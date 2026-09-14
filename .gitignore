@@ -3,3 +3,4 @@
 __pycache__/
 traces/
 graph.db*
+.pytest_cache/
