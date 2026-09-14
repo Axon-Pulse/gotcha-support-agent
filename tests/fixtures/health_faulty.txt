@@ -1,0 +1,2350 @@
+[eCAL][Config] Yaml configuration loaded from "/etc/ecal/ecal.yaml".
+echo protobuf message output for topic /system/health
+
+node_id: "system_launcher"
+node_type: "base_node"
+timestamp: 1786981143853
+overall_status: HEALTHY
+common {
+  cpu_usage_percent: 1.2001200120012
+  memory_usage_mb: 11.71875
+  uptime_seconds: 20
+}
+status_reason: "Node operating normally"
+health_score: 1
+
+node_id: "system_launcher"
+node_type: "base_node"
+timestamp: 1786981143854
+overall_status: HEALTHY
+common {
+  memory_usage_mb: 11.72265625
+  uptime_seconds: 20
+}
+status_reason: "Node operating normally"
+health_score: 1
+
+node_id: "magos"
+node_type: "radar_magos"
+timestamp: 1786981143863
+overall_status: HEALTHY
+common {
+  cpu_usage_percent: 1.1001100110011002
+  memory_usage_mb: 11.87890625
+  messages_processed_per_sec: 7
+  total_messages_processed: 138
+  uptime_seconds: 19
+}
+connections {
+  is_connected: true
+  bytes_received_per_sec: 30938
+  last_successful_communication: 1786981143851
+  connection_details: "Magos Radar WebSocket: CONNECTED"
+}
+custom_numeric_metrics {
+  key: "ack_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "active_alerts"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "alerts_count"
+  value: 1
+}
+custom_numeric_metrics {
+  key: "azimuth_offset"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "bytes_received"
+  value: 661715
+}
+custom_numeric_metrics {
+  key: "bytes_sent"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "connection_drops_delta"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "connection_errors"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "detection_count"
+  value: 138
+}
+custom_numeric_metrics {
+  key: "detection_frame_rate_hz"
+  value: 7.1003807359057829
+}
+custom_numeric_metrics {
+  key: "detection_item_count"
+  value: 232
+}
+custom_numeric_metrics {
+  key: "detection_rate_hz"
+  value: 10.800579147574995
+}
+custom_numeric_metrics {
+  key: "detections_count"
+  value: 138
+}
+custom_numeric_metrics {
+  key: "elevation_offset"
+  value: 30
+}
+custom_numeric_metrics {
+  key: "error_op_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "heartbeat_count"
+  value: 20
+}
+custom_numeric_metrics {
+  key: "mastership_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "messages_received"
+  value: 161
+}
+custom_numeric_metrics {
+  key: "messages_sent"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "op_state_count"
+  value: 1
+}
+custom_numeric_metrics {
+  key: "parse_errors"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "read_errors"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "time_since_last_detection_ms"
+  value: 11
+}
+custom_numeric_metrics {
+  key: "time_since_last_message_ms"
+  value: 11
+}
+custom_numeric_metrics {
+  key: "unknown_op_count"
+  value: 1
+}
+custom_numeric_metrics {
+  key: "write_errors"
+  value: 0
+}
+custom_string_metrics {
+  key: "connection_state"
+  value: "CONNECTED"
+}
+custom_string_metrics {
+  key: "ip_address"
+  value: "192.168.40.60"
+}
+custom_string_metrics {
+  key: "master_name"
+  value: ""
+}
+custom_string_metrics {
+  key: "radar_state"
+  value: "operational"
+}
+custom_string_metrics {
+  key: "sensor_type"
+  value: "Magos Radar"
+}
+custom_boolean_metrics {
+  key: "detections_flowing"
+  value: true
+}
+custom_boolean_metrics {
+  key: "has_mastership"
+  value: false
+}
+custom_boolean_metrics {
+  key: "recording_active"
+  value: false
+}
+custom_boolean_metrics {
+  key: "sensor_healthy"
+  value: true
+}
+custom_boolean_metrics {
+  key: "tx_control_available"
+  value: true
+}
+status_reason: "Node operating normally"
+health_score: 1
+
+node_id: "magos"
+node_type: "radar_magos"
+timestamp: 1786981143863
+overall_status: HEALTHY
+common {
+  memory_usage_mb: 11.8828125
+  total_messages_processed: 138
+  uptime_seconds: 20
+}
+connections {
+  is_connected: true
+  last_successful_communication: 1786981143851
+  connection_details: "Magos Radar WebSocket: CONNECTED"
+}
+custom_numeric_metrics {
+  key: "ack_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "active_alerts"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "alerts_count"
+  value: 1
+}
+custom_numeric_metrics {
+  key: "azimuth_offset"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "bytes_received"
+  value: 661715
+}
+custom_numeric_metrics {
+  key: "bytes_sent"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "connection_drops_delta"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "connection_errors"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "detection_count"
+  value: 138
+}
+custom_numeric_metrics {
+  key: "detection_frame_rate_hz"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "detection_item_count"
+  value: 232
+}
+custom_numeric_metrics {
+  key: "detection_rate_hz"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "detections_count"
+  value: 138
+}
+custom_numeric_metrics {
+  key: "elevation_offset"
+  value: 30
+}
+custom_numeric_metrics {
+  key: "error_op_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "heartbeat_count"
+  value: 20
+}
+custom_numeric_metrics {
+  key: "mastership_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "messages_received"
+  value: 161
+}
+custom_numeric_metrics {
+  key: "messages_sent"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "op_state_count"
+  value: 1
+}
+custom_numeric_metrics {
+  key: "parse_errors"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "read_errors"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "time_since_last_detection_ms"
+  value: 12
+}
+custom_numeric_metrics {
+  key: "time_since_last_message_ms"
+  value: 12
+}
+custom_numeric_metrics {
+  key: "unknown_op_count"
+  value: 1
+}
+custom_numeric_metrics {
+  key: "write_errors"
+  value: 0
+}
+custom_string_metrics {
+  key: "connection_state"
+  value: "CONNECTED"
+}
+custom_string_metrics {
+  key: "ip_address"
+  value: "192.168.40.60"
+}
+custom_string_metrics {
+  key: "master_name"
+  value: ""
+}
+custom_string_metrics {
+  key: "radar_state"
+  value: "operational"
+}
+custom_string_metrics {
+  key: "sensor_type"
+  value: "Magos Radar"
+}
+custom_boolean_metrics {
+  key: "detections_flowing"
+  value: true
+}
+custom_boolean_metrics {
+  key: "has_mastership"
+  value: false
+}
+custom_boolean_metrics {
+  key: "recording_active"
+  value: false
+}
+custom_boolean_metrics {
+  key: "sensor_healthy"
+  value: true
+}
+custom_boolean_metrics {
+  key: "tx_control_available"
+  value: true
+}
+status_reason: "Node operating normally"
+health_score: 1
+
+node_id: "asu"
+node_type: "acoustic_asu"
+timestamp: 1786981143870
+overall_status: CRITICAL
+common {
+  cpu_usage_percent: 0.60012002400480091
+  memory_usage_mb: 18.703125
+  messages_processed_per_sec: 1
+  total_messages_processed: 20
+  error_count: 25
+  uptime_seconds: 20
+  total_errors_since_start: 25
+}
+connections {
+  connection_details: "HTTP API: http://localhost:8000"
+}
+custom_numeric_metrics {
+  key: "active_tracks"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "asu_error_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "average_age"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "average_confidence"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "confirmed_tracks"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "error_count"
+  value: 20
+}
+custom_numeric_metrics {
+  key: "frame_number"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "pitch"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "request_count"
+  value: 20
+}
+custom_numeric_metrics {
+  key: "success_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "success_rate"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "tentative_tracks"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "yaw"
+  value: 0
+}
+custom_string_metrics {
+  key: "base_url"
+  value: "http://localhost:8000"
+}
+custom_string_metrics {
+  key: "last_error"
+  value: ""
+}
+custom_string_metrics {
+  key: "processing_status"
+  value: "unknown"
+}
+custom_string_metrics {
+  key: "start_time"
+  value: ""
+}
+custom_boolean_metrics {
+  key: "asu_connected"
+  value: false
+}
+status_reason: "Node experiencing critical issues"
+health_score: 0.3
+
+node_id: "asu"
+node_type: "acoustic_asu"
+timestamp: 1786981143872
+overall_status: CRITICAL
+common {
+  memory_usage_mb: 18.70703125
+  total_messages_processed: 20
+  error_count: 25
+  uptime_seconds: 20
+  total_errors_since_start: 25
+}
+connections {
+  connection_details: "HTTP API: http://localhost:8000"
+}
+custom_numeric_metrics {
+  key: "active_tracks"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "asu_error_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "average_age"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "average_confidence"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "confirmed_tracks"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "error_count"
+  value: 20
+}
+custom_numeric_metrics {
+  key: "frame_number"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "pitch"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "request_count"
+  value: 20
+}
+custom_numeric_metrics {
+  key: "success_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "success_rate"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "tentative_tracks"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "yaw"
+  value: 0
+}
+custom_string_metrics {
+  key: "base_url"
+  value: "http://localhost:8000"
+}
+custom_string_metrics {
+  key: "last_error"
+  value: ""
+}
+custom_string_metrics {
+  key: "processing_status"
+  value: "unknown"
+}
+custom_string_metrics {
+  key: "start_time"
+  value: ""
+}
+custom_boolean_metrics {
+  key: "asu_connected"
+  value: false
+}
+status_reason: "Node experiencing critical issues"
+health_score: 0.3
+
+node_id: "event_manager"
+node_type: "base_node"
+timestamp: 1786981143969
+overall_status: HEALTHY
+common {
+  cpu_usage_percent: 0.6000600060006
+  memory_usage_mb: 29.72265625
+  uptime_seconds: 20
+}
+status_reason: "Node operating normally"
+health_score: 1
+
+node_id: "event_manager"
+node_type: "base_node"
+timestamp: 1786981143969
+overall_status: HEALTHY
+common {
+  memory_usage_mb: 29.7265625
+  uptime_seconds: 20
+}
+status_reason: "Node operating normally"
+health_score: 1
+
+node_id: "tracker"
+node_type: "base_node"
+timestamp: 1786981144229
+overall_status: HEALTHY
+common {
+  cpu_usage_percent: 10.701070107010702
+  memory_usage_mb: 87.5
+  messages_processed_per_sec: 14
+  total_messages_processed: 274
+  uptime_seconds: 20
+}
+status_reason: "Node operating normally"
+health_score: 1
+
+node_id: "tracker"
+node_type: "base_node"
+timestamp: 1786981144229
+overall_status: HEALTHY
+common {
+  memory_usage_mb: 87.50390625
+  total_messages_processed: 274
+  uptime_seconds: 20
+}
+status_reason: "Node operating normally"
+health_score: 1
+
+node_id: "c2_gateway"
+node_type: "base_node"
+timestamp: 1786981149536
+overall_status: HEALTHY
+common {
+  cpu_usage_percent: 4.1004100410041007
+  memory_usage_mb: 75.02734375
+  uptime_seconds: 26670
+}
+status_reason: "Node operating normally"
+health_score: 1
+
+node_id: "c2_gateway"
+node_type: "base_node"
+timestamp: 1786981149536
+overall_status: HEALTHY
+common {
+  memory_usage_mb: 75.03125
+  uptime_seconds: 26670
+}
+status_reason: "Node operating normally"
+health_score: 1
+
+node_id: "system_launcher"
+node_type: "base_node"
+timestamp: 1786981150921
+overall_status: HEALTHY
+common {
+  cpu_usage_percent: 1.1001100110011002
+  memory_usage_mb: 11.75
+  uptime_seconds: 26680
+}
+status_reason: "Node operating normally"
+health_score: 1
+
+node_id: "system_launcher"
+node_type: "base_node"
+timestamp: 1786981150922
+overall_status: HEALTHY
+common {
+  memory_usage_mb: 11.75390625
+  uptime_seconds: 26680
+}
+status_reason: "Node operating normally"
+health_score: 1
+
+node_id: "magos"
+node_type: "radar_magos"
+timestamp: 1786981150927
+overall_status: DEGRADED
+common {
+  cpu_usage_percent: 1.0001000100010002
+  memory_usage_mb: 14.0390625
+  messages_processed_per_sec: 7
+  total_messages_processed: 43189
+  uptime_seconds: 26680
+}
+connections {
+  is_connected: true
+  connection_drops: 613
+  bytes_received_per_sec: 30000
+  last_successful_communication: 1786981150924
+  connection_details: "Magos Radar WebSocket: CONNECTED"
+}
+custom_numeric_metrics {
+  key: "ack_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "active_alerts"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "alerts_count"
+  value: 20
+}
+custom_numeric_metrics {
+  key: "azimuth_offset"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "bytes_received"
+  value: 477374847
+}
+custom_numeric_metrics {
+  key: "bytes_sent"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "connection_drops_delta"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "connection_errors"
+  value: 613
+}
+custom_numeric_metrics {
+  key: "detection_count"
+  value: 43189
+}
+custom_numeric_metrics {
+  key: "detection_frame_rate_hz"
+  value: 7.0005477522584378
+}
+custom_numeric_metrics {
+  key: "detection_item_count"
+  value: 170614
+}
+custom_numeric_metrics {
+  key: "detection_rate_hz"
+  value: 10.500821628387657
+}
+custom_numeric_metrics {
+  key: "detections_count"
+  value: 43189
+}
+custom_numeric_metrics {
+  key: "elevation_offset"
+  value: 30
+}
+custom_numeric_metrics {
+  key: "error_op_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "heartbeat_count"
+  value: 6288
+}
+custom_numeric_metrics {
+  key: "mastership_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "messages_received"
+  value: 49537
+}
+custom_numeric_metrics {
+  key: "messages_sent"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "op_state_count"
+  value: 20
+}
+custom_numeric_metrics {
+  key: "parse_errors"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "read_errors"
+  value: 19
+}
+custom_numeric_metrics {
+  key: "time_since_last_detection_ms"
+  value: 3
+}
+custom_numeric_metrics {
+  key: "time_since_last_message_ms"
+  value: 3
+}
+custom_numeric_metrics {
+  key: "unknown_op_count"
+  value: 20
+}
+custom_numeric_metrics {
+  key: "write_errors"
+  value: 0
+}
+custom_string_metrics {
+  key: "connection_state"
+  value: "CONNECTED"
+}
+custom_string_metrics {
+  key: "ip_address"
+  value: "192.168.40.60"
+}
+custom_string_metrics {
+  key: "master_name"
+  value: ""
+}
+custom_string_metrics {
+  key: "radar_state"
+  value: "operational"
+}
+custom_string_metrics {
+  key: "sensor_type"
+  value: "Magos Radar"
+}
+custom_boolean_metrics {
+  key: "detections_flowing"
+  value: true
+}
+custom_boolean_metrics {
+  key: "has_mastership"
+  value: false
+}
+custom_boolean_metrics {
+  key: "recording_active"
+  value: false
+}
+custom_boolean_metrics {
+  key: "sensor_healthy"
+  value: true
+}
+custom_boolean_metrics {
+  key: "tx_control_available"
+  value: true
+}
+status_reason: "Node experiencing minor issues"
+health_score: 0.7
+
+node_id: "magos"
+node_type: "radar_magos"
+timestamp: 1786981150928
+overall_status: DEGRADED
+common {
+  memory_usage_mb: 14.04296875
+  total_messages_processed: 43189
+  uptime_seconds: 26680
+}
+connections {
+  is_connected: true
+  connection_drops: 613
+  last_successful_communication: 1786981150924
+  connection_details: "Magos Radar WebSocket: CONNECTED"
+}
+custom_numeric_metrics {
+  key: "ack_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "active_alerts"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "alerts_count"
+  value: 20
+}
+custom_numeric_metrics {
+  key: "azimuth_offset"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "bytes_received"
+  value: 477374847
+}
+custom_numeric_metrics {
+  key: "bytes_sent"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "connection_drops_delta"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "connection_errors"
+  value: 613
+}
+custom_numeric_metrics {
+  key: "detection_count"
+  value: 43189
+}
+custom_numeric_metrics {
+  key: "detection_frame_rate_hz"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "detection_item_count"
+  value: 170614
+}
+custom_numeric_metrics {
+  key: "detection_rate_hz"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "detections_count"
+  value: 43189
+}
+custom_numeric_metrics {
+  key: "elevation_offset"
+  value: 30
+}
+custom_numeric_metrics {
+  key: "error_op_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "heartbeat_count"
+  value: 6288
+}
+custom_numeric_metrics {
+  key: "mastership_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "messages_received"
+  value: 49537
+}
+custom_numeric_metrics {
+  key: "messages_sent"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "op_state_count"
+  value: 20
+}
+custom_numeric_metrics {
+  key: "parse_errors"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "read_errors"
+  value: 19
+}
+custom_numeric_metrics {
+  key: "time_since_last_detection_ms"
+  value: 3
+}
+custom_numeric_metrics {
+  key: "time_since_last_message_ms"
+  value: 3
+}
+custom_numeric_metrics {
+  key: "unknown_op_count"
+  value: 20
+}
+custom_numeric_metrics {
+  key: "write_errors"
+  value: 0
+}
+custom_string_metrics {
+  key: "connection_state"
+  value: "CONNECTED"
+}
+custom_string_metrics {
+  key: "ip_address"
+  value: "192.168.40.60"
+}
+custom_string_metrics {
+  key: "master_name"
+  value: ""
+}
+custom_string_metrics {
+  key: "radar_state"
+  value: "operational"
+}
+custom_string_metrics {
+  key: "sensor_type"
+  value: "Magos Radar"
+}
+custom_boolean_metrics {
+  key: "detections_flowing"
+  value: true
+}
+custom_boolean_metrics {
+  key: "has_mastership"
+  value: false
+}
+custom_boolean_metrics {
+  key: "recording_active"
+  value: false
+}
+custom_boolean_metrics {
+  key: "sensor_healthy"
+  value: true
+}
+custom_boolean_metrics {
+  key: "tx_control_available"
+  value: true
+}
+status_reason: "Node experiencing minor issues"
+health_score: 0.7
+
+node_id: "asu"
+node_type: "acoustic_asu"
+timestamp: 1786981150930
+overall_status: CRITICAL
+common {
+  cpu_usage_percent: 0.70014002800560116
+  memory_usage_mb: 18.77734375
+  messages_processed_per_sec: 1
+  total_messages_processed: 26654
+  error_count: 26659
+  uptime_seconds: 26680
+  total_errors_since_start: 26659
+}
+connections {
+  connection_details: "HTTP API: http://localhost:8000"
+}
+custom_numeric_metrics {
+  key: "active_tracks"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "asu_error_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "average_age"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "average_confidence"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "confirmed_tracks"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "error_count"
+  value: 26654
+}
+custom_numeric_metrics {
+  key: "frame_number"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "pitch"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "request_count"
+  value: 26654
+}
+custom_numeric_metrics {
+  key: "success_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "success_rate"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "tentative_tracks"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "yaw"
+  value: 0
+}
+custom_string_metrics {
+  key: "base_url"
+  value: "http://localhost:8000"
+}
+custom_string_metrics {
+  key: "last_error"
+  value: ""
+}
+custom_string_metrics {
+  key: "processing_status"
+  value: "unknown"
+}
+custom_string_metrics {
+  key: "start_time"
+  value: ""
+}
+custom_boolean_metrics {
+  key: "asu_connected"
+  value: false
+}
+status_reason: "Node experiencing critical issues"
+health_score: 0.3
+
+node_id: "asu"
+node_type: "acoustic_asu"
+timestamp: 1786981150931
+overall_status: CRITICAL
+common {
+  memory_usage_mb: 18.78125
+  total_messages_processed: 26654
+  error_count: 26659
+  uptime_seconds: 26680
+  total_errors_since_start: 26659
+}
+connections {
+  connection_details: "HTTP API: http://localhost:8000"
+}
+custom_numeric_metrics {
+  key: "active_tracks"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "asu_error_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "average_age"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "average_confidence"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "confirmed_tracks"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "error_count"
+  value: 26654
+}
+custom_numeric_metrics {
+  key: "frame_number"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "pitch"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "request_count"
+  value: 26654
+}
+custom_numeric_metrics {
+  key: "success_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "success_rate"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "tentative_tracks"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "yaw"
+  value: 0
+}
+custom_string_metrics {
+  key: "base_url"
+  value: "http://localhost:8000"
+}
+custom_string_metrics {
+  key: "last_error"
+  value: ""
+}
+custom_string_metrics {
+  key: "processing_status"
+  value: "unknown"
+}
+custom_string_metrics {
+  key: "start_time"
+  value: ""
+}
+custom_boolean_metrics {
+  key: "asu_connected"
+  value: false
+}
+status_reason: "Node experiencing critical issues"
+health_score: 0.3
+
+node_id: "event_manager"
+node_type: "base_node"
+timestamp: 1786981151016
+overall_status: HEALTHY
+common {
+  cpu_usage_percent: 0.70000000000000007
+  memory_usage_mb: 30.76171875
+  uptime_seconds: 26680
+}
+status_reason: "Node operating normally"
+health_score: 1
+
+node_id: "event_manager"
+node_type: "base_node"
+timestamp: 1786981151016
+overall_status: HEALTHY
+common {
+  memory_usage_mb: 30.765625
+  uptime_seconds: 26680
+}
+status_reason: "Node operating normally"
+health_score: 1
+
+node_id: "tracker"
+node_type: "base_node"
+timestamp: 1786981151238
+overall_status: HEALTHY
+common {
+  cpu_usage_percent: 12.274876748163798
+  memory_usage_mb: 89.98046875
+  messages_processed_per_sec: 13
+  total_messages_processed: 43244
+  uptime_seconds: 26679
+}
+status_reason: "Node operating normally"
+health_score: 1
+
+node_id: "tracker"
+node_type: "base_node"
+timestamp: 1786981151299
+overall_status: HEALTHY
+common {
+  memory_usage_mb: 89.984375
+  total_messages_processed: 43246
+  uptime_seconds: 26680
+}
+status_reason: "Node operating normally"
+health_score: 1
+
+node_id: "system_launcher"
+node_type: "base_node"
+timestamp: 1786981153853
+overall_status: HEALTHY
+common {
+  cpu_usage_percent: 1.3001300130013
+  memory_usage_mb: 11.72265625
+  uptime_seconds: 30
+}
+status_reason: "Node operating normally"
+health_score: 1
+
+node_id: "system_launcher"
+node_type: "base_node"
+timestamp: 1786981153854
+overall_status: HEALTHY
+common {
+  memory_usage_mb: 11.72265625
+  uptime_seconds: 30
+}
+status_reason: "Node operating normally"
+health_score: 1
+
+node_id: "magos"
+node_type: "radar_magos"
+timestamp: 1786981153863
+overall_status: HEALTHY
+common {
+  cpu_usage_percent: 1.1001100110011002
+  memory_usage_mb: 11.8828125
+  messages_processed_per_sec: 6
+  total_messages_processed: 206
+  uptime_seconds: 30
+}
+connections {
+  is_connected: true
+  bytes_received_per_sec: 30786
+  last_successful_communication: 1786981153795
+  connection_details: "Magos Radar WebSocket: CONNECTED"
+}
+custom_numeric_metrics {
+  key: "ack_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "active_alerts"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "alerts_count"
+  value: 1
+}
+custom_numeric_metrics {
+  key: "azimuth_offset"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "bytes_received"
+  value: 969562
+}
+custom_numeric_metrics {
+  key: "bytes_sent"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "connection_drops_delta"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "connection_errors"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "detection_count"
+  value: 206
+}
+custom_numeric_metrics {
+  key: "detection_frame_rate_hz"
+  value: 6.8002881050860324
+}
+custom_numeric_metrics {
+  key: "detection_item_count"
+  value: 340
+}
+custom_numeric_metrics {
+  key: "detection_rate_hz"
+  value: 10.800457578666052
+}
+custom_numeric_metrics {
+  key: "detections_count"
+  value: 206
+}
+custom_numeric_metrics {
+  key: "elevation_offset"
+  value: 30
+}
+custom_numeric_metrics {
+  key: "error_op_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "heartbeat_count"
+  value: 30
+}
+custom_numeric_metrics {
+  key: "mastership_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "messages_received"
+  value: 239
+}
+custom_numeric_metrics {
+  key: "messages_sent"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "op_state_count"
+  value: 1
+}
+custom_numeric_metrics {
+  key: "parse_errors"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "read_errors"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "time_since_last_detection_ms"
+  value: 67
+}
+custom_numeric_metrics {
+  key: "time_since_last_message_ms"
+  value: 67
+}
+custom_numeric_metrics {
+  key: "unknown_op_count"
+  value: 1
+}
+custom_numeric_metrics {
+  key: "write_errors"
+  value: 0
+}
+custom_string_metrics {
+  key: "connection_state"
+  value: "CONNECTED"
+}
+custom_string_metrics {
+  key: "ip_address"
+  value: "192.168.40.60"
+}
+custom_string_metrics {
+  key: "master_name"
+  value: ""
+}
+custom_string_metrics {
+  key: "radar_state"
+  value: "operational"
+}
+custom_string_metrics {
+  key: "sensor_type"
+  value: "Magos Radar"
+}
+custom_boolean_metrics {
+  key: "detections_flowing"
+  value: true
+}
+custom_boolean_metrics {
+  key: "has_mastership"
+  value: false
+}
+custom_boolean_metrics {
+  key: "recording_active"
+  value: false
+}
+custom_boolean_metrics {
+  key: "sensor_healthy"
+  value: true
+}
+custom_boolean_metrics {
+  key: "tx_control_available"
+  value: true
+}
+status_reason: "Node operating normally"
+health_score: 1
+
+node_id: "magos"
+node_type: "radar_magos"
+timestamp: 1786981153863
+overall_status: HEALTHY
+common {
+  memory_usage_mb: 11.8828125
+  total_messages_processed: 206
+  uptime_seconds: 30
+}
+connections {
+  is_connected: true
+  last_successful_communication: 1786981153795
+  connection_details: "Magos Radar WebSocket: CONNECTED"
+}
+custom_numeric_metrics {
+  key: "ack_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "active_alerts"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "alerts_count"
+  value: 1
+}
+custom_numeric_metrics {
+  key: "azimuth_offset"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "bytes_received"
+  value: 969562
+}
+custom_numeric_metrics {
+  key: "bytes_sent"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "connection_drops_delta"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "connection_errors"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "detection_count"
+  value: 206
+}
+custom_numeric_metrics {
+  key: "detection_frame_rate_hz"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "detection_item_count"
+  value: 340
+}
+custom_numeric_metrics {
+  key: "detection_rate_hz"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "detections_count"
+  value: 206
+}
+custom_numeric_metrics {
+  key: "elevation_offset"
+  value: 30
+}
+custom_numeric_metrics {
+  key: "error_op_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "heartbeat_count"
+  value: 30
+}
+custom_numeric_metrics {
+  key: "mastership_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "messages_received"
+  value: 239
+}
+custom_numeric_metrics {
+  key: "messages_sent"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "op_state_count"
+  value: 1
+}
+custom_numeric_metrics {
+  key: "parse_errors"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "read_errors"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "time_since_last_detection_ms"
+  value: 68
+}
+custom_numeric_metrics {
+  key: "time_since_last_message_ms"
+  value: 68
+}
+custom_numeric_metrics {
+  key: "unknown_op_count"
+  value: 1
+}
+custom_numeric_metrics {
+  key: "write_errors"
+  value: 0
+}
+custom_string_metrics {
+  key: "connection_state"
+  value: "CONNECTED"
+}
+custom_string_metrics {
+  key: "ip_address"
+  value: "192.168.40.60"
+}
+custom_string_metrics {
+  key: "master_name"
+  value: ""
+}
+custom_string_metrics {
+  key: "radar_state"
+  value: "operational"
+}
+custom_string_metrics {
+  key: "sensor_type"
+  value: "Magos Radar"
+}
+custom_boolean_metrics {
+  key: "detections_flowing"
+  value: true
+}
+custom_boolean_metrics {
+  key: "has_mastership"
+  value: false
+}
+custom_boolean_metrics {
+  key: "recording_active"
+  value: false
+}
+custom_boolean_metrics {
+  key: "sensor_healthy"
+  value: true
+}
+custom_boolean_metrics {
+  key: "tx_control_available"
+  value: true
+}
+status_reason: "Node operating normally"
+health_score: 1
+
+node_id: "asu"
+node_type: "acoustic_asu"
+timestamp: 1786981153870
+overall_status: CRITICAL
+common {
+  cpu_usage_percent: 0.70014002800560116
+  memory_usage_mb: 18.7109375
+  messages_processed_per_sec: 1
+  total_messages_processed: 30
+  error_count: 35
+  uptime_seconds: 30
+  total_errors_since_start: 35
+}
+connections {
+  connection_details: "HTTP API: http://localhost:8000"
+}
+custom_numeric_metrics {
+  key: "active_tracks"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "asu_error_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "average_age"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "average_confidence"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "confirmed_tracks"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "error_count"
+  value: 30
+}
+custom_numeric_metrics {
+  key: "frame_number"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "pitch"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "request_count"
+  value: 30
+}
+custom_numeric_metrics {
+  key: "success_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "success_rate"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "tentative_tracks"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "yaw"
+  value: 0
+}
+custom_string_metrics {
+  key: "base_url"
+  value: "http://localhost:8000"
+}
+custom_string_metrics {
+  key: "last_error"
+  value: ""
+}
+custom_string_metrics {
+  key: "processing_status"
+  value: "unknown"
+}
+custom_string_metrics {
+  key: "start_time"
+  value: ""
+}
+custom_boolean_metrics {
+  key: "asu_connected"
+  value: false
+}
+status_reason: "Node experiencing critical issues"
+health_score: 0.3
+
+node_id: "asu"
+node_type: "acoustic_asu"
+timestamp: 1786981153872
+overall_status: CRITICAL
+common {
+  memory_usage_mb: 18.7109375
+  total_messages_processed: 30
+  error_count: 35
+  uptime_seconds: 30
+  total_errors_since_start: 35
+}
+connections {
+  connection_details: "HTTP API: http://localhost:8000"
+}
+custom_numeric_metrics {
+  key: "active_tracks"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "asu_error_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "average_age"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "average_confidence"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "confirmed_tracks"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "error_count"
+  value: 30
+}
+custom_numeric_metrics {
+  key: "frame_number"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "pitch"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "request_count"
+  value: 30
+}
+custom_numeric_metrics {
+  key: "success_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "success_rate"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "tentative_tracks"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "yaw"
+  value: 0
+}
+custom_string_metrics {
+  key: "base_url"
+  value: "http://localhost:8000"
+}
+custom_string_metrics {
+  key: "last_error"
+  value: ""
+}
+custom_string_metrics {
+  key: "processing_status"
+  value: "unknown"
+}
+custom_string_metrics {
+  key: "start_time"
+  value: ""
+}
+custom_boolean_metrics {
+  key: "asu_connected"
+  value: false
+}
+status_reason: "Node experiencing critical issues"
+health_score: 0.3
+
+node_id: "event_manager"
+node_type: "base_node"
+timestamp: 1786981153969
+overall_status: HEALTHY
+common {
+  memory_usage_mb: 29.7265625
+  uptime_seconds: 30
+}
+status_reason: "Node operating normally"
+health_score: 1
+
+node_id: "tracker"
+node_type: "base_node"
+timestamp: 1786981154229
+overall_status: HEALTHY
+common {
+  cpu_usage_percent: 11.401140114011401
+  memory_usage_mb: 87.5078125
+  messages_processed_per_sec: 13
+  total_messages_processed: 411
+  uptime_seconds: 30
+}
+status_reason: "Node operating normally"
+health_score: 1
+
+node_id: "tracker"
+node_type: "base_node"
+timestamp: 1786981154229
+overall_status: HEALTHY
+common {
+  memory_usage_mb: 87.5078125
+  total_messages_processed: 411
+  uptime_seconds: 30
+}
+status_reason: "Node operating normally"
+health_score: 1
+
+node_id: "c2_gateway"
+node_type: "base_node"
+timestamp: 1786981159536
+overall_status: HEALTHY
+common {
+  cpu_usage_percent: 3.9
+  memory_usage_mb: 74.97265625
+  uptime_seconds: 26680
+}
+status_reason: "Node operating normally"
+health_score: 1
+
+node_id: "c2_gateway"
+node_type: "base_node"
+timestamp: 1786981159536
+overall_status: HEALTHY
+common {
+  memory_usage_mb: 74.97265625
+  uptime_seconds: 26680
+}
+status_reason: "Node operating normally"
+health_score: 1
+
+node_id: "system_launcher"
+node_type: "base_node"
+timestamp: 1786981160921
+overall_status: HEALTHY
+common {
+  cpu_usage_percent: 1.3001300130013
+  memory_usage_mb: 11.75390625
+  uptime_seconds: 26690
+}
+status_reason: "Node operating normally"
+health_score: 1
+
+node_id: "system_launcher"
+node_type: "base_node"
+timestamp: 1786981160922
+overall_status: HEALTHY
+common {
+  memory_usage_mb: 11.75390625
+  uptime_seconds: 26690
+}
+status_reason: "Node operating normally"
+health_score: 1
+
+node_id: "magos"
+node_type: "radar_magos"
+timestamp: 1786981160927
+overall_status: DEGRADED
+common {
+  cpu_usage_percent: 1.1001100110011002
+  memory_usage_mb: 14.04296875
+  messages_processed_per_sec: 6
+  total_messages_processed: 43257
+  uptime_seconds: 26690
+}
+connections {
+  is_connected: true
+  connection_drops: 613
+  bytes_received_per_sec: 35027
+  last_successful_communication: 1786981160885
+  connection_details: "Magos Radar WebSocket: CONNECTED"
+}
+custom_numeric_metrics {
+  key: "ack_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "active_alerts"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "alerts_count"
+  value: 20
+}
+custom_numeric_metrics {
+  key: "azimuth_offset"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "bytes_received"
+  value: 477725110
+}
+custom_numeric_metrics {
+  key: "bytes_sent"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "connection_drops_delta"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "connection_errors"
+  value: 613
+}
+custom_numeric_metrics {
+  key: "detection_count"
+  value: 43257
+}
+custom_numeric_metrics {
+  key: "detection_frame_rate_hz"
+  value: 6.8001538480406891
+}
+custom_numeric_metrics {
+  key: "detection_item_count"
+  value: 170737
+}
+custom_numeric_metrics {
+  key: "detection_rate_hz"
+  value: 12.300278283955953
+}
+custom_numeric_metrics {
+  key: "detections_count"
+  value: 43257
+}
+custom_numeric_metrics {
+  key: "elevation_offset"
+  value: 30
+}
+custom_numeric_metrics {
+  key: "error_op_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "heartbeat_count"
+  value: 6298
+}
+custom_numeric_metrics {
+  key: "mastership_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "messages_received"
+  value: 49615
+}
+custom_numeric_metrics {
+  key: "messages_sent"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "op_state_count"
+  value: 20
+}
+custom_numeric_metrics {
+  key: "parse_errors"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "read_errors"
+  value: 19
+}
+custom_numeric_metrics {
+  key: "time_since_last_detection_ms"
+  value: 43
+}
+custom_numeric_metrics {
+  key: "time_since_last_message_ms"
+  value: 43
+}
+custom_numeric_metrics {
+  key: "unknown_op_count"
+  value: 20
+}
+custom_numeric_metrics {
+  key: "write_errors"
+  value: 0
+}
+custom_string_metrics {
+  key: "connection_state"
+  value: "CONNECTED"
+}
+custom_string_metrics {
+  key: "ip_address"
+  value: "192.168.40.60"
+}
+custom_string_metrics {
+  key: "master_name"
+  value: ""
+}
+custom_string_metrics {
+  key: "radar_state"
+  value: "operational"
+}
+custom_string_metrics {
+  key: "sensor_type"
+  value: "Magos Radar"
+}
+custom_boolean_metrics {
+  key: "detections_flowing"
+  value: true
+}
+custom_boolean_metrics {
+  key: "has_mastership"
+  value: false
+}
+custom_boolean_metrics {
+  key: "recording_active"
+  value: false
+}
+custom_boolean_metrics {
+  key: "sensor_healthy"
+  value: true
+}
+custom_boolean_metrics {
+  key: "tx_control_available"
+  value: true
+}
+status_reason: "Node experiencing minor issues"
+health_score: 0.7
+
+node_id: "magos"
+node_type: "radar_magos"
+timestamp: 1786981160928
+overall_status: DEGRADED
+common {
+  memory_usage_mb: 14.04296875
+  total_messages_processed: 43257
+  uptime_seconds: 26690
+}
+connections {
+  is_connected: true
+  connection_drops: 613
+  last_successful_communication: 1786981160885
+  connection_details: "Magos Radar WebSocket: CONNECTED"
+}
+custom_numeric_metrics {
+  key: "ack_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "active_alerts"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "alerts_count"
+  value: 20
+}
+custom_numeric_metrics {
+  key: "azimuth_offset"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "bytes_received"
+  value: 477725110
+}
+custom_numeric_metrics {
+  key: "bytes_sent"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "connection_drops_delta"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "connection_errors"
+  value: 613
+}
+custom_numeric_metrics {
+  key: "detection_count"
+  value: 43257
+}
+custom_numeric_metrics {
+  key: "detection_frame_rate_hz"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "detection_item_count"
+  value: 170737
+}
+custom_numeric_metrics {
+  key: "detection_rate_hz"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "detections_count"
+  value: 43257
+}
+custom_numeric_metrics {
+  key: "elevation_offset"
+  value: 30
+}
+custom_numeric_metrics {
+  key: "error_op_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "heartbeat_count"
+  value: 6298
+}
+custom_numeric_metrics {
+  key: "mastership_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "messages_received"
+  value: 49615
+}
+custom_numeric_metrics {
+  key: "messages_sent"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "op_state_count"
+  value: 20
+}
+custom_numeric_metrics {
+  key: "parse_errors"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "read_errors"
+  value: 19
+}
+custom_numeric_metrics {
+  key: "time_since_last_detection_ms"
+  value: 43
+}
+custom_numeric_metrics {
+  key: "time_since_last_message_ms"
+  value: 43
+}
+custom_numeric_metrics {
+  key: "unknown_op_count"
+  value: 20
+}
+custom_numeric_metrics {
+  key: "write_errors"
+  value: 0
+}
+custom_string_metrics {
+  key: "connection_state"
+  value: "CONNECTED"
+}
+custom_string_metrics {
+  key: "ip_address"
+  value: "192.168.40.60"
+}
+custom_string_metrics {
+  key: "master_name"
+  value: ""
+}
+custom_string_metrics {
+  key: "radar_state"
+  value: "operational"
+}
+custom_string_metrics {
+  key: "sensor_type"
+  value: "Magos Radar"
+}
+custom_boolean_metrics {
+  key: "detections_flowing"
+  value: true
+}
+custom_boolean_metrics {
+  key: "has_mastership"
+  value: false
+}
+custom_boolean_metrics {
+  key: "recording_active"
+  value: false
+}
+custom_boolean_metrics {
+  key: "sensor_healthy"
+  value: true
+}
+custom_boolean_metrics {
+  key: "tx_control_available"
+  value: true
+}
+status_reason: "Node experiencing minor issues"
+health_score: 0.7
+
+node_id: "asu"
+node_type: "acoustic_asu"
+timestamp: 1786981160930
+overall_status: CRITICAL
+common {
+  cpu_usage_percent: 0.6000600060006
+  memory_usage_mb: 18.78125
+  messages_processed_per_sec: 1
+  total_messages_processed: 26664
+  error_count: 26669
+  uptime_seconds: 26690
+  total_errors_since_start: 26669
+}
+connections {
+  connection_details: "HTTP API: http://localhost:8000"
+}
+custom_numeric_metrics {
+  key: "active_tracks"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "asu_error_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "average_age"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "average_confidence"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "confirmed_tracks"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "error_count"
+  value: 26664
+}
+custom_numeric_metrics {
+  key: "frame_number"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "pitch"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "request_count"
+  value: 26664
+}
+custom_numeric_metrics {
+  key: "success_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "success_rate"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "tentative_tracks"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "yaw"
+  value: 0
+}
+custom_string_metrics {
+  key: "base_url"
+  value: "http://localhost:8000"
+}
+custom_string_metrics {
+  key: "last_error"
+  value: ""
+}
+custom_string_metrics {
+  key: "processing_status"
+  value: "unknown"
+}
+custom_string_metrics {
+  key: "start_time"
+  value: ""
+}
+custom_boolean_metrics {
+  key: "asu_connected"
+  value: false
+}
+status_reason: "Node experiencing critical issues"
+health_score: 0.3
+
+node_id: "asu"
+node_type: "acoustic_asu"
+timestamp: 1786981160931
+overall_status: CRITICAL
+common {
+  memory_usage_mb: 18.78125
+  total_messages_processed: 26664
+  error_count: 26669
+  uptime_seconds: 26690
+  total_errors_since_start: 26669
+}
+connections {
+  connection_details: "HTTP API: http://localhost:8000"
+}
+custom_numeric_metrics {
+  key: "active_tracks"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "asu_error_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "average_age"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "average_confidence"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "confirmed_tracks"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "error_count"
+  value: 26664
+}
+custom_numeric_metrics {
+  key: "frame_number"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "pitch"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "request_count"
+  value: 26664
+}
+custom_numeric_metrics {
+  key: "success_count"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "success_rate"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "tentative_tracks"
+  value: 0
+}
+custom_numeric_metrics {
+  key: "yaw"
+  value: 0
+}
+custom_string_metrics {
+  key: "base_url"
+  value: "http://localhost:8000"
+}
+custom_string_metrics {
+  key: "last_error"
+  value: ""
+}
+custom_string_metrics {
+  key: "processing_status"
+  value: "unknown"
+}
+custom_string_metrics {
+  key: "start_time"
+  value: ""
+}
+custom_boolean_metrics {
+  key: "asu_connected"
+  value: false
+}
+status_reason: "Node experiencing critical issues"
+health_score: 0.3
+
+node_id: "event_manager"
+node_type: "base_node"
+timestamp: 1786981161016
+overall_status: HEALTHY
+common {
+  cpu_usage_percent: 0.6000600060006
+  memory_usage_mb: 30.765625
+  uptime_seconds: 26690
+}
+status_reason: "Node operating normally"
+health_score: 1
+
+node_id: "event_manager"
+node_type: "base_node"
+timestamp: 1786981161016
+overall_status: HEALTHY
+common {
+  memory_usage_mb: 30.765625
+  uptime_seconds: 26690
+}
+status_reason: "Node operating normally"
+health_score: 1
+
+node_id: "tracker"
+node_type: "base_node"
+timestamp: 1786981161239
+overall_status: HEALTHY
+common {
+  cpu_usage_percent: 9.7595331522285953
+  memory_usage_mb: 89.984375
+  messages_processed_per_sec: 13
+  total_messages_processed: 43382
+  uptime_seconds: 26689
+}
+status_reason: "Node operating normally"
+health_score: 1
+
+node_id: "tracker"
+node_type: "base_node"
+timestamp: 1786981161299
+overall_status: HEALTHY
+common {
+  cpu_usage_percent: 16.666666666666664
+  memory_usage_mb: 89.984375
+  total_messages_processed: 43383
+  uptime_seconds: 26690
+}
+status_reason: "Node operating normally"
+health_score: 1
+

@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>support-agent console</title>
+<style>
+:root{--bg:#fbfbfa;--fg:#1a1a18;--dim:#6b6b66;--line:#e2e2dd;--card:#fff;
+      --ok:#1f7a4d;--warn:#9a6a00;--bad:#a32b2b;--accent:#2f5fd0;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+@media(prefers-color-scheme:dark){:root{--bg:#16171a;--fg:#e8e8e4;--dim:#9a9a94;--line:#2c2e33;
+      --card:#1d1f23;--ok:#5fd39b;--warn:#e0b050;--bad:#f08a8a;--accent:#7aa2f7}}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:14px/1.55 system-ui,-apple-system,sans-serif;
+     margin:0;padding:0 16px 48px}
+.wrap{max-width:1080px;margin:0 auto}
+header{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;padding:20px 0 12px;border-bottom:1px solid var(--line)}
+h1{font-size:17px;margin:0;font-weight:650;letter-spacing:-.01em}
+.pill{font:11px/1 var(--mono);padding:4px 8px;border-radius:99px;border:1px solid var(--line);color:var(--dim)}
+.pill.mock{color:var(--ok);border-color:var(--ok)}
+.pill.bad{color:var(--bad);border-color:var(--bad)}
+nav{display:flex;gap:2px;margin:14px 0 18px;flex-wrap:wrap}
+nav button{background:none;border:1px solid transparent;border-radius:7px;padding:6px 12px;
+  font:inherit;color:var(--dim);cursor:pointer}
+nav button[aria-selected=true]{background:var(--card);border-color:var(--line);color:var(--fg);font-weight:600}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:12px}
+.card h3{margin:0 0 8px;font-size:13px;font-weight:650;letter-spacing:.01em}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+input[type=text],textarea{flex:1;min-width:200px;background:var(--bg);color:var(--fg);
+  border:1px solid var(--line);border-radius:7px;padding:9px 11px;font:inherit}
+textarea{font:12.5px/1.5 var(--mono);width:100%;min-height:260px}
+button.go{background:var(--accent);color:#fff;border:0;border-radius:7px;padding:9px 16px;
+  font:inherit;font-weight:600;cursor:pointer}
+button.go:disabled{opacity:.45;cursor:not-allowed}
+button.sm{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;
+  padding:5px 11px;font:inherit;cursor:pointer}
+button.sm.yes{border-color:var(--ok);color:var(--ok)}
+button.sm.no{border-color:var(--bad);color:var(--bad)}
+code,pre{font-family:var(--mono)}
+pre{background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:10px;
+  overflow-x:auto;font-size:12.5px;margin:6px 0}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--dim);font-weight:600}
+.mono{font-family:var(--mono);font-size:12.5px}
+.dim{color:var(--dim)}
+.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}
+.step{display:inline-block;padding:3px 9px;border-radius:6px;border:1px solid var(--line);
+  margin:2px 4px 2px 0;font:12px/1.4 var(--mono)}
+.step.done{border-color:var(--ok);color:var(--ok)}
+.step.active{border-color:var(--accent);color:var(--accent);font-weight:600}
+.note{font-size:12.5px;color:var(--dim);margin-top:6px}
+.scroll{overflow-x:auto}
+ul.tight{margin:6px 0;padding-left:20px}
+</style></head><body><div class="wrap">
+
+<header>
+  <h1>support-agent console</h1>
+  <span class="pill mock" id="mode">…</span>
+  <span class="pill" id="model">…</span>
+  <span class="pill" id="keystate">…</span>
+</header>
+
+<nav id="tabs">
+  <button data-t="run" aria-selected="true">Run</button>
+  <button data-t="approvals" aria-selected="false">Approvals <span id="apcount"></span></button>
+  <button data-t="traces" aria-selected="false">Traces</button>
+  <button data-t="kb" aria-selected="false">Knowledge</button>
+  <button data-t="perms" aria-selected="false">Tools &amp; permissions</button>
+</nav>
+
+<section id="run">
+  <div class="card">
+    <h3>Diagnose</h3>
+    <div class="row">
+      <input type="text" id="q" placeholder="e.g. the acoustic sensor shows no tracks">
+      <button class="go" id="go">Run</button>
+    </div>
+    <p class="note">Runs against recorded fixtures. Live mode stays a deliberate command-line act.</p>
+  </div>
+  <div id="live"></div>
+</section>
+
+<section id="approvals" hidden></section>
+<section id="traces" hidden></section>
+<section id="kb" hidden></section>
+<section id="perms" hidden></section>
+
+</div><script>
+const $=s=>document.querySelector(s), esc=s=>String(s??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const api=(p,o)=>fetch('/api'+p,o).then(async r=>{if(!r.ok)throw new Error((await r.json().catch(()=>({}))).detail||r.status);return r.json()});
+let META=null, CUR=null, TIMER=null;
+
+document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('#tabs button').forEach(x=>x.setAttribute('aria-selected',x===b));
+  ['run','approvals','traces','kb','perms'].forEach(t=>$('#'+t).hidden=(t!==b.dataset.t));
+  ({approvals:loadApprovals,traces:loadTraces,kb:loadKb,perms:loadPerms}[b.dataset.t]||(()=>{}))();
+});
+
+api('/meta').then(m=>{
+  META=m;
+  $('#mode').textContent='mode: '+m.mode;
+  $('#model').textContent=m.model;
+  const k=$('#keystate');
+  k.textContent=m.api_key_set?'API key set':'no API key';
+  k.className='pill'+(m.api_key_set?'':' bad');
+  $('#go').disabled=!m.api_key_set;
+  if(!m.api_key_set)$('#live').innerHTML='<div class="card"><h3>Not ready</h3><p class="note">ANTHROPIC_API_KEY is not set in the server environment. Stop the console, export the key, and restart it.</p></div>';
+  loadApprovals();
+});
+
+$('#go').onclick=async()=>{
+  const q=$('#q').value.trim(); if(!q)return;
+  $('#go').disabled=true;
+  try{ const r=await api('/run',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:q})});
+       CUR=r.session_id; poll(); }
+  catch(e){ $('#live').innerHTML='<div class="card bad">'+esc(e.message)+'</div>'; $('#go').disabled=false; }
+};
+
+function poll(){ clearInterval(TIMER); TIMER=setInterval(refresh,1500); refresh(); }
+
+async function refresh(){
+  if(!CUR)return;
+  const s=await api('/session/'+CUR).catch(()=>null); if(!s)return;
+  const st=s.state||{}, done=['done','error','awaiting_approval'].includes(s.status);
+  if(done){clearInterval(TIMER);$('#go').disabled=!META.api_key_set;}
+  const steps=(META.order||[]).map(a=>{
+    const v=(st.visited||[]).includes(a), act=(st.next||[]).includes(a);
+    return `<span class="step ${act?'active':v?'done':''}">${v?'✓ ':''}${esc(a)}</span>`}).join('');
+  const tools=(st.findings||[]).map(f=>
+    `<tr><td class="mono">${esc(f.agent)}</td><td class="mono">${esc(f.tool)}</td>
+     <td class="${f.ok?'ok':'bad'}">${f.ok?'ok':'failed'}</td></tr>`).join('');
+  const r=st.report||s.report;
+  $('#live').innerHTML=`
+   <div class="card"><h3>Session <span class="mono dim">${esc(CUR)}</span> — ${esc(s.status)}</h3>
+     <div>${steps}</div>
+     ${s.error?`<pre class="bad">${esc(s.error)}</pre>`:''}
+     ${tools?`<div class="scroll"><table><tr><th>agent</th><th>tool</th><th>result</th></tr>${tools}</table></div>`:''}
+   </div>
+   ${(st.transcript||[]).map(t=>`<div class="card"><h3>${esc(t.agent)}</h3>
+       <div>${esc(t.text).replace(/\n/g,'<br>')}</div>
+       <p class="note">cache read: ${t.usage?.cache_read ?? '?'} tok · in ${t.usage?.input ?? '?'} · out ${t.usage?.output ?? '?'}</p></div>`).join('')}
+   ${r?reportCard(r):''}
+   ${s.status==='awaiting_approval'?'<div class="card"><h3>Waiting on you</h3><p class="note">A new runbook scenario was proposed. Open the <b>Approvals</b> tab.</p></div>':''}`;
+  if(s.status==='awaiting_approval')loadApprovals();
+}
+
+function reportCard(r){
+  const li=(a)=>(a||[]).map(x=>`<li>${esc(x)}</li>`).join('');
+  return `<div class="card"><h3>Diagnosis</h3>
+    <p><b>${esc(r.root_cause||'(not determined)')}</b></p>
+    <p class="note">confidence: <span class="${r.confidence==='high'?'ok':r.confidence==='low'?'bad':'warn'}">${esc(r.confidence)}</span>
+      ${r.escalate?` · <span class="bad">escalate — ${esc(r.escalate_reason||'')}</span>`:''}</p>
+    ${r.evidence?.length?`<p class="dim">Evidence</p><ul class="tight">${li(r.evidence)}</ul>`:''}
+    ${r.unknowns?.length?`<p class="dim">Unknowns</p><ul class="tight">${li(r.unknowns)}</ul>`:''}
+    ${r.suggested_actions?.length?`<p class="dim">Next steps</p><ul class="tight">${li(r.suggested_actions)}</ul>`:''}
+  </div>`;
+}
+
+async function loadApprovals(){
+  const {sessions}=await api('/sessions');
+  const pend=sessions.filter(s=>s.status==='awaiting_approval');
+  $('#apcount').textContent=pend.length?`(${pend.length})`:'';
+  if(!pend.length){$('#approvals').innerHTML='<div class="card"><h3>Approval queue</h3><p class="note">Nothing waiting. The agent cannot add anything to the knowledge base on its own — proposals land here first.</p></div>';return;}
+  const cards=await Promise.all(pend.map(async p=>{
+    const s=await api('/session/'+p.id);
+    return `<div class="card"><h3>Proposed scenario <span class="mono dim">${esc(p.id)}</span></h3>
+      <p class="note">from: ${esc(p.question||'')}</p>
+      <textarea id="md-${p.id}">${esc(s.pending.preview_md)}</textarea>
+      <div class="row" style="margin-top:8px">
+        <button class="sm yes" onclick="decide('${p.id}',true)">Approve &amp; save</button>
+        <button class="sm no" onclick="decide('${p.id}',false)">Reject</button>
+        <span class="note">Edits in the box above are saved with the approval.</span>
+      </div></div>`;}));
+  $('#approvals').innerHTML=cards.join('');
+}
+
+async function decide(id,approved){
+  const md=$('#md-'+id)?.value;
+  await api('/session/'+id+'/decide',{method:'POST',headers:{'content-type':'application/json'},
+    body:JSON.stringify({approved,edited_md:approved?md:null})});
+  setTimeout(()=>{loadApprovals();if(CUR===id)poll();},400);
+}
+
+async function loadTraces(){
+  const {traces}=await api('/traces');
+  $('#traces').innerHTML=`<div class="card"><h3>Sessions on disk</h3>
+   ${traces.length?`<div class="scroll"><table><tr><th>id</th><th>size</th><th></th></tr>
+   ${traces.map(t=>`<tr><td class="mono">${esc(t.id)}</td><td class="dim">${t.bytes} B</td>
+     <td><button class="sm" onclick="showTrace('${t.id}')">open</button></td></tr>`).join('')}
+   </table></div>`:'<p class="note">No traces yet.</p>'}</div><div id="tdetail"></div>`;
+}
+async function showTrace(id){
+  const t=await api('/traces/'+id);
+  $('#tdetail').innerHTML=`<div class="card"><h3>${esc(id)}</h3>
+    <pre>${esc(JSON.stringify(t.entries,null,1))}</pre></div>`;
+}
+
+async function loadKb(){
+  const {docs}=await api('/kb');
+  $('#kb').innerHTML=`<div class="card"><h3>Knowledge base</h3>
+    <p class="note">Loaded into the cached system prompt at session start. Add a file to <code>kb/</code> to extend it.</p>
+    <div class="scroll"><table><tr><th>document</th><th>size</th><th></th></tr>
+    ${docs.map(d=>`<tr><td class="mono">${esc(d.name)}</td><td class="dim">${d.bytes} B</td>
+      <td><button class="sm" onclick="showKb('${d.name}')">open</button></td></tr>`).join('')}
+    </table></div></div><div id="kbdetail"></div>`;
+}
+async function showKb(n){
+  const d=await api('/kb/'+n);
+  $('#kbdetail').innerHTML=`<div class="card"><h3>${esc(n)}.md</h3><pre>${esc(d.text)}</pre></div>`;
+}
+
+function loadPerms(){
+  const p=META.permissions;
+  $('#perms').innerHTML=`
+  <div class="card"><h3>Agents and ordering</h3>
+    <p class="note">Edit <code>agents.py</code>. ORDER is the sequence; REQUIRES is a precondition the supervisor cannot violate.</p>
+    <div class="scroll"><table><tr><th>agent</th><th>tools</th><th>requires</th></tr>
+    ${META.agents.map(a=>`<tr><td class="mono">${esc(a.name)}</td>
+      <td class="mono dim">${a.tools.map(esc).join(', ')}</td>
+      <td class="mono dim">${(META.requires[a.name]||[]).join(', ')||'—'}</td></tr>`).join('')}
+    </table></div></div>
+
+  <div class="card"><h3>Registered tools</h3>
+    <div class="scroll"><table><tr><th>tool</th><th>params</th><th>side effect</th></tr>
+    ${META.tools.map(t=>`<tr><td class="mono">${esc(t.name)}</td>
+      <td class="mono dim">${t.params.join(', ')||'—'}</td>
+      <td class="${t.side_effect==='none'?'ok':'bad'}">${esc(t.side_effect)}</td></tr>`).join('')}
+    </table></div>
+    <p class="note">${p.write_tools_registered.length
+      ? '<span class="bad">Write tools registered — an approval node must gate them.</span>'
+      : 'No write tools registered. The agent cannot modify the system or the knowledge base.'}</p>
+  </div>
+
+  <div class="card"><h3>Permission surface <span class="dim" style="font-weight:400">— read-only</span></h3>
+    <p class="note">Deliberately not editable here. Widening these should be a code change that shows in a diff and a test run.</p>
+    <p class="dim">Commands that may ever run — <code>transport.ALLOWED</code></p>
+    <pre>${esc(Object.entries(p.allowed_commands).map(([k,v])=>k.padEnd(10)+' '+v.join(' ')).join('\n'))}</pre>
+    <p class="dim">Nodes that may be addressed — <code>inventory.py</code></p>
+    <pre>${esc(Object.values(p.inventory).map(n=>`${(n.name||'').padEnd(15)} ${(n.type||'').padEnd(22)} ${n.endpoint?(n.endpoint.scheme+'://'+n.endpoint.host+(n.endpoint.port?':'+n.endpoint.port:'')):'—'}`).join('\n'))}</pre>
+    <p class="note">Credentials are dropped while parsing the config, not redacted afterwards.</p>
+  </div>`;
+}
+window.decide=decide;window.showTrace=showTrace;window.showKb=showKb;
+</script></body></html>
