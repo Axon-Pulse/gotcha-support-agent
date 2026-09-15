@@ -50,7 +50,18 @@ def load_tools(allow_writes: bool = False) -> dict[str, dict]:
 
 
 def schemas(names: list[str] | None = None) -> list[dict]:
-    return [t["schema"] for n, t in REGISTRY.items() if names is None or n in names]
+    """Tool schemas as the model sees them, with console description overrides applied."""
+    import config_store
+    over = config_store.get("tool_descriptions", {})
+    out = []
+    for n, t in REGISTRY.items():
+        if names is not None and n not in names:
+            continue
+        sch = t["schema"]
+        if n in over and str(over[n]).strip():
+            sch = {**sch, "description": over[n]}
+        out.append(sch)
+    return out
 
 
 def call(name: str, args: dict) -> dict:

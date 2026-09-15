@@ -4,3 +4,4 @@ __pycache__/
 traces/
 graph.db*
 .pytest_cache/
+config_audit.jsonl

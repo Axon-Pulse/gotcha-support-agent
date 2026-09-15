@@ -17,7 +17,8 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
 import llm
-from agents import AGENTS, MAX_AGENT_STEPS, ORDER, REQUIRES, SUPERVISOR_PICKS
+import agents as A
+from agents import MAX_AGENT_STEPS
 from state import S
 
 log = logging.getLogger(__name__)
@@ -57,8 +58,9 @@ REPORT_SCHEMA = {
 
 
 def _eligible(visited: list[str]) -> list[str]:
-    return [a for a in ORDER if a not in visited
-            and all(r in visited for r in REQUIRES.get(a, []))]
+    req = A.requires()
+    return [a for a in A.order() if a not in visited
+            and all(r in visited for r in req.get(a, []))]
 
 
 def supervisor(s: S) -> dict:
@@ -66,7 +68,7 @@ def supervisor(s: S) -> dict:
     elig = _eligible(visited)
     if not elig or len(visited) >= MAX_AGENT_STEPS:
         return {"next": "synthesize"}
-    if not SUPERVISOR_PICKS:
+    if not A.supervisor_picks():
         return {"next": elig[0]}
     picked = llm.ask_json(
         prompt=(f"Question: {s['question']}\n\n"
@@ -78,7 +80,7 @@ def supervisor(s: S) -> dict:
                                "why": {"type": "string"}},
                 "required": ["next"]},
         system=("You route between diagnostic agents. Available now: "
-                + ", ".join(f"{a} ({AGENTS[a]['prompt'][:60]}...)" for a in elig)),
+                + ", ".join(f"{a} ({A.agents()[a]['prompt'][:60]}...)" for a in elig)),
     ).get("next", elig[0])
     return {"next": "synthesize" if picked == "done" else picked}
 
@@ -92,7 +94,7 @@ def _digest(s: S, limit: int = 4000) -> str:
 def make_agent_node(name: str):
     def node(s: S) -> dict:
         text, findings, usage = llm.run_agent(
-            name, AGENTS[name], s["question"],
+            name, A.agents()[name], s["question"],
             context=f"Findings from earlier agents:\n{_digest(s)}" if s.get("findings") else "")
         log.info("agent=%s tools=%d cache_read=%d", name, len(findings), usage["cache_read"])
         return {"findings": findings, "visited": [name],
@@ -151,8 +153,9 @@ def save(s: S) -> dict:
 
 def build():
     g = StateGraph(S)
+    names = list(A.agents())
     g.add_node("supervisor", supervisor)
-    for name in AGENTS:
+    for name in names:
         g.add_node(name, make_agent_node(name))
     g.add_node("synthesize", synthesize)
     g.add_node("propose_scenario", propose_scenario)
@@ -160,8 +163,8 @@ def build():
 
     g.add_edge(START, "supervisor")
     g.add_conditional_edges("supervisor", lambda s: s["next"],
-                            {**{a: a for a in AGENTS}, "synthesize": "synthesize"})
-    for name in AGENTS:
+                            {**{a: a for a in names}, "synthesize": "synthesize"})
+    for name in names:
         g.add_edge(name, "supervisor")
     g.add_edge("synthesize", "propose_scenario")
     g.add_edge("save", END)

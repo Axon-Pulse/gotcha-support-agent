@@ -80,12 +80,43 @@ and it is refused at registration until an approval node is wired in front of it
     .venv/bin/python -m uvicorn console.server:app --port 8765
     # then open http://localhost:8765
 
-Five tabs: **Run** (mock sessions; watch each agent fire, with per-agent cache and token
+Six tabs: **Run** (mock sessions; watch each agent fire, with per-agent cache and token
 counts), **Approvals** (the queue — edit the markdown in place, then approve or reject),
-**Traces**, **Knowledge**, and **Tools & permissions**.
+**Traces**, **Knowledge**, **Graph**, and **Tools & permissions**.
 
 The console sets `AGENT_MODE=mock` before importing anything, so it cannot touch the real
 system. Live runs stay a deliberate command-line act.
 
-The permission surface is shown **read-only** on purpose. Widening it should be a code
-change that appears in a diff and a test run, not a button.
+### Editing configuration from the UI
+
+**Tools & permissions** edits agent prompts, which tools each agent may call, the tool
+descriptions the model reads, the order and its `requires` preconditions, and the allowed
+command table. Changes land in `overrides.json`, layered over the code defaults in
+`agents.py` / `transport.py` / `tools/`; clearing a field reverts to the default.
+
+Two properties survive the UI being editable:
+
+- **The agent still cannot widen its own permissions.** No tool can reach `config_store` —
+  asserted by a test that greps every registered tool's source. Config is written by the
+  console API, i.e. by a human at localhost.
+- **Changes remain reviewable.** `overrides.json` is git-tracked so edits show in a diff,
+  and every write is appended to `config_audit.jsonl` (visible under "View change log").
+
+Edits are validated before they are saved: unknown tools, reserved node names, an agent
+with no tools, duplicate or undefined agents in the order, `requires` cycles, a
+prerequisite scheduled after its dependant, and non-list argv are all rejected with the
+reason. Adding a shell binary (`bash`, `sh`, `env`, `xargs`…) to the command table is
+*allowed* but prompts for confirmation first, because the argv-list protection does not
+apply to a shell.
+
+The **addressable node list stays read-only**: it is derived from the gotcha30 config
+named by `GOTCHA30_CONFIG`, with credential keys dropped during parsing. Point the agent
+at another deployment by changing that env var, not by typing hosts into a box.
+
+### Graph
+
+The **Graph** tab draws the execution graph: START → supervisor → agents (each looping
+back) → synthesize → the approval gate → `save` or END. Dashed amber edges are `requires`
+preconditions; green and red are the approve/reject branches. Agents defined but missing
+from `order` are greyed out, since the supervisor can never pick them. LangGraph's own
+mermaid export is included below the diagram.

@@ -25,6 +25,7 @@ from langgraph.types import Command  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 
 import agents as agents_mod  # noqa: E402
+import config_store  # noqa: E402
 import inventory  # noqa: E402
 import transport  # noqa: E402
 from graph import build  # noqa: E402
@@ -36,8 +37,22 @@ TRACES = ROOT / "traces"
 KB = ROOT / "kb"
 
 load_tools()
-GRAPH = build()
 app = FastAPI(title="support-agent console")
+
+_graph = build()
+_graph_lock = threading.Lock()
+
+
+def graph():
+    with _graph_lock:
+        return _graph
+
+
+def rebuild_graph() -> None:
+    """Config edits can add or remove agents, which changes the graph topology."""
+    global _graph
+    with _graph_lock:
+        _graph = build()
 
 # session id -> {status, question, error}
 SESSIONS: dict[str, dict] = {}
@@ -53,7 +68,7 @@ def _run(sid: str, payload) -> None:
     """Drive the graph in a worker thread. Fresh sqlite connection per thread."""
     try:
         with SqliteSaver.from_conn_string(DB) as cp:
-            out = GRAPH.compile(checkpointer=cp).invoke(
+            out = graph().compile(checkpointer=cp).invoke(
                 payload, {"configurable": {"thread_id": sid}})
         if "__interrupt__" in out:
             _set(sid, status="awaiting_approval",
@@ -80,7 +95,7 @@ def _live_state(sid: str) -> dict:
     """Read accumulated state from the checkpoint so the UI can watch agents fire."""
     try:
         with SqliteSaver.from_conn_string(DB) as cp:
-            snap = GRAPH.compile(checkpointer=cp).get_state(
+            snap = graph().compile(checkpointer=cp).get_state(
                 {"configurable": {"thread_id": sid}})
     except Exception:  # noqa: BLE001
         return {}
@@ -104,29 +119,185 @@ class DecideReq(BaseModel):
     edited_md: str | None = None
 
 
+def _effective_desc(name: str, entry: dict) -> str:
+    over = config_store.get("tool_descriptions", {})
+    return over.get(name) or entry["schema"].get("description", "")
+
+
 @app.get("/api/meta")
 def meta() -> dict:
     return {
         "mode": transport.MODE,
         "model": os.environ.get("AGENT_MODEL", "claude-opus-5"),
         "api_key_set": bool(os.environ.get("ANTHROPIC_API_KEY")),
-        "agents": [{"name": n, "prompt": a["prompt"], "tools": a["tools"]}
-                   for n, a in agents_mod.AGENTS.items()],
-        "order": agents_mod.ORDER,
-        "requires": agents_mod.REQUIRES,
-        "supervisor_picks": agents_mod.SUPERVISOR_PICKS,
+        "agents": [{"name": n, "prompt": a["prompt"], "tools": a.get("tools", [])}
+                   for n, a in agents_mod.agents().items()],
+        "order": agents_mod.order(),
+        "requires": agents_mod.requires(),
+        "supervisor_picks": agents_mod.supervisor_picks(),
         "tools": [{"name": n, "side_effect": t["side_effect"],
-                   "description": t["schema"].get("description", ""),
+                   "description": _effective_desc(n, t),
+                   "default_description": t["schema"].get("description", ""),
                    "params": sorted((t["schema"].get("input_schema") or {})
                                     .get("properties", {}))}
                   for n, t in sorted(REGISTRY.items())],
         "permissions": {
-            "allowed_commands": {k: list(v) for k, v in transport.ALLOWED.items()},
+            "allowed_commands": transport.allowed(),
             "addressable_nodes": inventory.names(),
             "inventory": inventory.load(),
             "write_tools_registered": [n for n, t in REGISTRY.items()
                                        if t["side_effect"] != "none"],
         },
+        "overridden_keys": sorted(config_store.load()),
+    }
+
+
+class AgentReq(BaseModel):
+    prompt: str
+    tools: list[str]
+
+
+class FlowReq(BaseModel):
+    order: list[str]
+    requires: dict[str, list[str]]
+    supervisor_picks: bool
+
+
+class DescReq(BaseModel):
+    description: str
+
+
+class CommandsReq(BaseModel):
+    commands: dict[str, list[str]]
+    confirm: bool = False
+
+
+def _bad(e: Exception):
+    return HTTPException(400, str(e))
+
+
+@app.get("/api/config")
+def get_config() -> dict:
+    return {"effective": {"agents": agents_mod.agents(), "order": agents_mod.order(),
+                          "requires": agents_mod.requires(),
+                          "supervisor_picks": agents_mod.supervisor_picks(),
+                          "allowed_commands": transport.allowed(),
+                          "tool_descriptions": config_store.get("tool_descriptions", {})},
+            "defaults": {**agents_mod.defaults(),
+                         "allowed_commands": {k: list(v) for k, v in
+                                              transport.DEFAULT_ALLOWED.items()}},
+            "overridden_keys": sorted(config_store.load())}
+
+
+@app.put("/api/config/agent/{name}")
+def put_agent(name: str, req: AgentReq) -> dict:
+    cur = dict(agents_mod.agents())
+    cur[name] = {"prompt": req.prompt, "tools": req.tools}
+    try:
+        config_store.validate_agents(cur, set(REGISTRY))
+        order = agents_mod.order()
+        if name not in order:
+            order = order + [name]
+        config_store.validate_flow(order, agents_mod.requires(), set(cur))
+    except config_store.ConfigError as e:
+        raise _bad(e) from e
+    config_store.put("agents", cur, note=f"edit agent {name}")
+    config_store.put("order", order, note=f"ensure {name} in order")
+    rebuild_graph()
+    return {"ok": True, "agents": cur, "order": order}
+
+
+@app.delete("/api/config/agent/{name}")
+def delete_agent(name: str) -> dict:
+    cur = {k: v for k, v in agents_mod.agents().items() if k != name}
+    order = [a for a in agents_mod.order() if a != name]
+    req = {k: [d for d in v if d != name]
+           for k, v in agents_mod.requires().items() if k != name}
+    try:
+        config_store.validate_agents(cur, set(REGISTRY))
+        config_store.validate_flow(order, req, set(cur))
+    except config_store.ConfigError as e:
+        raise _bad(e) from e
+    config_store.put("agents", cur, note=f"delete agent {name}")
+    config_store.put("order", order, note="drop from order")
+    config_store.put("requires", req, note="drop from requires")
+    rebuild_graph()
+    return {"ok": True}
+
+
+@app.put("/api/config/flow")
+def put_flow(req: FlowReq) -> dict:
+    try:
+        config_store.validate_flow(req.order, req.requires, set(agents_mod.agents()))
+    except config_store.ConfigError as e:
+        raise _bad(e) from e
+    config_store.put("order", req.order, note="edit order")
+    config_store.put("requires", req.requires, note="edit requires")
+    config_store.put("supervisor_picks", req.supervisor_picks, note="edit routing mode")
+    rebuild_graph()
+    return {"ok": True}
+
+
+@app.put("/api/config/tool/{name}")
+def put_tool_desc(name: str, req: DescReq) -> dict:
+    if name not in REGISTRY:
+        raise HTTPException(404, f"no registered tool {name!r}")
+    over = dict(config_store.get("tool_descriptions", {}))
+    if req.description.strip():
+        over[name] = req.description
+    else:
+        over.pop(name, None)      # empty reverts to the code default
+    config_store.put("tool_descriptions", over, note=f"edit description {name}")
+    return {"ok": True, "description": _effective_desc(name, REGISTRY[name])}
+
+
+@app.put("/api/config/commands")
+def put_commands(req: CommandsReq) -> dict:
+    try:
+        warnings = config_store.validate_commands(req.commands)
+    except config_store.ConfigError as e:
+        raise _bad(e) from e
+    if warnings and not req.confirm:
+        return {"ok": False, "needs_confirmation": True, "warnings": warnings}
+    config_store.put("allowed_commands", req.commands, note="edit allowed commands")
+    return {"ok": True, "warnings": warnings}
+
+
+@app.post("/api/config/reset")
+def reset_config(key: str | None = None) -> dict:
+    config_store.clear(key)
+    rebuild_graph()
+    return {"ok": True, "overridden_keys": sorted(config_store.load())}
+
+
+@app.get("/api/config/audit")
+def audit() -> dict:
+    p = ROOT / "config_audit.jsonl"
+    if not p.exists():
+        return {"entries": []}
+    rows = [json.loads(l) for l in p.read_text().splitlines() if l.strip()]
+    return {"entries": [{"ts": r["ts"], "by": r["by"], "change": r["change"]}
+                        for r in rows[-100:]][::-1]}
+
+
+@app.get("/api/graph")
+def graph_shape() -> dict:
+    """Structure for the UI diagram, plus langgraph's own mermaid as an export."""
+    ags, req = agents_mod.agents(), agents_mod.requires()
+    try:
+        mermaid = graph().compile().get_graph().draw_mermaid()
+    except Exception:  # noqa: BLE001
+        mermaid = ""
+    order = agents_mod.order()
+    ranked = sorted(ags, key=lambda n: order.index(n) if n in order else 1e6)
+    return {
+        "agents": [{"name": n, "tools": ags[n].get("tools", []),
+                    "requires": req.get(n, []), "in_order": n in order}
+                   for n in ranked],
+        "order": order,
+        "supervisor_picks": agents_mod.supervisor_picks(),
+        "max_steps": agents_mod.MAX_AGENT_STEPS,
+        "mermaid": mermaid,
     }
 
 

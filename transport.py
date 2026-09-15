@@ -10,11 +10,21 @@ import os
 import subprocess
 from pathlib import Path
 
-ALLOWED: dict[str, tuple[str, ...]] = {
+import config_store
+
+DEFAULT_ALLOWED: dict[str, tuple[str, ...]] = {
     "topology": ("ecal_mon_cli", "-l"),
     "health":   ("ecal_mon_cli", "--proto", "/system/health", "-c", "40"),
     "launcher": ("ecal_mon_cli", "--proto", "/launcher/status", "-c", "2"),
 }
+
+
+
+def allowed() -> dict[str, list]:
+    """Effective command table: code defaults, overlaid with console edits."""
+    return {k: list(v) for k, v in
+            config_store.get("allowed_commands", DEFAULT_ALLOWED).items()}
+
 
 # Which fixture file backs each command in mock mode.
 FIXTURES = {
@@ -29,15 +39,16 @@ FIXTURE_DIR = Path(os.environ.get("FIXTURE_DIR", "tests/fixtures"))
 
 def run(key: str, timeout: int = 10) -> str:
     """Run an allowlisted command (live) or read its fixture (mock)."""
-    if key not in ALLOWED:
-        raise KeyError(f"command {key!r} is not allowlisted: {sorted(ALLOWED)}")
+    table = allowed()
+    if key not in table:
+        raise KeyError(f"command {key!r} is not allowlisted: {sorted(table)}")
     if MODE == "mock":
-        path = FIXTURE_DIR / FIXTURES[key]
+        path = FIXTURE_DIR / FIXTURES.get(key, f"{key}.txt")
         if not path.exists():
             raise FileNotFoundError(f"no fixture for {key!r} at {path}")
         return path.read_text()
     return subprocess.run(
-        ["timeout", str(timeout), *ALLOWED[key]],
+        ["timeout", str(timeout), *table[key]],
         capture_output=True, text=True, timeout=timeout + 5,
     ).stdout
 

@@ -49,6 +49,25 @@ th{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--dim)
 .note{font-size:12.5px;color:var(--dim);margin-top:6px}
 .scroll{overflow-x:auto}
 ul.tight{margin:6px 0;padding-left:20px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
+label.chk{display:inline-flex;align-items:center;gap:5px;margin:0 10px 4px 0;font:12.5px var(--mono)}
+textarea.p{min-height:92px}
+.danger{border-color:var(--bad)}
+.badge{font:10.5px/1 var(--mono);padding:3px 6px;border-radius:5px;border:1px solid var(--warn);
+  color:var(--warn);margin-left:6px}
+.saved{color:var(--ok);font-size:12px;margin-left:8px}
+svg.g{width:100%;height:auto;display:block}
+svg.g text{font:11px ui-monospace,Menlo,monospace;fill:var(--fg)}
+svg.g .lbl{font-size:10px;fill:var(--dim)}
+svg.g rect{fill:var(--card);stroke:var(--line);stroke-width:1.5}
+svg.g rect.ag{stroke:var(--accent)}
+svg.g rect.off{stroke:var(--line);stroke-dasharray:3 3;opacity:.55}
+svg.g rect.gate{stroke:var(--warn);stroke-dasharray:4 3}
+svg.g rect.term{fill:var(--bg)}
+svg.g path,svg.g line{stroke:var(--dim);fill:none;stroke-width:1.4}
+svg.g .req{stroke:var(--warn);stroke-dasharray:4 3}
+svg.g .yes{stroke:var(--ok)}
+svg.g .no{stroke:var(--bad)}
 </style></head><body><div class="wrap">
 
 <header>
@@ -63,6 +82,7 @@ ul.tight{margin:6px 0;padding-left:20px}
   <button data-t="approvals" aria-selected="false">Approvals <span id="apcount"></span></button>
   <button data-t="traces" aria-selected="false">Traces</button>
   <button data-t="kb" aria-selected="false">Knowledge</button>
+  <button data-t="graph" aria-selected="false">Graph</button>
   <button data-t="perms" aria-selected="false">Tools &amp; permissions</button>
 </nav>
 
@@ -81,6 +101,7 @@ ul.tight{margin:6px 0;padding-left:20px}
 <section id="approvals" hidden></section>
 <section id="traces" hidden></section>
 <section id="kb" hidden></section>
+<section id="graph" hidden></section>
 <section id="perms" hidden></section>
 
 </div><script>
@@ -90,8 +111,8 @@ let META=null, CUR=null, TIMER=null;
 
 document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('#tabs button').forEach(x=>x.setAttribute('aria-selected',x===b));
-  ['run','approvals','traces','kb','perms'].forEach(t=>$('#'+t).hidden=(t!==b.dataset.t));
-  ({approvals:loadApprovals,traces:loadTraces,kb:loadKb,perms:loadPerms}[b.dataset.t]||(()=>{}))();
+  ['run','approvals','traces','kb','graph','perms'].forEach(t=>$('#'+t).hidden=(t!==b.dataset.t));
+  ({approvals:loadApprovals,traces:loadTraces,kb:loadKb,graph:loadGraph,perms:loadPerms}[b.dataset.t]||(()=>{}))();
 });
 
 api('/meta').then(m=>{
@@ -207,36 +228,243 @@ async function showKb(n){
   $('#kbdetail').innerHTML=`<div class="card"><h3>${esc(n)}.md</h3><pre>${esc(d.text)}</pre></div>`;
 }
 
-function loadPerms(){
-  const p=META.permissions;
-  $('#perms').innerHTML=`
-  <div class="card"><h3>Agents and ordering</h3>
-    <p class="note">Edit <code>agents.py</code>. ORDER is the sequence; REQUIRES is a precondition the supervisor cannot violate.</p>
-    <div class="scroll"><table><tr><th>agent</th><th>tools</th><th>requires</th></tr>
-    ${META.agents.map(a=>`<tr><td class="mono">${esc(a.name)}</td>
-      <td class="mono dim">${a.tools.map(esc).join(', ')}</td>
-      <td class="mono dim">${(META.requires[a.name]||[]).join(', ')||'—'}</td></tr>`).join('')}
-    </table></div></div>
+// ---------------- graph ----------------
+async function loadGraph(){
+  const g = await api('/graph');
+  const N=(x,y,w,h,label,cls,sub)=>({x,y,w,h,label,cls,sub});
+  const ags=g.agents, n=ags.length;
+  const AW=124, AH=46, GAP=14;
+  const rowW = n*AW + (n-1)*GAP;
+  const W = Math.max(rowW + 60, 620), cx = W/2;
+  const x0 = cx - rowW/2;
+  const nodes=[
+    N(cx-40,  8, 80,26,'START','term'),
+    N(cx-70, 66,140,34,'supervisor','', g.supervisor_picks?'routes by model':'fixed order'),
+  ];
+  ags.forEach((a,i)=>nodes.push(N(x0+i*(AW+GAP),150,AW,AH,a.name,a.in_order?'ag':'off',
+    a.in_order?(a.tools.length+' tool'+(a.tools.length===1?'':'s')):'not in order')));
+  const yS=248, yP=310, ySave=378, yEnd=378;
+  nodes.push(N(cx-70,yS,140,34,'synthesize','','builds the report'));
+  nodes.push(N(cx-92,yP,184,38,'propose_scenario','gate','waits for you'));
+  nodes.push(N(cx-186,ySave,110,30,'save','','writes kb/'));
+  nodes.push(N(cx+80,yEnd,110,30,'END','term'));
+  nodes.push(N(cx-186,ySave+52,110,26,'END','term'));
 
-  <div class="card"><h3>Registered tools</h3>
-    <div class="scroll"><table><tr><th>tool</th><th>params</th><th>side effect</th></tr>
-    ${META.tools.map(t=>`<tr><td class="mono">${esc(t.name)}</td>
-      <td class="mono dim">${t.params.join(', ')||'—'}</td>
-      <td class="${t.side_effect==='none'?'ok':'bad'}">${esc(t.side_effect)}</td></tr>`).join('')}
-    </table></div>
-    <p class="note">${p.write_tools_registered.length
-      ? '<span class="bad">Write tools registered — an approval node must gate them.</span>'
-      : 'No write tools registered. The agent cannot modify the system or the knowledge base.'}</p>
-  </div>
+  const cxOf=i=>x0+i*(AW+GAP)+AW/2;
+  let paths='';
+  paths+=`<line x1="${cx}" y1="34" x2="${cx}" y2="66"/>`;
+  ags.forEach((a,i)=>{
+    if(!a.in_order) return;
+    paths+=`<path d="M ${cx} 100 C ${cx} 125, ${cxOf(i)} 125, ${cxOf(i)} 150"/>`;
+    // loop back to supervisor down the outside
+    const side = cxOf(i) < cx ? x0-22 : x0+rowW+22;
+    paths+=`<path d="M ${cxOf(i)} 196 C ${cxOf(i)} 220, ${side} 210, ${side} 83 L ${cx-70} 83"
+             marker-end="url(#ar)"/>`;
+  });
+  // requires edges (dashed, between agent boxes)
+  ags.forEach((a,i)=>(a.requires||[]).forEach(r=>{
+    const j=ags.findIndex(x=>x.name===r); if(j<0)return;
+    paths+=`<path class="req" d="M ${cxOf(j)} 150 C ${cxOf(j)} 132, ${cxOf(i)} 132, ${cxOf(i)} 150"
+             marker-end="url(#arw)"/>`;
+  }));
+  paths+=`<line x1="${cx}" y1="196" x2="${cx}" y2="${yS}" stroke-dasharray="3 3"/>`;
+  paths+=`<line x1="${cx}" y1="${yS+34}" x2="${cx}" y2="${yP}" marker-end="url(#ar)"/>`;
+  paths+=`<path class="yes" d="M ${cx-40} ${yP+38} C ${cx-40} ${ySave-14}, ${cx-131} ${ySave-14}, ${cx-131} ${ySave}" marker-end="url(#arg)"/>`;
+  paths+=`<path class="no"  d="M ${cx+40} ${yP+38} C ${cx+40} ${yEnd-14}, ${cx+135} ${yEnd-14}, ${cx+135} ${yEnd}" marker-end="url(#arr)"/>`;
+  paths+=`<line x1="${cx-131}" y1="${ySave+30}" x2="${cx-131}" y2="${ySave+52}"/>`;
 
-  <div class="card"><h3>Permission surface <span class="dim" style="font-weight:400">— read-only</span></h3>
-    <p class="note">Deliberately not editable here. Widening these should be a code change that shows in a diff and a test run.</p>
-    <p class="dim">Commands that may ever run — <code>transport.ALLOWED</code></p>
-    <pre>${esc(Object.entries(p.allowed_commands).map(([k,v])=>k.padEnd(10)+' '+v.join(' ')).join('\n'))}</pre>
-    <p class="dim">Nodes that may be addressed — <code>inventory.py</code></p>
-    <pre>${esc(Object.values(p.inventory).map(n=>`${(n.name||'').padEnd(15)} ${(n.type||'').padEnd(22)} ${n.endpoint?(n.endpoint.scheme+'://'+n.endpoint.host+(n.endpoint.port?':'+n.endpoint.port:'')):'—'}`).join('\n'))}</pre>
-    <p class="note">Credentials are dropped while parsing the config, not redacted afterwards.</p>
-  </div>`;
+  const boxes=nodes.map(d=>`
+    <g><rect class="${d.cls}" x="${d.x}" y="${d.y}" width="${d.w}" height="${d.h}" rx="7"/>
+    <text x="${d.x+d.w/2}" y="${d.y+(d.sub?18:d.h/2+4)}" text-anchor="middle">${esc(d.label)}</text>
+    ${d.sub?`<text class="lbl" x="${d.x+d.w/2}" y="${d.y+32}" text-anchor="middle">${esc(d.sub)}</text>`:''}</g>`).join('');
+
+  const mk=(id,c)=>`<marker id="${id}" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6"
+    markerHeight="6" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="${c}" stroke="none"/></marker>`;
+
+  $('#graph').innerHTML=`
+   <div class="card"><h3>Execution graph</h3>
+    <svg class="g" viewBox="0 0 ${W} ${ySave+92}" role="img" aria-label="agent execution graph">
+      <defs>${mk('ar','var(--dim)')}${mk('arw','var(--warn)')}${mk('arg','var(--ok)')}${mk('arr','var(--bad)')}</defs>
+      ${paths}${boxes}
+    </svg>
+    <p class="note">
+      Solid grey: flow. Each agent returns to the supervisor, which picks the next one
+      ${g.supervisor_picks?'(model-routed, constrained by order and requires)':'(fixed order — routing is off)'}.
+      <span class="warn">Dashed amber between agents</span>: a <code>requires</code> precondition —
+      the supervisor cannot pick an agent until its prerequisites have run.
+      <span class="ok">Green</span>: you approved. <span class="bad">Red</span>: you rejected.
+      <code>save</code> is the only node that writes, and it is reachable only through the gate.
+      Ceiling of ${g.max_steps} agent steps per session.
+      ${ags.some(a=>!a.in_order)?`<br><b class="warn">Greyed out:</b> defined but absent from
+        <code>order</code>, so the supervisor can never pick it — add it to the order to enable it.`:''}
+    </p>
+   </div>
+   <div class="card"><h3>Agent order</h3>
+     <div>${g.order.map((a,i)=>`<span class="step">${i+1}. ${esc(a)}</span>`).join('')}</div>
+     <p class="note">Edit ordering and preconditions in <b>Tools &amp; permissions</b>.</p>
+   </div>
+   <div class="card"><h3>Mermaid export <span class="dim" style="font-weight:400">— from langgraph</span></h3>
+     <pre>${esc(g.mermaid||'(unavailable)')}</pre></div>`;
 }
-window.decide=decide;window.showTrace=showTrace;window.showKb=showKb;
+
+// ---------------- editable config ----------------
+let CFG=null;
+async function loadPerms(){
+  CFG=await api('/config'); META=await api('/meta');
+  const eff=CFG.effective, over=CFG.overridden_keys;
+  const allTools=META.tools.map(t=>t.name);
+
+  const agentCards=Object.entries(eff.agents).map(([name,a])=>`
+   <div class="card"><h3>${esc(name)}
+     <button class="sm no" style="float:right" onclick="delAgent('${esc(name)}')">delete</button></h3>
+     <textarea class="p" id="ap-${name}">${esc(a.prompt)}</textarea>
+     <div style="margin:8px 0">${allTools.map(t=>`<label class="chk">
+       <input type="checkbox" data-a="${name}" value="${t}" ${(a.tools||[]).includes(t)?'checked':''}> ${esc(t)}</label>`).join('')}</div>
+     <button class="sm yes" onclick="saveAgent('${esc(name)}')">Save agent</button>
+     <span class="saved" id="sv-${name}"></span>
+   </div>`).join('');
+
+  const toolCards=META.tools.map(t=>`
+   <div class="card"><h3>${esc(t.name)}
+     <span class="${t.side_effect==='none'?'ok':'bad'}" style="font-weight:400;font-size:12px">
+       side effect: ${esc(t.side_effect)}</span>
+     ${eff.tool_descriptions[t.name]?'<span class="badge">overridden</span>':''}</h3>
+     <p class="note">Params: <code>${t.params.join(', ')||'none'}</code>. This text is what the
+       model reads to decide when to call it.</p>
+     <textarea class="p" id="td-${t.name}">${esc(t.description)}</textarea>
+     <button class="sm yes" onclick="saveTool('${esc(t.name)}')">Save description</button>
+     <button class="sm" onclick="resetTool('${esc(t.name)}')">Revert to default</button>
+     <span class="saved" id="tv-${t.name}"></span>
+   </div>`).join('');
+
+  $('#perms').innerHTML=`
+   <div class="card"><h3>Configuration source</h3>
+     <p class="note">${over.length
+       ? `Overridden in <code>overrides.json</code>: <b>${over.map(esc).join(', ')}</b>. The file is
+          git-tracked and every change is appended to <code>config_audit.jsonl</code>.`
+       : 'All values are the code defaults. Edits below are written to <code>overrides.json</code>.'}</p>
+     <div class="row" style="margin-top:8px">
+       <button class="sm" onclick="showAudit()">View change log</button>
+       ${over.length?`<button class="sm no" onclick="resetAll()">Revert everything to code defaults</button>`:''}
+     </div>
+     <div id="auditbox"></div>
+   </div>
+
+   <div class="card"><h3>Flow</h3>
+     <p class="note">Order is the sequence the supervisor may pick from. Requires is a hard
+       precondition it cannot violate — an agent is ineligible until its prerequisites have run.</p>
+     <p class="dim" style="margin:8px 0 4px">Order (comma separated)</p>
+     <input type="text" id="f-order" value="${esc(eff.order.join(', '))}">
+     <p class="dim" style="margin:10px 0 4px">Requires — one per line, <code>agent: prereq, prereq</code></p>
+     <textarea id="f-req" style="min-height:76px">${esc(Object.entries(eff.requires).map(([k,v])=>`${k}: ${v.join(', ')}`).join('\n'))}</textarea>
+     <label class="chk" style="margin-top:8px"><input type="checkbox" id="f-sup" ${eff.supervisor_picks?'checked':''}>
+       supervisor picks the next agent (uncheck for a fixed pipeline)</label>
+     <div><button class="sm yes" onclick="saveFlow()">Save flow</button><span class="saved" id="fv"></span></div>
+   </div>
+
+   <h3 style="margin:18px 0 8px;font-size:13px">Agents</h3>
+   ${agentCards}
+   <div class="card"><h3>Add an agent</h3>
+     <div class="row"><input type="text" id="na" placeholder="name (lowercase, e.g. storage)">
+       <button class="sm yes" onclick="addAgent()">Create</button></div>
+     <p class="note">It is appended to the order with no prompt tools until you edit it.</p>
+   </div>
+
+   <h3 style="margin:18px 0 8px;font-size:13px">Tool descriptions</h3>
+   ${toolCards}
+
+   <div class="card ${Object.keys(eff.allowed_commands).length?'':''}"><h3>Allowed commands
+     ${over.includes('allowed_commands')?'<span class="badge">overridden</span>':''}</h3>
+     <p class="note">The complete set of commands that may ever run in live mode. One per line,
+       <code>key: binary arg arg</code>. No shell is used, so metacharacters are passed through
+       literally and cannot chain commands — but a shell <i>binary</i> here would grant arbitrary
+       execution, and you will be warned before that is saved.</p>
+     <textarea id="cmds" class="danger">${esc(Object.entries(eff.allowed_commands).map(([k,v])=>`${k}: ${v.join(' ')}`).join('\n'))}</textarea>
+     <div><button class="sm yes" onclick="saveCmds(false)">Save commands</button>
+       <span class="saved" id="cv"></span></div>
+   </div>
+
+   <div class="card"><h3>Addressable nodes <span class="dim" style="font-weight:400">— from ${esc(META.permissions.inventory&&Object.keys(META.permissions.inventory).length?'the gotcha30 config':'nothing')}</span></h3>
+     <p class="note">Derived from the gotcha30 config named by <code>GOTCHA30_CONFIG</code>, with
+       credential keys dropped while parsing. Point the agent at a different deployment by changing
+       that env var, not by typing hosts here — the config is the source of truth.</p>
+     <pre>${esc(Object.values(META.permissions.inventory).map(n=>`${(n.name||'').padEnd(15)} ${(n.type||'').padEnd(22)} ${n.endpoint?(n.endpoint.scheme+'://'+n.endpoint.host+(n.endpoint.port?':'+n.endpoint.port:'')):'—'}`).join('\n'))}</pre>
+   </div>`;
+}
+
+const flash=(id,msg,bad)=>{const e=$('#'+id); if(!e)return; e.textContent=msg;
+  e.className='saved '+(bad?'bad':'ok'); setTimeout(()=>e.textContent='',2500)};
+
+async function saveAgent(name){
+  const tools=[...document.querySelectorAll(`input[data-a="${name}"]:checked`)].map(i=>i.value);
+  try{ await api('/config/agent/'+name,{method:'PUT',headers:{'content-type':'application/json'},
+         body:JSON.stringify({prompt:$('#ap-'+name).value,tools})});
+       flash('sv-'+name,'saved'); loadPerms(); }
+  catch(e){ flash('sv-'+name,e.message,true); }
+}
+async function addAgent(){
+  const n=$('#na').value.trim(); if(!n)return;
+  try{ await api('/config/agent/'+n,{method:'PUT',headers:{'content-type':'application/json'},
+         body:JSON.stringify({prompt:'Describe what this agent should do.',tools:[META.tools[0].name]})});
+       loadPerms(); }
+  catch(e){ alert(e.message); }
+}
+async function delAgent(n){
+  if(!confirm(`Delete agent "${n}"?`))return;
+  try{ await api('/config/agent/'+n,{method:'DELETE'}); loadPerms(); }
+  catch(e){ alert(e.message); }
+}
+async function saveFlow(){
+  const order=$('#f-order').value.split(',').map(s=>s.trim()).filter(Boolean);
+  const requires={};
+  $('#f-req').value.split('\n').forEach(l=>{
+    if(!l.trim())return; const [k,v]=l.split(':');
+    if(k&&v!==undefined) requires[k.trim()]=v.split(',').map(s=>s.trim()).filter(Boolean);
+  });
+  try{ await api('/config/flow',{method:'PUT',headers:{'content-type':'application/json'},
+         body:JSON.stringify({order,requires,supervisor_picks:$('#f-sup').checked})});
+       flash('fv','saved'); loadPerms(); }
+  catch(e){ flash('fv',e.message,true); }
+}
+async function saveTool(n){
+  try{ await api('/config/tool/'+n,{method:'PUT',headers:{'content-type':'application/json'},
+         body:JSON.stringify({description:$('#td-'+n).value})}); flash('tv-'+n,'saved'); }
+  catch(e){ flash('tv-'+n,e.message,true); }
+}
+async function resetTool(n){
+  await api('/config/tool/'+n,{method:'PUT',headers:{'content-type':'application/json'},
+    body:JSON.stringify({description:''})}); loadPerms();
+}
+async function saveCmds(confirmed){
+  const commands={};
+  for(const l of $('#cmds').value.split('\n')){
+    if(!l.trim())continue; const i=l.indexOf(':');
+    if(i<0){flash('cv','line missing ":" → '+l,true);return;}
+    commands[l.slice(0,i).trim()]=l.slice(i+1).trim().split(/\s+/).filter(Boolean);
+  }
+  try{
+    const r=await api('/config/commands',{method:'PUT',headers:{'content-type':'application/json'},
+      body:JSON.stringify({commands,confirm:confirmed})});
+    if(r.needs_confirmation){
+      if(confirm('Warning:\n\n'+r.warnings.join('\n\n')+'\n\nSave anyway?')) return saveCmds(true);
+      return;
+    }
+    flash('cv','saved'); loadPerms();
+  }catch(e){ flash('cv',e.message,true); }
+}
+async function resetAll(){
+  if(!confirm('Discard every override and return to the code defaults?'))return;
+  await api('/config/reset',{method:'POST'}); loadPerms();
+}
+async function showAudit(){
+  const {entries}=await api('/config/audit');
+  $('#auditbox').innerHTML=entries.length?`<div class="scroll"><table>
+    <tr><th>when</th><th>by</th><th>change</th></tr>
+    ${entries.map(e=>`<tr><td class="mono dim">${new Date(e.ts*1000).toLocaleString()}</td>
+      <td class="mono">${esc(e.by)}</td><td>${esc(e.change)}</td></tr>`).join('')}</table></div>`
+    : '<p class="note">No changes recorded.</p>';
+}
+Object.assign(window,{decide,showTrace,showKb,saveAgent,addAgent,delAgent,saveFlow,
+  saveTool,resetTool,saveCmds,resetAll,showAudit});
+
 </script></body></html>
