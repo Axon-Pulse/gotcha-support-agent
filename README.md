@@ -82,7 +82,8 @@ and it is refused at registration until an approval node is wired in front of it
 
 Six tabs: **Run** (mock sessions; watch each agent fire, with per-agent cache and token
 counts), **Approvals** (the queue — edit the markdown in place, then approve or reject),
-**Traces**, **Knowledge**, **Graph**, and **Tools & permissions**.
+**Traces**, **Knowledge** (edit runbook documents and create new ones), **Graph** (the
+diagram plus the flow editor), and **Tools & permissions**.
 
 The console sets `AGENT_MODE=mock` before importing anything, so it cannot touch the real
 system. Live runs stay a deliberate command-line act.
@@ -113,13 +114,24 @@ The **addressable node list stays read-only**: it is derived from the gotcha30 c
 named by `GOTCHA30_CONFIG`, with credential keys dropped during parsing. Point the agent
 at another deployment by changing that env var, not by typing hosts into a box.
 
+### Knowledge
+
+Documents are editable in place and new ones start from the Symptoms / Root cause /
+Checks / Fix skeleton the seeded runbook entries use. Names are kebab-case and every
+write is resolved against `kb/` before it lands, so a name cannot escape the directory.
+
+Because the whole of `kb/` is concatenated into the cached system prompt at session
+start, an edit reaches the **next** run, not one already in flight — and it invalidates
+the prompt cache, so the first session after an edit pays full input price once.
+
 ### Graph
 
 The **Graph** tab draws the execution graph: START → supervisor → agents (each looping
 back) → synthesize → the approval gate → `save` or END. Dashed amber edges are `requires`
 preconditions; green and red are the approve/reject branches. Agents defined but missing
 from `order` are greyed out, since the supervisor can never pick them. LangGraph's own
-mermaid export is included below the diagram.
+mermaid export is included below the diagram. The **flow editor** lives here too — editing
+the order or the `requires` preconditions redraws the diagram immediately.
 
 
 ## Prerequisites: `requires` vs `needs_context`

@@ -49,6 +49,12 @@ th{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--dim)
 .note{font-size:12.5px;color:var(--dim);margin-top:6px}
 .scroll{overflow-x:auto}
 ul.tight{margin:6px 0;padding-left:20px}
+.sec{display:flex;align-items:baseline;gap:10px;margin:34px 0 12px;padding-top:16px;
+  border-top:3px solid var(--fg);font-size:12px;font-weight:700;text-transform:uppercase;
+  letter-spacing:.1em}
+.sec:first-of-type{margin-top:8px}
+.sec em{font:400 12px/1 system-ui;color:var(--dim);text-transform:none;letter-spacing:0;
+  font-style:normal;margin-left:auto}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
 label.chk{display:inline-flex;align-items:center;gap:5px;margin:0 10px 4px 0;font:12.5px var(--mono)}
 textarea.p{min-height:92px}
@@ -217,21 +223,66 @@ async function showTrace(id){
 
 async function loadKb(){
   const {docs}=await api('/kb');
-  $('#kb').innerHTML=`<div class="card"><h3>Knowledge base</h3>
-    <p class="note">Loaded into the cached system prompt at session start. Add a file to <code>kb/</code> to extend it.</p>
-    <div class="scroll"><table><tr><th>document</th><th>size</th><th></th></tr>
-    ${docs.map(d=>`<tr><td class="mono">${esc(d.name)}</td><td class="dim">${d.bytes} B</td>
-      <td><button class="sm" onclick="showKb('${d.name}')">open</button></td></tr>`).join('')}
-    </table></div></div><div id="kbdetail"></div>`;
+  $('#kb').innerHTML=`
+   <div class="card"><h3>Knowledge base</h3>
+     <p class="note">Every document here is loaded into the cached system prompt at the start of
+       a session, so an edit reaches the next run — not one already in flight. Keep entries short
+       and symptom-first; this text competes for the model's attention with the findings.</p>
+     <div class="scroll"><table><tr><th>document</th><th>size</th><th></th></tr>
+     ${docs.map(d=>`<tr><td class="mono">${esc(d.name)}</td><td class="dim">${d.bytes} B</td>
+       <td><button class="sm" onclick="showKb('${esc(d.name)}')">edit</button>
+           <button class="sm no" onclick="delKb('${esc(d.name)}')">delete</button></td></tr>`).join('')}
+     </table></div>
+   </div>
+   <div class="card"><h3>New document</h3>
+     <div class="row"><input type="text" id="kbnew" placeholder="kebab-case-name (no .md)">
+       <button class="sm yes" onclick="newKb()">Create</button></div>
+     <p class="note">Starts from a Symptoms / Root cause / Checks / Fix skeleton, matching the
+       runbook entries seeded from <code>docs/launcher/troubleshooting.md</code>.</p>
+   </div>
+   <div id="kbdetail"></div>`;
 }
+
 async function showKb(n){
   const d=await api('/kb/'+n);
-  $('#kbdetail').innerHTML=`<div class="card"><h3>${esc(n)}.md</h3><pre>${esc(d.text)}</pre></div>`;
+  $('#kbdetail').innerHTML=`
+   <div class="card"><h3>${esc(n)}.md <span class="saved" id="kv"></span></h3>
+     <textarea id="kbtext" style="min-height:420px">${esc(d.text)}</textarea>
+     <div class="row" style="margin-top:8px">
+       <button class="sm yes" onclick="saveKb('${esc(n)}')">Save</button>
+       <button class="sm" onclick="showKb('${esc(n)}')">Revert</button>
+       <span class="note">Takes effect on the next session.</span>
+     </div>
+   </div>`;
+  $('#kbdetail').scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+
+async function saveKb(n){
+  try{ const r=await api('/kb/'+n,{method:'PUT',headers:{'content-type':'application/json'},
+         body:JSON.stringify({text:$('#kbtext').value})});
+       flash('kv',`saved · ${r.bytes} B`); loadKb(); }
+  catch(e){ flash('kv',e.message,true); }
+}
+
+async function newKb(){
+  const n=$('#kbnew').value.trim();
+  if(!n)return;
+  try{ await api('/kb',{method:'POST',headers:{'content-type':'application/json'},
+         body:JSON.stringify({name:n})});
+       await loadKb(); showKb(n); }
+  catch(e){ alert(e.message); }
+}
+
+async function delKb(n){
+  if(!confirm(`Delete ${n}.md? The agent will no longer see this guidance.`))return;
+  try{ await api('/kb/'+n,{method:'DELETE'}); $('#kbdetail').innerHTML=''; loadKb(); }
+  catch(e){ alert(e.message); }
 }
 
 // ---------------- graph ----------------
 async function loadGraph(){
-  const g = await api('/graph');
+  const [g,cfg] = await Promise.all([api('/graph'),api('/config')]);
+  const eff = cfg.effective;
   const N=(x,y,w,h,label,cls,sub)=>({x,y,w,h,label,cls,sub});
   const ags=g.agents, n=ags.length;
   const AW=124, AH=46, GAP=14;
@@ -312,9 +363,17 @@ async function loadGraph(){
         <code>order</code>, so the supervisor can never pick it — add it to the order to enable it.`:''}
     </p>
    </div>
-   <div class="card"><h3>Agent order</h3>
-     <div>${g.order.map((a,i)=>`<span class="step">${i+1}. ${esc(a)}</span>`).join('')}</div>
-     <p class="note">Edit ordering and preconditions in <b>Tools &amp; permissions</b>.</p>
+   <div class="card"><h3>Flow</h3>
+     <p class="note">Order is the sequence the supervisor may pick from. Requires is a hard
+       precondition it cannot violate — an agent is ineligible until its prerequisites have run.
+       Saving redraws the diagram above.</p>
+     <p class="dim" style="margin:8px 0 4px">Order (comma separated)</p>
+     <input type="text" id="f-order" value="${esc(eff.order.join(', '))}">
+     <p class="dim" style="margin:10px 0 4px">Requires — one per line, <code>agent: prereq, prereq</code></p>
+     <textarea id="f-req" style="min-height:76px">${esc(Object.entries(eff.requires).map(([k,v])=>`${k}: ${v.join(', ')}`).join('\n'))}</textarea>
+     <label class="chk" style="margin-top:8px"><input type="checkbox" id="f-sup" ${eff.supervisor_picks?'checked':''}>
+       supervisor picks the next agent (uncheck for a fixed pipeline)</label>
+     <div><button class="sm yes" onclick="saveFlow()">Save flow</button><span class="saved" id="fv"></span></div>
    </div>
    <div class="card"><h3>Mermaid export <span class="dim" style="font-weight:400">— from langgraph</span></h3>
      <pre>${esc(g.mermaid||'(unavailable)')}</pre></div>`;
@@ -351,31 +410,7 @@ async function loadPerms(){
    </div>`).join('');
 
   $('#perms').innerHTML=`
-   <div class="card"><h3>Configuration source</h3>
-     <p class="note">${over.length
-       ? `Overridden in <code>overrides.json</code>: <b>${over.map(esc).join(', ')}</b>. The file is
-          git-tracked and every change is appended to <code>config_audit.jsonl</code>.`
-       : 'All values are the code defaults. Edits below are written to <code>overrides.json</code>.'}</p>
-     <div class="row" style="margin-top:8px">
-       <button class="sm" onclick="showAudit()">View change log</button>
-       ${over.length?`<button class="sm no" onclick="resetAll()">Revert everything to code defaults</button>`:''}
-     </div>
-     <div id="auditbox"></div>
-   </div>
-
-   <div class="card"><h3>Flow</h3>
-     <p class="note">Order is the sequence the supervisor may pick from. Requires is a hard
-       precondition it cannot violate — an agent is ineligible until its prerequisites have run.</p>
-     <p class="dim" style="margin:8px 0 4px">Order (comma separated)</p>
-     <input type="text" id="f-order" value="${esc(eff.order.join(', '))}">
-     <p class="dim" style="margin:10px 0 4px">Requires — one per line, <code>agent: prereq, prereq</code></p>
-     <textarea id="f-req" style="min-height:76px">${esc(Object.entries(eff.requires).map(([k,v])=>`${k}: ${v.join(', ')}`).join('\n'))}</textarea>
-     <label class="chk" style="margin-top:8px"><input type="checkbox" id="f-sup" ${eff.supervisor_picks?'checked':''}>
-       supervisor picks the next agent (uncheck for a fixed pipeline)</label>
-     <div><button class="sm yes" onclick="saveFlow()">Save flow</button><span class="saved" id="fv"></span></div>
-   </div>
-
-   <h3 style="margin:18px 0 8px;font-size:13px">Agents</h3>
+   <h2 class="sec">Agents <em>routed by the supervisor · gather evidence with tools</em></h2>
    ${agentCards}
    <div class="card"><h3>Add an agent</h3>
      <div class="row"><input type="text" id="na" placeholder="name (lowercase, e.g. storage)">
@@ -383,7 +418,7 @@ async function loadPerms(){
      <p class="note">It is appended to the order with no prompt tools until you edit it.</p>
    </div>
 
-   <h3 style="margin:18px 0 8px;font-size:13px">Post-synthesis agents</h3>
+   <h2 class="sec">Post-synthesis agents <em>fixed position in the graph · no tools</em></h2>
    ${Object.entries(eff.post_agents||{}).map(([name,a])=>`
      <div class="card"><h3>${esc(name)} <span class="dim" style="font-weight:400;font-size:12px">
        — runs after synthesize, no tools</span></h3>
@@ -394,10 +429,11 @@ async function loadPerms(){
        <button class="sm yes" onclick="savePost('${esc(name)}')">Save prompt</button>
        <span class="saved" id="pv-${name}"></span></div>`).join('')}
 
-   <h3 style="margin:18px 0 8px;font-size:13px">Tool descriptions</h3>
+   <h2 class="sec">Tools <em>what the model reads to decide when to call them</em></h2>
    ${toolCards}
 
-   <div class="card ${Object.keys(eff.allowed_commands).length?'':''}"><h3>Allowed commands
+   <h2 class="sec">Permissions <em>what may run, and what may be addressed</em></h2>
+   <div class="card"><h3>Allowed commands
      ${over.includes('allowed_commands')?'<span class="badge">overridden</span>':''}</h3>
      <p class="note">The complete set of commands that may ever run in live mode. One per line,
        <code>key: binary arg arg</code>. No shell is used, so metacharacters are passed through
@@ -413,6 +449,19 @@ async function loadPerms(){
        credential keys dropped while parsing. Point the agent at a different deployment by changing
        that env var, not by typing hosts here — the config is the source of truth.</p>
      <pre>${esc(Object.values(META.permissions.inventory).map(n=>`${(n.name||'').padEnd(15)} ${(n.type||'').padEnd(22)} ${n.endpoint?(n.endpoint.scheme+'://'+n.endpoint.host+(n.endpoint.port?':'+n.endpoint.port:'')):'—'}`).join('\n'))}</pre>
+   </div>
+
+   <h2 class="sec">Configuration source <em>where these values come from</em></h2>
+   <div class="card">
+     <p class="note">${over.length
+       ? `Overridden in <code>overrides.json</code>: <b>${over.map(esc).join(', ')}</b>. The file is
+          git-tracked and every change is appended to <code>config_audit.jsonl</code>.`
+       : 'All values above are the code defaults. Edits are written to <code>overrides.json</code>.'}</p>
+     <div class="row" style="margin-top:8px">
+       <button class="sm" onclick="showAudit()">View change log</button>
+       ${over.length?`<button class="sm no" onclick="resetAll()">Revert everything to code defaults</button>`:''}
+     </div>
+     <div id="auditbox"></div>
    </div>`;
 }
 
@@ -447,7 +496,7 @@ async function saveFlow(){
   });
   try{ await api('/config/flow',{method:'PUT',headers:{'content-type':'application/json'},
          body:JSON.stringify({order,requires,supervisor_picks:$('#f-sup').checked})});
-       flash('fv','saved'); loadPerms(); }
+       flash('fv','saved'); loadGraph(); }
   catch(e){ flash('fv',e.message,true); }
 }
 async function savePost(n){
@@ -493,7 +542,7 @@ async function showAudit(){
       <td class="mono">${esc(e.by)}</td><td>${esc(e.change)}</td></tr>`).join('')}</table></div>`
     : '<p class="note">No changes recorded.</p>';
 }
-Object.assign(window,{decide,showTrace,showKb,saveAgent,addAgent,delAgent,saveFlow,savePost,
+Object.assign(window,{decide,showTrace,showKb,saveKb,newKb,delKb,saveAgent,addAgent,delAgent,saveFlow,savePost,
   saveTool,resetTool,saveCmds,resetAll,showAudit});
 
 </script></body></html>

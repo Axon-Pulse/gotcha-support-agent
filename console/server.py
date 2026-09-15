@@ -7,7 +7,9 @@ Permissions are deliberately not editable here. Their value is that widening the
 code change that shows up in a diff and a test run; a button that adds an allowed
 command is how that guarantee quietly dies.
 """
+import logging
 import os
+import re
 import threading
 import traceback
 import uuid
@@ -31,6 +33,7 @@ import transport  # noqa: E402
 from graph import build  # noqa: E402
 from registry import REGISTRY, load_tools  # noqa: E402
 
+log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parent.parent
 DB = str(ROOT / "graph.db")
 TRACES = ROOT / "traces"
@@ -365,6 +368,30 @@ def decide(sid: str, req: DecideReq) -> dict:
     return {"ok": True}
 
 
+_SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+
+
+def _kb_path(name: str, must_exist: bool = True) -> Path:
+    """Resolve a KB document name, refusing anything that escapes kb/."""
+    if not _SLUG.match(name or ""):
+        raise HTTPException(400, "name must be kebab-case: lowercase letters, digits, hyphens")
+    p = (KB / f"{name}.md").resolve()
+    if p.parent != KB.resolve():
+        raise HTTPException(400, "path escapes the knowledge base directory")
+    if must_exist and not p.exists():
+        raise HTTPException(404, "no such document")
+    return p
+
+
+class KbReq(BaseModel):
+    text: str
+
+
+class KbNewReq(BaseModel):
+    name: str
+    text: str = ""
+
+
 @app.get("/api/kb")
 def kb_list() -> dict:
     return {"docs": [{"name": p.stem, "bytes": p.stat().st_size}
@@ -373,10 +400,37 @@ def kb_list() -> dict:
 
 @app.get("/api/kb/{name}")
 def kb_doc(name: str) -> dict:
-    p = (KB / f"{name}.md").resolve()
-    if p.parent != KB.resolve() or not p.exists():
-        raise HTTPException(404, "no such document")
+    p = _kb_path(name)
     return {"name": name, "text": p.read_text()}
+
+
+@app.put("/api/kb/{name}")
+def kb_save(name: str, req: KbReq) -> dict:
+    """Edit a runbook document. It is re-read into the cached prompt on the next session."""
+    p = _kb_path(name)
+    p.write_text(req.text)
+    log.info("kb edited: %s (%d bytes)", p.name, len(req.text))
+    return {"ok": True, "name": name, "bytes": len(req.text)}
+
+
+@app.post("/api/kb")
+def kb_create(req: KbNewReq) -> dict:
+    p = _kb_path(req.name, must_exist=False)
+    if p.exists():
+        raise HTTPException(409, f"{req.name}.md already exists")
+    p.write_text(req.text or f"# {req.name.replace('-', ' ').title()}\n\n"
+                             "## Symptoms\n- \n\n## Root cause\n\n\n"
+                             "## Checks (read-only)\n    \n\n## Fix\n")
+    log.info("kb created: %s", p.name)
+    return {"ok": True, "name": req.name}
+
+
+@app.delete("/api/kb/{name}")
+def kb_delete(name: str) -> dict:
+    p = _kb_path(name)
+    p.unlink()
+    log.info("kb deleted: %s", p.name)
+    return {"ok": True}
 
 
 @app.get("/api/traces")
