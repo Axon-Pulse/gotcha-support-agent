@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parent
 PATH = ROOT / "overrides.json"
 AUDIT = ROOT / "config_audit.jsonl"
 
-KEYS = ("agents", "order", "requires", "supervisor_picks",
+KEYS = ("agents", "post_agents", "order", "requires", "supervisor_picks",
         "tool_descriptions", "allowed_commands")
 _NAME = re.compile(r"^[a-z][a-z0-9_]{0,40}$")
 
@@ -165,3 +165,18 @@ def validate_commands(cmds: dict) -> list[str]:
                 f"{key!r} contains shell metacharacters. They are NOT interpreted "
                 f"(no shell is used), so they will be passed through literally.")
     return warnings
+
+
+def validate_post_agents(post: dict) -> None:
+    """Post-synthesis agents transform text; they take no tools by design."""
+    if not isinstance(post, dict):
+        raise ConfigError("post_agents must be an object")
+    for name, spec in post.items():
+        if not _NAME.match(name):
+            raise ConfigError(f"post agent name {name!r} must be lowercase alphanumeric")
+        if not str((spec or {}).get("prompt", "")).strip():
+            raise ConfigError(f"post agent {name!r} needs a prompt")
+        if (spec or {}).get("tools"):
+            raise ConfigError(
+                f"post agent {name!r} cannot have tools — it runs after the evidence "
+                f"phase and only transforms the report")

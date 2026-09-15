@@ -29,13 +29,27 @@ class Scenario:
     fix: str
 
 
+def merge_context(a: dict, b: dict) -> dict:
+    """Later extractions win, but never overwrite a real value with an empty one."""
+    out = dict(a or {})
+    for k, v in (b or {}).items():
+        if v or k not in out:
+            out[k] = v
+    return out
+
+
 class S(TypedDict, total=False):
     question: str
     session_id: str
     findings: Annotated[list[Finding], operator.add]
     visited: Annotated[list[str], operator.add]
     transcript: Annotated[list[dict], operator.add]
+    # Facts extracted from findings, used to gate agents that depend on them.
+    # An agent whose needs_context is unmet can never be picked — see graph._eligible.
+    context: Annotated[dict, merge_context]
+    blocked: Annotated[list[dict], operator.add]
     next: str
     report: dict
+    customer_message: dict | None
     scenario: dict | None
     saved: bool

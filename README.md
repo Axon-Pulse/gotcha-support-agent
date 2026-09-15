@@ -120,3 +120,45 @@ back) → synthesize → the approval gate → `save` or END. Dashed amber edges
 preconditions; green and red are the approve/reject branches. Agents defined but missing
 from `order` are greyed out, since the supervisor can never pick them. LangGraph's own
 mermaid export is included below the diagram.
+
+
+## Prerequisites: `requires` vs `needs_context`
+
+`agents.py` declares two kinds of gate, both enforced in `graph._eligible()`:
+
+- **`requires`** — agent B cannot run until agent A has run at all. Pure ordering.
+- **`needs_context`** — agent B cannot run until a named fact has actually been
+  *extracted from tool output*. `network` needs `probe_targets`, so if `triage` runs but
+  every tool errors, `network` stays ineligible instead of probing the whole inventory on
+  a guess. The reason lands in `state["blocked"]` and reaches the report.
+
+Context is extracted by `graph._extract_context()` from the **structured tool payloads**,
+never from the model's prose — an agent that narrates "the radar looks unreachable"
+without a tool returning a node must not unlock the network agent.
+
+## Customer communicator
+
+`customer_communicator` runs between `synthesize` and the approval gate. It is a
+*post-synthesis* agent: it gathers no evidence, takes no tools, and is not in the
+supervisor pool — it rewrites the technical report as a client-facing message.
+
+Its draft is not trusted. `graph._scan_for_leaks()` checks it for IP addresses, node
+names, PIDs, paths, topic names, internal status fields, tool names and container names,
+and `safe_to_send` is false if any are found **or** if the report escalates or is
+low-confidence. "Do not leak internal identifiers" is the kind of instruction a model
+follows 95% of the time, and 95% is not good enough for outbound customer mail.
+
+## Slack
+
+`slack_app.py` is an **adapter, not a node**. The graph knows nothing about Slack; a test
+asserts `graph.py`, `agents.py` and `llm.py` never mention it.
+
+    pip install slack-sdk
+    export SLACK_BOT_TOKEN=xoxb-... SLACK_SIGNING_SECRET=... SLACK_INTERNAL_CHANNEL=C0...
+    uvicorn slack_app:app --port 3000
+
+Four things it handles that matter in production: the 3-second ACK (diagnosis runs in a
+background thread, Slack gets 200 immediately); deduplication on `event_id`, since Slack
+resends on timeout; routing the **approval interrupt to a staff channel, never the
+customer thread**; and holding a leaked or escalating draft for review instead of sending
+it, with the customer getting a neutral holding reply.

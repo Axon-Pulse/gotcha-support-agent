@@ -92,6 +92,23 @@ def run_agent(name: str, agent: dict, question: str, context: str = "",
     return "Reached the turn limit without concluding.", findings, usage
 
 
+def run_text_agent(agent: dict, user_content: str, max_tokens: int = 2000) -> tuple[str, dict]:
+    """A tool-less agent: text in, text out.
+
+    The evidence-gathering loop in run_agent() is wrong for transformation agents —
+    they have no tools, so the loop would hand the model an empty tool list.
+    """
+    r = client().messages.create(
+        model=MODEL, max_tokens=max_tokens,
+        thinking={"type": "adaptive"},
+        system=[{"type": "text", "text": agent["prompt"]}],
+        messages=[{"role": "user", "content": user_content}],
+    )
+    usage = {"input": r.usage.input_tokens, "output": r.usage.output_tokens,
+             "cache_read": getattr(r.usage, "cache_read_input_tokens", 0) or 0}
+    return "".join(b.text for b in r.content if b.type == "text").strip(), usage
+
+
 def ask_json(prompt: str, schema: dict, system: str = "") -> dict:
     """One-shot structured call via a forced tool, for routing and synthesis."""
     r = client().messages.create(

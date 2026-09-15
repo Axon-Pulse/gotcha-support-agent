@@ -181,6 +181,7 @@ def get_config() -> dict:
     return {"effective": {"agents": agents_mod.agents(), "order": agents_mod.order(),
                           "requires": agents_mod.requires(),
                           "supervisor_picks": agents_mod.supervisor_picks(),
+                          "post_agents": agents_mod.post_agents(),
                           "allowed_commands": transport.allowed(),
                           "tool_descriptions": config_store.get("tool_descriptions", {})},
             "defaults": {**agents_mod.defaults(),
@@ -222,6 +223,21 @@ def delete_agent(name: str) -> dict:
     config_store.put("order", order, note="drop from order")
     config_store.put("requires", req, note="drop from requires")
     rebuild_graph()
+    return {"ok": True}
+
+
+@app.put("/api/config/post_agent/{name}")
+def put_post_agent(name: str, req: DescReq) -> dict:
+    """Post-synthesis agents (e.g. customer_communicator) — prompt only, no tools."""
+    cur = dict(agents_mod.post_agents())
+    if name not in cur:
+        raise HTTPException(404, f"no post agent {name!r}")
+    cur[name] = {**cur[name], "prompt": req.description, "tools": []}
+    try:
+        config_store.validate_post_agents(cur)
+    except config_store.ConfigError as e:
+        raise _bad(e) from e
+    config_store.put("post_agents", cur, note=f"edit post agent {name}")
     return {"ok": True}
 
 
@@ -292,10 +308,14 @@ def graph_shape() -> dict:
     ranked = sorted(ags, key=lambda n: order.index(n) if n in order else 1e6)
     return {
         "agents": [{"name": n, "tools": ags[n].get("tools", []),
-                    "requires": req.get(n, []), "in_order": n in order}
+                    "requires": req.get(n, []), "in_order": n in order,
+                    "needs_context": agents_mod.needs_context().get(n, [])}
                    for n in ranked],
         "order": order,
         "supervisor_picks": agents_mod.supervisor_picks(),
+        "post_agents": [{"name": n, "prompt": a.get("prompt", "")}
+                        for n, a in agents_mod.post_agents().items()],
+        "needs_context": agents_mod.needs_context(),
         "max_steps": agents_mod.MAX_AGENT_STEPS,
         "mermaid": mermaid,
     }

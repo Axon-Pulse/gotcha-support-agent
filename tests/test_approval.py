@@ -23,6 +23,10 @@ def _stub(monkeypatch, propose=True):
     if propose:
         rep["propose_scenario"] = SCENARIO
     monkeypatch.setattr(G.llm, "ask_json", lambda **kw: rep)
+    # customer_communicator now sits between synthesize and the gate.
+    monkeypatch.setattr(G.llm, "run_text_agent",
+                        lambda *a, **k: ("A plain client update.",
+                                         {"input": 0, "output": 0, "cache_read": 0}))
 
 
 def _run(tmp_path, monkeypatch, decision, propose=True):
@@ -79,6 +83,8 @@ def test_scenario_id_cannot_escape_the_kb_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(G.llm, "ask_json", lambda **kw: {
         "root_cause": "x", "confidence": "high", "evidence": [], "suggested_actions": [],
         "escalate": False, "unknowns": [], "propose_scenario": evil})
+    monkeypatch.setattr(G.llm, "run_text_agent",
+                        lambda *a, **k: ("x", {"input": 0, "output": 0, "cache_read": 0}))
     g = G.build()
     with SqliteSaver.from_conn_string(str(tmp_path / "t.db")) as cp:
         app = g.compile(checkpointer=cp)

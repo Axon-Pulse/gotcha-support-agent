@@ -61,6 +61,7 @@ svg.g text{font:11px ui-monospace,Menlo,monospace;fill:var(--fg)}
 svg.g .lbl{font-size:10px;fill:var(--dim)}
 svg.g rect{fill:var(--card);stroke:var(--line);stroke-width:1.5}
 svg.g rect.ag{stroke:var(--accent)}
+svg.g rect.post{stroke:var(--ok)}
 svg.g rect.off{stroke:var(--line);stroke-dasharray:3 3;opacity:.55}
 svg.g rect.gate{stroke:var(--warn);stroke-dasharray:4 3}
 svg.g rect.term{fill:var(--bg)}
@@ -243,8 +244,11 @@ async function loadGraph(){
   ];
   ags.forEach((a,i)=>nodes.push(N(x0+i*(AW+GAP),150,AW,AH,a.name,a.in_order?'ag':'off',
     a.in_order?(a.tools.length+' tool'+(a.tools.length===1?'':'s')):'not in order')));
-  const yS=248, yP=310, ySave=378, yEnd=378;
+  const post=(g.post_agents||[]);
+  const yS=240, yC=post.length?302:0, yP=post.length?366:302,
+        ySave=yP+68, yEnd=ySave;
   nodes.push(N(cx-70,yS,140,34,'synthesize','','builds the report'));
+  post.forEach(pa=>nodes.push(N(cx-104,yC,208,38,pa.name,'post','rewrites it for the client')));
   nodes.push(N(cx-92,yP,184,38,'propose_scenario','gate','waits for you'));
   nodes.push(N(cx-186,ySave,110,30,'save','','writes kb/'));
   nodes.push(N(cx+80,yEnd,110,30,'END','term'));
@@ -268,7 +272,12 @@ async function loadGraph(){
              marker-end="url(#arw)"/>`;
   }));
   paths+=`<line x1="${cx}" y1="196" x2="${cx}" y2="${yS}" stroke-dasharray="3 3"/>`;
-  paths+=`<line x1="${cx}" y1="${yS+34}" x2="${cx}" y2="${yP}" marker-end="url(#ar)"/>`;
+  if(post.length){
+    paths+=`<line x1="${cx}" y1="${yS+34}" x2="${cx}" y2="${yC}" marker-end="url(#ar)"/>`;
+    paths+=`<line x1="${cx}" y1="${yC+38}" x2="${cx}" y2="${yP}" marker-end="url(#ar)"/>`;
+  } else {
+    paths+=`<line x1="${cx}" y1="${yS+34}" x2="${cx}" y2="${yP}" marker-end="url(#ar)"/>`;
+  }
   paths+=`<path class="yes" d="M ${cx-40} ${yP+38} C ${cx-40} ${ySave-14}, ${cx-131} ${ySave-14}, ${cx-131} ${ySave}" marker-end="url(#arg)"/>`;
   paths+=`<path class="no"  d="M ${cx+40} ${yP+38} C ${cx+40} ${yEnd-14}, ${cx+135} ${yEnd-14}, ${cx+135} ${yEnd}" marker-end="url(#arr)"/>`;
   paths+=`<line x1="${cx-131}" y1="${ySave+30}" x2="${cx-131}" y2="${ySave+52}"/>`;
@@ -292,6 +301,10 @@ async function loadGraph(){
       ${g.supervisor_picks?'(model-routed, constrained by order and requires)':'(fixed order — routing is off)'}.
       <span class="warn">Dashed amber between agents</span>: a <code>requires</code> precondition —
       the supervisor cannot pick an agent until its prerequisites have run.
+      ${ags.filter(a=>(a.needs_context||[]).length).map(a=>`<br><b>${esc(a.name)}</b> additionally
+        needs <code>${a.needs_context.map(esc).join(', ')}</code> to have been extracted from an
+        earlier agent's tool output — if that agent runs but its tools fail,
+        <b>${esc(a.name)}</b> stays blocked rather than probing blind.`).join('')}
       <span class="ok">Green</span>: you approved. <span class="bad">Red</span>: you rejected.
       <code>save</code> is the only node that writes, and it is reachable only through the gate.
       Ceiling of ${g.max_steps} agent steps per session.
@@ -370,6 +383,17 @@ async function loadPerms(){
      <p class="note">It is appended to the order with no prompt tools until you edit it.</p>
    </div>
 
+   <h3 style="margin:18px 0 8px;font-size:13px">Post-synthesis agents</h3>
+   ${Object.entries(eff.post_agents||{}).map(([name,a])=>`
+     <div class="card"><h3>${esc(name)} <span class="dim" style="font-weight:400;font-size:12px">
+       — runs after synthesize, no tools</span></h3>
+       <p class="note">Transforms the finished report. It gathers no evidence, so it is not in
+         the supervisor pool and takes no tools. Drafts are scanned for internal identifiers
+         before anything is sent.</p>
+       <textarea class="p" style="min-height:190px" id="pa-${name}">${esc(a.prompt)}</textarea>
+       <button class="sm yes" onclick="savePost('${esc(name)}')">Save prompt</button>
+       <span class="saved" id="pv-${name}"></span></div>`).join('')}
+
    <h3 style="margin:18px 0 8px;font-size:13px">Tool descriptions</h3>
    ${toolCards}
 
@@ -426,6 +450,11 @@ async function saveFlow(){
        flash('fv','saved'); loadPerms(); }
   catch(e){ flash('fv',e.message,true); }
 }
+async function savePost(n){
+  try{ await api('/config/post_agent/'+n,{method:'PUT',headers:{'content-type':'application/json'},
+         body:JSON.stringify({description:$('#pa-'+n).value})}); flash('pv-'+n,'saved'); }
+  catch(e){ flash('pv-'+n,e.message,true); }
+}
 async function saveTool(n){
   try{ await api('/config/tool/'+n,{method:'PUT',headers:{'content-type':'application/json'},
          body:JSON.stringify({description:$('#td-'+n).value})}); flash('tv-'+n,'saved'); }
@@ -464,7 +493,7 @@ async function showAudit(){
       <td class="mono">${esc(e.by)}</td><td>${esc(e.change)}</td></tr>`).join('')}</table></div>`
     : '<p class="note">No changes recorded.</p>';
 }
-Object.assign(window,{decide,showTrace,showKb,saveAgent,addAgent,delAgent,saveFlow,
+Object.assign(window,{decide,showTrace,showKb,saveAgent,addAgent,delAgent,saveFlow,savePost,
   saveTool,resetTool,saveCmds,resetAll,showAudit});
 
 </script></body></html>
