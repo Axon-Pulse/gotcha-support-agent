@@ -5,6 +5,9 @@ symptoms:
 - the acoustic sensor shows no tracks
 - acoustic sensor is critical but the machine is fine
 - no audio detections since start-up
+- the dashboard shows zeroes for the acoustic panel while everything else looks alive
+- operator says the web page does not make sense, or contradicts the launcher page
+- yaw and pitch both read zero and processing_status reads unknown
 ---
 
 # ASU backend was never reachable since start-up
@@ -35,6 +38,20 @@ with errors only recent.
     curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/
 
 `get_asu_service_status` does both and reports which of the four cases it is.
+
+## What the operator sees
+
+This arrives as a UI complaint far more often than as "the ASU is down", because the
+page is where the zeros surface. Every ASU value the dashboard renders is zero or
+`unknown` — `yaw`, `pitch`, `active_tracks`, `confirmed_tracks`, `tentative_tracks`,
+`average_confidence`, `processing_status` — while the launcher page in the same browser
+shows every node RUNNING and the radar panel updates normally. One dead panel among
+live ones reads to an operator as "the page is wrong", not as "a node has failed", so
+the ticket usually says nothing about the ASU at all.
+
+Confirmed a second time on the bench, 2026-09-16, with `request_count 440`,
+`success_count 0`, `asu_connected false` at `uptime_seconds 440` — same 1:1 ratio, and
+nothing listening on port 8000 (`ss -ltn`).
 
 ## Fix
 

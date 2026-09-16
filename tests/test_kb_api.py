@@ -527,3 +527,20 @@ def test_a_raw_body_is_still_accepted(client, tmp_path):
     client.post("/api/kb", json={"name": "raw", "topics": ["radar"], "symptoms": ["x"],
                                  "body": "# Raw\n\n## Root cause\n\nrc\n"})
     assert client.get("/api/kb/raw").json()["sections"]["root_cause"] == "rc"
+
+
+def test_asu_case_is_reachable_from_ui_side_wording():
+    """Tickets arrive in the operator's words, not the engineer's.
+
+    The ASU-backend case was recorded with sensor-side symptoms only, so a real ticket
+    about the dashboard scored zero against it while the fault was exactly that case.
+    Both vocabularies must reach it. (A query of only everyday short words still
+    matches nothing — that is _DISTINCTIVE working as designed, not a gap.)
+    """
+    from tools.kb import search_runbook
+    f = getattr(search_runbook, "__wrapped__", search_runbook)
+    for q in ("dashboard shows zeroes on the acoustic panel",
+              "operator says the page contradicts the launcher",
+              "processing_status unknown and yaw pitch zero"):
+        docs = [h["doc"] for h in f(q)["hits"]]
+        assert "asu-backend-never-reachable" in docs, f"{q!r} did not reach the case"

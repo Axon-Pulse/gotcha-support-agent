@@ -120,10 +120,11 @@ def test_the_page_no_longer_references_removed_surfaces():
 
 def test_the_page_wires_the_new_surfaces():
     for hook in ("loadInv", "renderFlow", "laneDrop", "addSym", "togglePw", "supCard",
-                 'data-t="inv"', "renderView", "viewSys", "addComp", "setRole",
+                 'data-t="inv"', "renderView", "viewSys", "addComp",
                  "roleTag", "ins-before", "flowProblems", "togglePerm", "renderPerms",
                  "firstSentence", "toggleTopic", "addTopic", "renderTopics",
-                 "closeKb", "toggleKb", "removeTopic", "renderRemovable"):
+                 "closeKb", "toggleKb", "removeTopic", "renderRemovable",
+                 "nextName", "toggleSec"):
         assert hook in HTML, f"missing {hook}"
 
 
@@ -131,7 +132,7 @@ def test_inventory_is_the_last_tab():
     nav = HTML[HTML.index("<nav id=\"tabs\">"):HTML.index("</nav>")]
     order = re.findall(r'data-t="(\w+)"', nav)
     assert order[-1] == "inv", f"tab order is {order}"
-    assert order[:2] == ["run", "approvals"]
+    assert order[:2] == ["run", "chat"], "the two ways to ask a question come first"
     # The section list drives which panel is shown; it must agree with the nav.
     js = re.search(r"\['run',([^\]]+)\]\.forEach\(t=>\$\('#'\+t\)", HTML).group(0)
     assert js.index("'inv'") > js.index("'perms'")
@@ -189,6 +190,11 @@ def test_adding_a_topic_goes_to_the_server_not_just_the_tab():
     assert "TOPICS_ALL=r.all_topics" in HTML, "the list comes back from the server"
 
 
+def test_adding_a_case_is_the_first_thing_on_the_knowledge_page():
+    kb = HTML[HTML.index("async function loadKb()"):HTML.index("async function showKb(")]
+    assert kb.index("Add a case by hand") < kb.index("Recorded cases") < kb.index("sysmodel")
+
+
 def test_the_system_model_is_last_and_folded_away():
     """Reference material, not the working surface: cases come first, this stays shut."""
     kb = HTML[HTML.index("async function loadKb()"):HTML.index("async function showKb(")]
@@ -198,10 +204,58 @@ def test_the_system_model_is_last_and_folded_away():
     assert kb.index("Add a case by hand") < kb.index("sysmodel"), "it is last on the page"
 
 
+def test_adding_a_system_is_the_first_thing_on_the_inventory_page():
+    inv = HTML[HTML.index("function renderInv()"):HTML.index("// ---- read-only summary")]
+    assert inv.index("Add a system") < inv.index("<h3>Systems</h3>") < inv.index("What the agent sees")
+
+
+def test_a_system_expands_in_place_under_its_own_row():
+    """A detail card further down the page loses the connection to what you clicked."""
+    assert 'id="sysinline"' in HTML and 'tr class="detail"' in HTML
+    assert 'id="sysdetail"' not in HTML, "the separate card below the table is gone"
+    assert "function toggleSys(n)" in HTML, "clicking the open row collapses it"
+    assert 'id="sysnew"' in HTML, "a brand new system has no row to expand under"
+
+
+def test_the_system_name_is_editable_and_not_duplicated():
+    """The row above already shows the name and site; the panel should not repeat them."""
+    assert "fld(3,'Name'" in HTML, "the edit form has a Name field"
+    assert "EDIT.name=this.value" in HTML
+    assert "new_name:(EDIT.name||'').trim()" in HTML, "rename is sent, not a second system"
+    assert "'/inventory/system/'+EDIT.orig" in HTML, "the URL addresses the current name"
+    view = HTML[HTML.index("function renderView()"):HTML.index("// ---- dense editor ----")]
+    assert "esc(sy.site)" not in view, "site is already on the row"
+
+
+def test_the_row_carries_edit_delete_and_close():
+    inv = HTML[HTML.index("function renderInv()"):HTML.index("// ---- read-only summary")]
+    assert 'class="acts"' in inv
+    for label in (">Edit<", ">Delete<"):
+        assert label in inv, f"the row should carry {label}"
+    assert "${open?'Close':'Open'}" in inv
+
+
+def test_a_system_is_grouped_into_categories():
+    """Radar, camera, acoustic, computers — a view over role and domain, not a schema
+    change: the stored model and the agent-facing inventory are untouched."""
+    assert "const SECTIONS=[" in HTML
+    for key in ("'radar'", "'camera'", "'acoustic'", "'computers'", "'other'"):
+        assert key in HTML
+    assert "function sectionOf(c)" in HTML and "function bucket(comps)" in HTML
+    assert "addComp('${sec.key}')" in HTML, "each section adds into itself"
+
+
 def test_view_and_edit_are_distinct_modes():
-    """Clicking a system must not drop straight into the editor."""
-    assert "function viewSys(n){ VIEW=n; EDIT=null;" in HTML
-    assert 'onclick="editSys(' in HTML, "an explicit Edit button toggles the dense mode"
+    """Clicking a system must not drop straight into the editor.
+
+    Asserted on the function body rather than one exact line — the formatting is not
+    the contract, and the harness covers the behaviour itself.
+    """
+    fn = HTML[HTML.index("function viewSys(n){"):HTML.index("function toggleSys(n)")]
+    assert "EDIT=null" in fn, "opening a system must leave the editor closed"
+    # The Edit button lives on the row now, so its handler carries a stopPropagation
+    # guard — match the call, not the whole attribute.
+    assert "editSys('" in HTML, "an explicit Edit button toggles the dense mode"
 
 
 # ---------- credentials: an API key is not the only way in ----------

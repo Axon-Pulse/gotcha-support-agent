@@ -24,7 +24,12 @@ import inventory
 
 DEFAULT_ALLOWED: dict[str, tuple[str, ...]] = {
     "topology": ("ecal_mon_cli", "-l"),
-    "health":   ("ecal_mon_cli", "--proto", "/system/health", "-c", "40"),
+    # -c must be reachable inside TIMEOUTS["health"] at the rate being sampled, or the
+    # capture is cut mid-stream and loses whatever sat in an unflushed stdio block.
+    # Measured on the bench: 6 nodes, one health message each per 4-8s, ~1.1 msg/s
+    # aggregate. 24 messages arrive in ~22s — under the 30s net, and 2-4 samples per
+    # node, enough for _cluster() to tell two launcher sessions from one.
+    "health":   ("ecal_mon_cli", "--proto", "/system/health", "-c", "24"),
     "launcher": ("ecal_mon_cli", "--proto", "/launcher/status", "-c", "2"),
     # The ASU backend is a local Docker service, not a sensor on the LAN. `-a` is
     # load-bearing: without it an exited container is invisible, and "absent" and
@@ -68,12 +73,25 @@ FIXTURES = {
     "tower_status": "tower_status.txt",
 }
 
+DEFAULT_TIMEOUT = 10
+# Per-key timeout, seconds. The default suits a command that answers immediately.
+# A streaming capture instead needs a window sized to the publish rate it samples:
+# too short and the tool reports a thin sample as if it were the whole system, which
+# is how a CRITICAL node once hid behind a one-sample capture. Keep in step with any
+# `-c` count above — the count should bind first, the timeout is only the safety net.
+TIMEOUTS: dict[str, int] = {"health": 30}
+
 MODE = os.environ.get("AGENT_MODE", "mock")
 FIXTURE_DIR = Path(os.environ.get("FIXTURE_DIR", "tests/fixtures"))
 
 
-def run(key: str, timeout: int = 10) -> str:
-    """Run an allowlisted command (live) or read its fixture (mock)."""
+def run(key: str, timeout: int | None = None) -> str:
+    """Run an allowlisted command (live) or read its fixture (mock).
+
+    `timeout` defaults per key: see TIMEOUTS.
+    """
+    if timeout is None:
+        timeout = TIMEOUTS.get(key, DEFAULT_TIMEOUT)
     table = allowed()
     if key not in table:
         raise KeyError(f"command {key!r} is not allowlisted: {sorted(table)}")

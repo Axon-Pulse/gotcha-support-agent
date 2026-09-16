@@ -1,0 +1,34 @@
+# A deployment config in the shape inventory._gotcha30_nodes() parses.
+#
+# The suite used to read the operator's live /home/gal/Documents/code/gotcha30 config.
+# That file is theirs to rename or delete — and when two_sensor_test.yaml disappeared on
+# 2026-09-16 it took 14 tests with it, plus every import of tools/. Node identity that
+# tests assert on belongs here, in the repo, under version control.
+#
+# Two properties the routing tests depend on, both deliberate:
+#   * `magos` and `asu` carry the CONFIG spelling of their type. The health proto uses
+#     the reversed spelling (radar_magos, acoustic_asu), and the tests assert the two
+#     genuinely disagree — that is why graph.DOMAINS is a set and not a substring rule.
+#   * `tracker` has no ip and no base_url, so it is not probeable. `magos` has one.
+version: 1
+
+nodes:
+  sensors:
+    magos:
+      type: magos_radar
+      config:
+        ip: 192.168.1.50
+        port: 8080
+        password: not-a-real-secret-and-must-never-survive-the-walk
+    asu:
+      type: asu
+      config:
+        base_url: http://localhost:8000
+  processing:
+    tracker:
+      type: python_tracker
+      config:
+        max_age: 30
+    event_manager:
+      type: python_event_manager
+      config: {}

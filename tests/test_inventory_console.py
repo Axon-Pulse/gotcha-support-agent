@@ -279,3 +279,161 @@ def test_a_pre_existing_bad_block_does_not_veto_an_unrelated_edit(client, tmp_pa
          "ssh": {"user": "ops", "key_file": "~/.ssh/k"}}]})
     assert r.status_code == 200, r.text
     assert "good" in inventory.names() and "broken" in inventory.names()
+
+
+# ---------- 8. renaming a system ----------
+
+def test_a_system_can_be_renamed(client, tmp_path):
+    """The URL addresses what exists; new_name carries the change."""
+    _put(client)
+    r = client.put("/api/inventory/system/tower1",
+                   json={**SYS, "new_name": "mast-north"}).json()
+    assert r["name"] == "mast-north", "the caller needs the new name to re-open the row"
+    assert [s["name"] for s in r["systems"]] == ["mast-north"]
+    assert "tower1:" not in (tmp_path / "systems_inventory.yaml").read_text()
+
+
+def test_renaming_keeps_the_system_in_place(client):
+    """Otherwise a rename jumps to the end of the file and the diff is unreadable."""
+    _put(client, "alpha")
+    _put(client, "beta", {"sensors": [{"name": "b1", "type": "x", "address": "10.0.0.2"}]})
+    _put(client, "gamma", {"sensors": [{"name": "g1", "type": "x", "address": "10.0.0.3"}]})
+    r = client.put("/api/inventory/system/beta", json={
+        "new_name": "bravo",
+        "sensors": [{"name": "b1", "type": "x", "address": "10.0.0.2"}]}).json()
+    assert [s["name"] for s in r["systems"]] == ["alpha", "bravo", "gamma"]
+
+
+def test_renaming_does_not_orphan_a_stored_secret(client, tmp_path):
+    """password_env is derived from the COMPONENT name, which a rename does not touch."""
+    _put(client)
+    assert "MAGOS_SSH_PW" in (tmp_path / "secrets.local.env").read_text()
+    client.put("/api/inventory/system/tower1", json={
+        "new_name": "mast-north",
+        "sensors": [{**SYS["sensors"][0],
+                     "ssh": {"user": "magos", "password_env": "MAGOS_SSH_PW"}}]})
+    assert "MAGOS_SSH_PW" in (tmp_path / "secrets.local.env").read_text()
+    assert inventory.credentials("magos")["password"].reveal() == PW
+
+
+def test_renaming_onto_an_existing_name_is_refused(client, tmp_path):
+    _put(client, "tower1")
+    _put(client, "tower2", {"sensors": [{"name": "m2", "type": "x", "address": "10.0.0.9"}]})
+    before = (tmp_path / "systems_inventory.yaml").read_text()
+    r = client.put("/api/inventory/system/tower2",
+                   json={"new_name": "tower1", "sensors": []})
+    assert r.status_code == 409 and "already exists" in r.text
+    assert (tmp_path / "systems_inventory.yaml").read_text() == before
+
+
+@pytest.mark.parametrize("bad", ["Mast North", "", "../etc", "a" * 80, "-x"])
+def test_renaming_to_a_bad_name_is_refused(client, bad):
+    _put(client)
+    assert client.put("/api/inventory/system/tower1",
+                      json={**SYS, "new_name": bad}).status_code == 400
+    assert "tower1" in [s["name"] for s in client.get("/api/inventory").json()["systems"]]
+
+
+def test_omitting_new_name_is_a_plain_update(client):
+    _put(client)
+    r = client.put("/api/inventory/system/tower1",
+                   json={**SYS, "site": "elsewhere"}).json()
+    assert r["name"] == "tower1" and r["systems"][0]["site"] == "elsewhere"
+
+
+# ---------- 9. the simplified component form ----------
+
+def test_a_web_address_is_stored_and_reaches_the_agent(client, tmp_path):
+    """Not a credential — it is where a human goes to look, and worth the agent knowing."""
+    _put(client, "t", {"components": [
+        {"name": "1", "type": "meduza_optic", "role": "sensor", "domain": "camera",
+         "address": "192.168.40.71", "web": "http://192.168.40.71:5173"}]})
+    assert "web: http://192.168.40.71:5173" in (tmp_path / "systems_inventory.yaml").read_text()
+    assert inventory.require("1")["web"] == "http://192.168.40.71:5173"
+    assert client.get("/api/inventory").json()["systems"][0]["components"][0]["web"] \
+        == "http://192.168.40.71:5173"
+
+
+def test_a_username_is_still_an_ssh_user_underneath(client, tmp_path):
+    """The label changed; the storage did not, so credentials() and run_on keep working."""
+    _put(client, "t", {"components": [
+        {"name": "1", "type": "x", "role": "compute", "address": "10.0.0.5",
+         "ssh": {"user": "ops", "password": "pw"}}]})
+    assert "user: ops" in (tmp_path / "systems_inventory.yaml").read_text()
+    assert inventory.credentials("1")["user"] == "ops"
+    assert inventory.credentials("1")["port"] == 22, "the default still applies"
+
+
+def test_a_component_with_no_scheme_defaults_to_tcp(client):
+    """Scheme is no longer typed by hand; the section sets it or the default applies."""
+    _put(client, "t", {"components": [
+        {"name": "1", "type": "x", "role": "other", "address": "10.0.0.5"}]})
+    assert inventory.require("1")["endpoint"]["scheme"] == "tcp"
+
+
+def test_numeric_component_names_are_accepted(client):
+    """The form numbers them 1, 2, 3 — the slug rules must allow that."""
+    r = _put(client, "t", {"components": [
+        {"name": "1", "type": "x", "role": "other", "address": "10.0.0.1"},
+        {"name": "2", "type": "x", "role": "other", "address": "10.0.0.2"}]})
+    assert [c["name"] for c in r["systems"][0]["components"]] == ["1", "2"]
+
+
+def test_a_number_reused_across_systems_is_still_refused(client):
+    """Which is why the form numbers from the whole inventory, not per system."""
+    _put(client, "t1", {"components": [
+        {"name": "1", "type": "x", "role": "other", "address": "10.0.0.1"}]})
+    r = client.put("/api/inventory/system/t2", json={"components": [
+        {"name": "1", "type": "x", "role": "other", "address": "10.0.0.2"}]})
+    assert r.status_code == 400 and "defined twice" in r.text
+
+
+# ---------- 10. a save must not be blocked or lost by what the form cannot see ----------
+
+BAD_PORT = ("version: 1\nsystems:\n  t1:\n    components:\n"
+            "      a:\n        type: x\n        address: 10.0.0.1\n"
+            "      b:\n        type: y\n        address: 10.0.0.2\n"
+            "        access:\n          ssh:\n            port: -1\n")
+
+
+def test_a_bad_value_the_form_cannot_show_does_not_block_a_save(client, tmp_path):
+    """The reported bug: editing component `a` failed because `b` carried an SSH port
+    of -1 — a field the editor no longer has, so it could not be seen or fixed."""
+    (tmp_path / "systems_inventory.yaml").write_text(BAD_PORT)
+    import console.server as srv
+    srv._reload_inventory()
+    r = client.put("/api/inventory/system/t1", json={"components": [
+        {"name": "a", "type": "x", "role": "other", "address": "10.0.0.1",
+         "hardware": "Magos AR-300"},
+        {"name": "b", "type": "y", "role": "other", "address": "10.0.0.2"}]})
+    assert r.status_code == 200, r.text
+    comps = {c["name"]: c for c in r.json()["systems"][0]["components"]}
+    assert comps["a"]["hardware"] == "Magos AR-300", "the edit must actually land"
+
+
+def test_ssh_settings_the_form_does_not_edit_survive_a_save(client, tmp_path):
+    """Port and key file are no longer fields; a save must carry them forward."""
+    (tmp_path / "systems_inventory.yaml").write_text(
+        "version: 1\nsystems:\n  t1:\n    components:\n      a:\n        type: x\n"
+        "        address: 10.0.0.1\n        access:\n          ssh:\n"
+        "            user: ops\n            port: 2222\n            key_file: ~/.ssh/k\n")
+    import console.server as srv
+    srv._reload_inventory()
+    client.put("/api/inventory/system/t1", json={"components": [
+        {"name": "a", "type": "x", "role": "other", "address": "10.0.0.1",
+         "hardware": "new model", "ssh": {"user": "ops"}}]})
+    creds = inventory.credentials("a")
+    assert creds["port"] == 2222, "the SSH port was not carried forward"
+    assert creds["key_file"].endswith(".ssh/k"), "the key file was not carried forward"
+    assert inventory.require("a")["hardware"] == "new model"
+
+
+def test_clearing_the_username_still_clears_it(client, tmp_path):
+    """Carrying values forward must not make a field impossible to empty."""
+    _put(client, "t1", {"components": [
+        {"name": "a", "type": "x", "role": "other", "address": "10.0.0.1",
+         "ssh": {"user": "ops", "key_file": "~/.ssh/k"}}]})
+    assert inventory.credentials("a")["user"] == "ops"
+    client.put("/api/inventory/system/t1", json={"components": [
+        {"name": "a", "type": "x", "role": "other", "address": "10.0.0.1"}]})
+    assert not inventory.has_credentials("a")

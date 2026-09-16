@@ -159,6 +159,35 @@ def _row(nid: str, group: list[dict]) -> dict:
     }
 
 
+def _capture_note(messages: int) -> dict | None:
+    """Flag a stream that was cut short, so absence is not read as evidence.
+
+    /system/health is a slow stream: each node publishes every few seconds, so a
+    window too short for the allowlisted `-c` returns a partial view in which a node
+    is missing simply because its turn had not come round. That is indistinguishable
+    from a dead node unless we say so — and it has already hidden a CRITICAL node
+    behind a single-sample capture. Only meaningful live; a fixture is whatever it is.
+    """
+    if transport.MODE != "live":
+        return None
+    argv = transport.allowed().get("health", ())
+    try:
+        want = int(argv[argv.index("-c") + 1])
+    except (ValueError, IndexError):
+        return None
+    if messages >= want:
+        return None
+    return {
+        "messages": messages, "requested": want, "complete": False,
+        "warning": (
+            f"capture returned {messages} of {want} requested messages, so it was cut "
+            "short. Nodes publish /system/health seconds apart: a node absent from this "
+            "list may simply not have published inside the window. Do not read absence "
+            "as failure — re-run, or raise transport.TIMEOUTS['health']."
+        ),
+    }
+
+
 @tool({
     "name": "get_system_health",
     "description": (
@@ -193,5 +222,9 @@ def get_system_health() -> dict:
     counts: dict[str, int] = {}
     for r in rows:
         counts[r["status"]] = counts.get(r["status"], 0) + 1
-    return {"samples": len(parsed), "node_count": len(by_node), "row_count": len(rows),
-            "duplicate_instance_nodes": dup, "status_counts": counts, "nodes": rows}
+    out = {"samples": len(parsed), "node_count": len(by_node), "row_count": len(rows),
+           "duplicate_instance_nodes": dup, "status_counts": counts, "nodes": rows}
+    note = _capture_note(len(parsed))
+    if note:
+        out["capture"] = note
+    return out

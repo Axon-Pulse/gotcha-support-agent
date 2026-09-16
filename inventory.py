@@ -48,7 +48,7 @@ _INLINE_SECRET_KEYS = {
 # Everything the model may see about a system. An allowlist, not a denylist: a key
 # nobody anticipated cannot ride along into a prompt by being added to the YAML.
 _PUBLIC_FIELDS = ("name", "type", "role", "domain", "group", "system", "description",
-                  "hardware", "software_version", "endpoint")
+                  "hardware", "software_version", "web", "endpoint")
 
 # A system holds more than sensors: the compute box that runs the stack, the switch the
 # sensors hang off, the laptop an engineer left on site. They are addressable and worth
@@ -135,8 +135,19 @@ def _endpoint(cfg: dict) -> dict | None:
 
 
 def _gotcha30_nodes() -> dict[str, dict]:
-    """Nodes the launcher runs. Credentials are dropped during the walk, not after."""
-    doc = _load(REPO / CONFIG)
+    """Nodes the launcher runs. Credentials are dropped during the walk, not after.
+
+    An absent deployment config is a normal state, not a crash: a fresh checkout, a
+    different machine, or an operator who renamed the config they were running. It used
+    to raise FileNotFoundError out of a module-level `@tool` decorator, which took down
+    every import of tools/ — console, tests and agents alike — for a missing optional
+    file. Degrade to "no nodes known from config" instead; the systems file still
+    overlays on top, so an explicitly inventoried system stays addressable.
+    """
+    path = REPO / CONFIG
+    if not path.exists():
+        return {}
+    doc = _load(path)
     out: dict[str, dict] = {}
     for group, members in (doc.get("nodes") or {}).items():
         if not isinstance(members, dict):
@@ -251,6 +262,9 @@ def _systems() -> dict[str, dict]:
             "description": spec.get("description") or sys_spec.get("description"),
             "hardware": spec.get("hardware"),
             "software_version": spec.get("software_version"),
+            # A device's own web UI. Not a secret, and useful to say "the dashboard is
+            # on :5173" — so it is on the allowlist deliberately, not by omission.
+            "web": spec.get("web"),
             "endpoint": _system_endpoint(spec)}
     return out
 

@@ -9,3 +9,5 @@ config_audit.jsonl
 # tests/fixtures/systems_inventory.yaml, which must be committed.
 /secrets.local.env
 /systems_inventory.yaml
+# transient console<->chat queue; traces/ keeps the durable record
+/bridge/

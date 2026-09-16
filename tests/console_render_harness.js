@@ -9,10 +9,11 @@ const mk=()=>({innerHTML:'',textContent:'',value:'',type:'text',hidden:false,dat
 const els={};                     // stable per selector, so rendered HTML is inspectable
 const el=sel=>els[sel]||(els[sel]=mk());
 const sandbox={console,setTimeout,clearInterval,setInterval,Promise,JSON,Math,Number,Object,Date,
-  alert:()=>{},confirm:()=>true,
+  alert:()=>{},confirm:()=>sandbox.__confirm,
   fetch:()=>Promise.resolve({ok:true,json:async()=>({})}),
   document:{querySelector:sel=>el(sel),querySelectorAll:()=>[],getElementById:id=>el('#'+id)}};
 sandbox.window=sandbox;
+sandbox.__confirm=true;          // what confirm() answers; flipped per check
 vm.createContext(sandbox);
 const html=fs.readFileSync(path.join(__dirname,'..','console','index.html'),'utf8');
 const js=html.split('</div><script>')[1].split('</script>')[0];
@@ -223,28 +224,161 @@ sandbox.systems=sandbox.INV.systems;
 check('renderInv (list)',()=>sandbox.renderInv());
 check('viewSys → read-only summary',()=>{sandbox.viewSys('tower1');
   if(sandbox.EDIT)throw new Error('view mode must not open the editor')});
+check('the detail expands in place, not in a card below',()=>{
+  sandbox.viewSys('tower1');
+  const inline=sandbox.document.querySelector('#sysinline').innerHTML;
+  if(!inline.includes('magos'))throw new Error('detail did not render into the row');
+  const list=sandbox.document.querySelector('#inv').innerHTML;
+  if(list.includes('id="sysdetail"'))throw new Error('the separate card is still there');
+  if(!list.includes('id="sysinline"'))throw new Error('no inline row was emitted');});
+check('toggleSys closes the system already open',()=>{
+  sandbox.viewSys('tower1'); sandbox.toggleSys('tower1');
+  if(sandbox.VIEW!==null)throw new Error('second click did not collapse it');});
+check('a new system edits under the Add box, not in a row',()=>{
+  sandbox.document.querySelector('#newsys').value='tower2';
+  sandbox.newSys();
+  if(!sandbox.EDIT||!sandbox.EDIT.isNew)throw new Error('new editor not opened');
+  if(!sandbox.document.querySelector('#sysnew').innerHTML.includes('New system'))
+    throw new Error('new-system form did not render into #sysnew');
+  sandbox.EDIT=null; sandbox.VIEW=null;});
 check('editSys → dense editor',()=>{sandbox.editSys('tower1');
   if(!sandbox.EDIT)throw new Error('edit mode not entered');
   if(sandbox.EDIT.components.length!==5)throw new Error('components not copied')});
 check('every role renders',()=>{sandbox.renderEdit()});
-check('setRole refreshes the type list',()=>{sandbox.setRole(3,'network');
-  if(sandbox.EDIT.components[3].role!=='network')throw new Error('role not set')});
-check('addComp/rmComp',()=>{sandbox.addComp();
-  if(sandbox.EDIT.components.length!==6)throw new Error('add failed');
-  sandbox.rmComp(5);
-  if(sandbox.EDIT.components.length!==5)throw new Error('remove failed')});
-check('component with no ssh renders',()=>{sandbox.EDIT.components[3].ssh={};sandbox.renderEdit()});
+check('components bucket into their categories',()=>{
+  const g=sandbox.bucket([
+    {name:'r1',role:'sensor',domain:'radar'},
+    {name:'c1',role:'sensor',domain:'camera'},
+    {name:'a1',role:'sensor',domain:'acoustic'},
+    {name:'e1',role:'compute'},{name:'l1',role:'laptop'},
+    {name:'s1',role:'network'},{name:'x1',role:'sensor'}]);
+  const got=Object.fromEntries(Object.entries(g).map(([k,v])=>[k,v.map(o=>o.c.name)]));
+  const want={radar:['r1'],camera:['c1'],acoustic:['a1'],computers:['e1','l1'],
+              other:['s1','x1']};
+  if(JSON.stringify(got)!==JSON.stringify(want))
+    throw new Error('bucketing: '+JSON.stringify(got));});
+check('nothing can fall outside a section',()=>{
+  const odd=[{name:'q',role:'power'},{name:'z',role:'other',domain:'hydraulics'}];
+  const total=Object.values(sandbox.bucket(odd)).reduce((n,v)=>n+v.length,0);
+  if(total!==odd.length)throw new Error('a component was hidden');});
+check('sections render in view mode',()=>{
+  sandbox.viewSys('tower1');
+  const html=sandbox.document.querySelector('#sysinline').innerHTML;
+  for(const label of ['Radar','Camera','Acoustic','Computers'])
+    if(!html.includes('>'+label+'<'))throw new Error('missing section '+label);});
+check('a section with nothing in it still offers to add',()=>{
+  sandbox.editSys('tower1'); sandbox.renderEdit();
+  const html=sandbox.document.querySelector('#sysinline').innerHTML;
+  if(!html.includes("addComp('camera')"))throw new Error('no add button for camera');});
+check('adding lands in the section clicked, with its defaults',()=>{
+  sandbox.editSys('tower1');
+  const before=sandbox.EDIT.components.length;
+  sandbox.addComp('camera');
+  const c=sandbox.EDIT.components[sandbox.EDIT.components.length-1];
+  if(sandbox.EDIT.components.length!==before+1)throw new Error('not added');
+  if(c.domain!=='camera'||c.role!=='sensor')throw new Error('wrong defaults: '+JSON.stringify(c));
+  if(sandbox.sectionOf(c)!=='camera')throw new Error('landed in the wrong section');});
+check('adding a computer defaults to the compute role',()=>{
+  sandbox.editSys('tower1'); sandbox.addComp('computers');
+  const c=sandbox.EDIT.components[sandbox.EDIT.components.length-1];
+  if(c.role!=='compute'||c.domain)throw new Error('wrong defaults: '+JSON.stringify(c));});
+check('toggleSec opens and closes a section',()=>{
+  sandbox.editSys('tower1'); sandbox.SEC_OPEN.clear();
+  sandbox.toggleSec('radar');
+  if(!sandbox.SEC_OPEN.has('radar'))throw new Error('not opened');
+  sandbox.toggleSec('radar');
+  if(sandbox.SEC_OPEN.has('radar'))throw new Error('not closed');});
+check('the form has no role, domain, scheme or ssh plumbing',()=>{
+  sandbox.editSys('tower1'); sandbox.SEC_OPEN=new Set(['radar','camera','acoustic','computers','other']);
+  sandbox.renderEdit();
+  const html=sandbox.document.querySelector('#sysinline').innerHTML;
+  for(const gone of ['SSH user','SSH port','Key file','>Scheme<','>Role<','>Domain<'])
+    if(html.includes(gone))throw new Error('still showing '+gone);
+  for(const want of ['>Username<','>Web address<','>Password<','>Name<'])
+    if(!html.includes(want))throw new Error('missing '+want);});
+check('empty fields read as "-", not as a worked example',()=>{
+  const html=sandbox.document.querySelector('#sysinline').innerHTML;
+  // as PLACEHOLDERS — the same strings are legitimate as stored values
+  for(const example of ['2.4.1','Magos AR-300','192.168.40.60','e.g. magos'])
+    if(html.includes('placeholder="'+example+'"'))
+      throw new Error('placeholder still suggests '+example);
+  if(!html.includes('placeholder="-"'))throw new Error('no "-" placeholders');});
+check('a new component is numbered, and the number is free inventory-wide',()=>{
+  sandbox.editSys('tower1');
+  const before=new Set(sandbox.INV.systems.flatMap(s=>(s.components||s.sensors||[]).map(c=>String(c.name))));
+  sandbox.addComp('radar');
+  const n=sandbox.EDIT.components[sandbox.EDIT.components.length-1].name;
+  if(!/^\d+$/.test(n))throw new Error('not a number: '+n);
+  if(before.has(n))throw new Error('collides with an existing component: '+n);});
+check('numbers keep counting up within one edit',()=>{
+  sandbox.editSys('tower1');
+  sandbox.addComp('radar'); sandbox.addComp('camera');
+  const names=sandbox.EDIT.components.slice(-2).map(c=>c.name);
+  if(names[0]===names[1])throw new Error('duplicate number: '+names);});
+check('the number is still editable',()=>{
+  sandbox.editSys('tower1'); sandbox.addComp('radar');
+  const i=sandbox.EDIT.components.length-1;
+  sandbox.setS(i,'name','front-radar');
+  if(sandbox.EDIT.components[i].name!=='front-radar')throw new Error('not editable');});
+check('addComp/rmComp',()=>{
+  // Relative, not absolute: these checks share one sandbox, so a fixed expected length
+  // breaks whenever an earlier check adds a component.
+  sandbox.editSys('tower1');
+  const n=sandbox.EDIT.components.length;
+  sandbox.addComp('radar');
+  if(sandbox.EDIT.components.length!==n+1)throw new Error('add failed');
+  sandbox.rmComp(n);
+  if(sandbox.EDIT.components.length!==n)throw new Error('remove failed')});
+check('component with no ssh renders',()=>{sandbox.editSys('tower1');
+  sandbox.EDIT.components[1].ssh={};sandbox.renderEdit()});
 check('clearPw flags deletion',()=>{sandbox.clearPw(0);
   if(!sandbox.EDIT.components[0].ssh.clear_password)throw new Error('flag not set')});
 check('cancel returns to the view',()=>{sandbox.viewSys('tower1');
   if(sandbox.EDIT)throw new Error('editor still open')});
+check('a failed save keeps the editor open and says why',()=>{
+  sandbox.editSys('tower1');
+  sandbox.EDIT.error='component \'b\': SSH port -1 is out of range';
+  sandbox.renderEdit();
+  const html=sandbox.document.querySelector('#sysinline').innerHTML;
+  if(!html.includes('Not saved.'))throw new Error('no failure banner');
+  if(!html.includes('SSH port -1'))throw new Error('the reason is not shown');});
+check('collapsing with unsaved changes asks first',()=>{
+  sandbox.editSys('tower1');
+  sandbox.__confirm=false; sandbox.closeView();
+  if(!sandbox.EDIT)throw new Error('discarded without asking');
+  sandbox.__confirm=true; sandbox.closeView();
+  if(sandbox.EDIT)throw new Error('kept the editor after a confirmed discard');});
+check('opening another system with unsaved changes asks first',()=>{
+  sandbox.editSys('tower1');
+  sandbox.__confirm=false; sandbox.viewSys('rack1');
+  if(!sandbox.EDIT)throw new Error('discarded without asking');
+  sandbox.__confirm=true; sandbox.viewSys('tower1');});
+check('the payload omits ssh settings the form cannot edit',()=>{
+  sandbox.editSys('tower1');
+  sandbox.EDIT.components[0].ssh={user:'ops',port:2222,key_file:'~/.ssh/k',password:'pw'};
+  // Capture at fetch, not at api(): `api` is a top-level const, so it resolves
+  // lexically and replacing the sandbox property would not affect it.
+  let sent=null;
+  const realFetch=sandbox.fetch;
+  sandbox.fetch=(p,o)=>{ sent=JSON.parse(o.body);
+    return Promise.resolve({ok:true,json:async()=>({name:'tower1',systems:[]})}); };
+  sandbox.saveSys();
+  sandbox.fetch=realFetch;
+  if(!sent)throw new Error('saveSys never sent anything');
+  const ssh=sent.components[0].ssh;
+  if('port' in ssh||'key_file' in ssh)
+    throw new Error('round-tripped a field the form does not edit: '+JSON.stringify(ssh));
+  if(ssh.user!=='ops'||ssh.password!=='pw')throw new Error('dropped what it does edit');});
 check('legacy sensors key still renders',()=>{
   const sy=sandbox.INV.systems[0]; const keep=sy.components;
   delete sy.components; sy.sensors=keep; sandbox.renderInv(); sandbox.viewSys('tower1');
   sy.components=keep;});
 check('empty inventory renders',()=>{const s2=sandbox.INV.systems;sandbox.INV.systems=[];
   sandbox.VIEW=null;sandbox.EDIT=null;sandbox.renderInv();sandbox.INV.systems=s2});
-check('newSys opens a blank editor',()=>{sandbox.newSys()});
+check('newSys refuses an empty name',()=>{
+  sandbox.document.querySelector('#newsys').value='';
+  sandbox.EDIT=null; sandbox.newSys();
+  if(sandbox.EDIT)throw new Error('opened an editor for an unnamed system');});
 check('closeView clears both modes',()=>{sandbox.closeView();
   if(sandbox.VIEW||sandbox.EDIT)throw new Error('not cleared')});
 

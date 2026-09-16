@@ -1,9 +1,10 @@
 """Isolate every test from the operator's live configuration.
 
 tests/ must not depend on anything a person edits at runtime — systems_inventory.yaml,
-secrets.local.env, or overrides.json. Those are live operator data: deleting an agent in
-the console is a legitimate thing to do, and it must not turn the suite red. So each test
-starts from the code defaults, and a test that wants an override writes one itself.
+secrets.local.env, overrides.json, or the gotcha30 deployment config. Those are live
+operator data: deleting an agent in the console, or renaming the config on the bench, is
+a legitimate thing to do and must not turn the suite red. So each test starts from the
+code defaults, and a test that wants an override writes one itself.
 
 Any test may still point SYSTEMS or config_store.PATH at its own fixture — monkeypatch in
 a requested fixture runs after an autouse one, so the local setting wins.
@@ -31,6 +32,11 @@ def _clear() -> None:
 def isolate_operator_state(tmp_path_factory, monkeypatch):
     d = tmp_path_factory.mktemp("operator")
     monkeypatch.setattr(inventory, "SYSTEMS", d / "systems_inventory.yaml")
+    # The gotcha30 deployment config is operator data too — a sibling repo whose config
+    # they rename between bench runs. Pin node identity to a fixture so the suite does
+    # not go red because a file outside this repo moved.
+    monkeypatch.setattr(inventory, "REPO", ROOT / "tests" / "fixtures")
+    monkeypatch.setattr(inventory, "CONFIG", "gotcha30_config.yaml")
     monkeypatch.setattr(secrets_store, "PATH", d / "secrets.local.env")
     # Agents, order, tool descriptions and the command table all live here; without this
     # an agent deleted in the console fails every test that reads the effective config.

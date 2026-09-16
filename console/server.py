@@ -30,6 +30,7 @@ from pydantic import BaseModel  # noqa: E402
 import yaml  # noqa: E402
 
 import agents as agents_mod  # noqa: E402
+import bridge  # noqa: E402
 import config_store  # noqa: E402
 import inventory  # noqa: E402
 import secrets_store  # noqa: E402
@@ -788,7 +789,10 @@ def trace(tid: str) -> JSONResponse:
 # from a field allowlist, so nothing below can widen what a model sees.
 # ---------------------------------------------------------------------------
 
-_INV_NAME = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+# A leading digit is allowed: the editor numbers components 1, 2, 3 by default. These
+# names are YAML keys and tool-enum values, never filesystem paths, and PyYAML quotes a
+# numeric-looking key so it loads back as a string.
+_INV_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 
 class SshReq(BaseModel):
@@ -810,11 +814,13 @@ class ComponentReq(BaseModel):
     scheme: str | None = None
     hardware: str | None = None
     software_version: str | None = None
+    web: str | None = None
     description: str | None = None
     ssh: SshReq | None = None
 
 
 class SystemReq(BaseModel):
+    new_name: str | None = None   # rename: the URL carries the CURRENT name
     site: str | None = None
     description: str | None = None
     components: list[ComponentReq] = []
@@ -915,6 +921,7 @@ def _component_out(name: str, spec: dict, inherited: dict) -> dict:
         "address": spec.get("address"), "port": spec.get("port"),
         "scheme": spec.get("scheme"), "hardware": spec.get("hardware"),
         "software_version": spec.get("software_version"),
+        "web": spec.get("web"),
         "description": spec.get("description"),
         "ssh": {
             "user": ssh.get("user"), "port": ssh.get("port"),
@@ -965,6 +972,20 @@ def inventory_get() -> dict:
 def inventory_put(name: str, req: SystemReq) -> dict:
     if not _INV_NAME.match(name):
         raise HTTPException(400, "system name must be lowercase letters, digits, - or _")
+
+    # A rename writes under the new key and drops the old one in the same save, so the
+    # file is never briefly holding both. Component names are untouched: they live in
+    # their own flat namespace, and password_env is derived from the COMPONENT name, so
+    # renaming a system cannot orphan a stored secret.
+    # Absent means "no rename"; present but blank means the field was cleared, which is
+    # a mistake worth reporting rather than silently ignoring.
+    target = name if req.new_name is None else req.new_name.strip()
+    if not _INV_NAME.match(target):
+        raise HTTPException(400, "system name must be lowercase letters, digits, - or _")
+    existing = _inv_doc().get("systems") or {}
+    if target != name and target in existing:
+        raise HTTPException(409, f"a system called {target!r} already exists")
+
     members = req.members()
     for s_ in members:
         if not _INV_NAME.match(s_.name):
@@ -978,20 +999,38 @@ def inventory_put(name: str, req: SystemReq) -> dict:
         _check_access(s_)
 
     doc = _inv_doc()
+    # What this system already holds, so a save can keep the parts the form does not
+    # edit. Without this the editor round-trips stale values back — and a bad one the
+    # user cannot even see (the SSH port is no longer a field) blocks every later save.
+    _cur = existing.get(name) or {}
+    _cur_members = _cur.get("components")
+    if not isinstance(_cur_members, dict):
+        _cur_members = _cur.get("sensors")
+    _cur_members = _cur_members if isinstance(_cur_members, dict) else {}
+
     components: dict[str, dict] = {}
     for s_ in members:
         spec: dict = {"type": s_.type.strip(), "role": s_.role}
         for k in ("domain", "address", "port", "scheme", "hardware",
-                  "software_version", "description"):
+                  "software_version", "web", "description"):
             if (v := getattr(s_, k)) not in (None, ""):
                 spec[k] = v
         if s_.ssh:
             ssh = {k: v for k in ("user", "port", "key_file")
                    if (v := getattr(s_.ssh, k)) not in (None, "")}
+            # Carry forward what was not submitted. `user` is deliberately not carried:
+            # clearing the username in the form should clear it.
+            _prev = ((_cur_members.get(s_.name) or {}).get("access") or {}).get("ssh") or {}
+            ssh = {**{k: v for k, v in _prev.items() if k in ("port", "key_file")}, **ssh}
             env = (s_.ssh.password_env or "").strip()
             if s_.ssh.password and not env:
                 # Derive a stable variable name so an admin never has to invent one.
+                # Components are numbered by default, and "1_SSH_PW" is not a legal
+                # environment variable — prefix anything that does not start with a
+                # letter rather than failing the save.
                 env = re.sub(r"[^A-Z0-9]+", "_", s_.name.upper()) + "_SSH_PW"
+                if not env[0].isalpha():
+                    env = "NODE_" + env
             if env:
                 try:
                     if s_.ssh.clear_password:
@@ -1014,9 +1053,20 @@ def inventory_put(name: str, req: SystemReq) -> dict:
     if req.description:
         entry["description"] = req.description
     entry["components"] = components
-    doc.setdefault("systems", {})[name] = entry
-    _save_inv_doc(doc, f"upsert system {name} ({len(components)} components)")
-    return {"ok": True, **inventory_get()}
+
+    # Rebuild in order so a renamed system keeps its place in the file rather than
+    # jumping to the end of a diff.
+    systems = doc.get("systems") or {}
+    rebuilt = {(target if k == name else k): (entry if k == name else v)
+               for k, v in systems.items()}
+    if name not in systems:
+        rebuilt[target] = entry
+    doc["systems"] = rebuilt
+
+    note = (f"rename system {name} -> {target}" if target != name
+            else f"upsert system {name} ({len(components)} components)")
+    _save_inv_doc(doc, note)
+    return {"ok": True, "name": target, **inventory_get()}
 
 
 @app.delete("/api/inventory/system/{name}")
@@ -1046,6 +1096,47 @@ def inventory_delete_secret(env_name: str) -> dict:
         raise HTTPException(400, f"{env_name} comes from the process environment; "
                                  f"unset it and restart the console to remove it")
     return {"ok": secrets_store.delete(env_name)}
+
+
+# ---------------------------------------------------------------------------
+# Live with chat — the console <-> chat bridge
+#
+# A ticket here does NOT run the graph. It is queued on disk for the assistant in the
+# Claude Code session, which reads the KB, runs read-only checks against the real
+# hardware, and publishes a report in the same shape the pipeline produces. The Run tab
+# is the other half: it exercises the pipeline against recorded fixtures and never
+# touches the bench.
+# ---------------------------------------------------------------------------
+
+
+class TicketReq(BaseModel):
+    question: str
+
+
+@app.post("/api/bridge/ticket")
+def bridge_submit(req: TicketReq) -> dict:
+    try:
+        sid = bridge.submit(req.question)
+    except bridge.BridgeError as e:
+        raise _bad(e) from e
+    log.info("bridge ticket %s queued", sid)
+    return {"ok": True, "id": sid, **(bridge.status(sid) or {})}
+
+
+@app.get("/api/bridge/queue")
+def bridge_queue() -> dict:
+    q = bridge.queue()
+    return {"sessions": q,
+            "pending": sum(1 for s in q if s.get("status") == "pending"),
+            "working": sum(1 for s in q if s.get("status") == "in_progress")}
+
+
+@app.get("/api/bridge/session/{sid}")
+def bridge_session(sid: str) -> dict:
+    s = bridge.status(sid)
+    if not s:
+        raise HTTPException(404, "unknown session")
+    return s
 
 
 @app.get("/")

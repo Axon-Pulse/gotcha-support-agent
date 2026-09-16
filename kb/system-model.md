@@ -25,6 +25,15 @@ Three families of node:
 Every node publishes `/heartbeat` and `NodeHealth` on `/system/health`. The launcher
 publishes `LauncherStatus` on `/launcher/status`.
 
+**Health is a slow stream.** Each node publishes `/system/health` only every few
+seconds — measured on a 6-node bench rig: tracker 4.0s, asu/magos/event_manager 5.0s,
+c2_gateway 6.7s, system_launcher 8.0s, ~1.1 messages/second aggregate across all nodes.
+`/heartbeat` is far faster (~3.6 Hz) and `/launcher/status` is ~1 Hz. This sets the
+sampling window: a capture must run for seconds, not milliseconds, before absence from
+`get_system_health` means anything. A window too short returns a partial view in which a
+node is missing only because its turn had not come round — the tool now flags that as
+`capture.warning` rather than presenting it as the whole system.
+
 ## Three independent views, and what each one cannot see
 
 This is the most useful thing in this document. The views fail differently, so

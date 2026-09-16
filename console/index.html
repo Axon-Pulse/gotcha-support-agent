@@ -218,6 +218,22 @@ details.sysmodel pre{max-height:340px;overflow:auto;font-size:11.5px;line-height
   border:1px solid var(--line);color:var(--dim);margin:0 5px 5px 0;white-space:nowrap}
 .tchip.on{border-color:var(--accent);color:var(--accent)}
 .tchip.none{border-style:dashed}
+/* a system's detail, expanded in place under its own row */
+tr.detail>td{background:var(--sunk);padding:14px 16px;border-bottom:1px solid var(--line)}
+tr.click.open{background:var(--tint)}
+.inline>header{display:flex;align-items:center;gap:9px;margin-bottom:10px}
+.inline>header .grow{margin-left:auto}
+.inline>header b{font-size:13px}
+td.acts{white-space:nowrap;text-align:right}
+td.acts button{margin-left:5px}
+.secg{border:1px solid var(--line);border-radius:var(--r);margin-bottom:9px;overflow:hidden}
+.secg>header{display:flex;align-items:center;gap:9px;padding:9px 12px;cursor:pointer;
+  user-select:none;background:var(--card);transition:background var(--t)}
+.secg>header:hover{background:var(--tint)}
+.secg>header b{font-size:12.5px}
+.secg>header .grow{margin-left:auto}
+.secg.empty>header{opacity:.6}
+.secg .scroll,.secg .secbody{padding:2px 12px 12px}
 button.tchip{cursor:pointer;background:none;font-family:var(--mono);
   transition:border-color var(--t),color var(--t),background var(--t)}
 button.tchip:hover{border-color:var(--accent);color:var(--accent);background:var(--tint)}
@@ -241,6 +257,7 @@ tr.click:hover{background:var(--tint)}
 
 <nav id="tabs">
   <button data-t="run" aria-selected="true">Run</button>
+  <button data-t="chat" aria-selected="false">Live with chat <span id="chatcount"></span></button>
   <button data-t="approvals" aria-selected="false">Approvals <span id="apcount"></span></button>
   <button data-t="traces" aria-selected="false">Traces</button>
   <button data-t="kb" aria-selected="false">Knowledge</button>
@@ -261,6 +278,7 @@ tr.click:hover{background:var(--tint)}
   <div id="live"></div>
 </section>
 
+<section id="chat" hidden></section>
 <section id="approvals" hidden></section>
 <section id="traces" hidden></section>
 <section id="kb" hidden></section>
@@ -275,8 +293,8 @@ var META=null, CUR=null, TIMER=null;
 
 document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('#tabs button').forEach(x=>x.setAttribute('aria-selected',x===b));
-  ['run','approvals','traces','kb','graph','perms','inv'].forEach(t=>$('#'+t).hidden=(t!==b.dataset.t));
-  ({approvals:loadApprovals,traces:loadTraces,kb:loadKb,graph:loadGraph,inv:loadInv,perms:loadPerms}[b.dataset.t]||(()=>{}))();
+  ['run','chat','approvals','traces','kb','graph','perms','inv'].forEach(t=>$('#'+t).hidden=(t!==b.dataset.t));
+  ({chat:loadChat,approvals:loadApprovals,traces:loadTraces,kb:loadKb,graph:loadGraph,inv:loadInv,perms:loadPerms}[b.dataset.t]||(()=>{}))();
 });
 
 api('/meta').then(m=>{
@@ -463,10 +481,13 @@ function slugify(raw){
 
 function previewSlug(){
   const el=$('#kbnew-slug'); if(!el)return;
-  const slug=slugify($('#kbnew').value);
-  el.innerHTML=slug
-    ? `Saved as <code>${esc(slug)}.md</code>`
-    : '<span class="warn">Needs at least one letter or digit.</span>';
+  const raw=$('#kbnew').value.trim();
+  const slug=slugify(raw);
+  // Empty is not an error, it is the starting state — the warning only means something
+  // once something has been typed that slugs to nothing.
+  el.innerHTML=!raw ? ''
+    : slug ? `Saved as <code>${esc(slug)}.md</code>`
+           : '<span class="warn">Needs at least one letter or digit.</span>';
 }
 
 const topicChips=ts=>(ts&&ts.length)
@@ -486,16 +507,6 @@ async function loadKb(){
      <td><button class="sm" onclick="toggleKb('${esc(d.name)}')">edit</button>
          <button class="sm no" onclick="delKb('${esc(d.name)}')">delete</button></td></tr>`).join('');
   $('#kb').innerHTML=`
-   <div class="card"><h3>Recorded cases <span class="dim" style="font-weight:400">— ${docs.length}</span></h3>
-     <p class="note">Faults that were actually diagnosed here. These are <b>not</b> in the
-       prompt — they are retrieved with <code>search_runbook</code>, which is what lets the
-       history grow without growing every request. The topics and the symptom list are what
-       a ticket gets matched against, so keep symptoms short and in the words a reporter
-       would use. A new case normally arrives through the approval queue rather than here.</p>
-     <div class="scroll"><table><tr><th>case</th><th>topics</th><th>symptoms</th><th>size</th><th></th></tr>
-       ${rows||'<tr><td colspan="5" class="dim">No cases recorded yet. Until one is, every diagnosis reasons from the system model alone.</td></tr>'}</table></div>
-   </div>
-
    <div class="card"><h3>Add a case by hand</h3>
      <p class="note">Two steps. This creates the file and immediately opens the editor
        below, where you fill in the <b>symptoms</b>, the <b>root cause</b> and the
@@ -513,6 +524,16 @@ async function loadKb(){
        routing domains: which agents may run is decided by <code>graph.DOMAINS</code> and
        the inventory, not by this field.</p>
    </div>
+   <div class="card"><h3>Recorded cases <span class="dim" style="font-weight:400">— ${docs.length}</span></h3>
+     <p class="note">Faults that were actually diagnosed here. These are <b>not</b> in the
+       prompt — they are retrieved with <code>search_runbook</code>, which is what lets the
+       history grow without growing every request. The topics and the symptom list are what
+       a ticket gets matched against, so keep symptoms short and in the words a reporter
+       would use. A new case normally arrives through the approval queue rather than here.</p>
+     <div class="scroll"><table><tr><th>case</th><th>topics</th><th>symptoms</th><th>size</th><th></th></tr>
+       ${rows||'<tr><td colspan="5" class="dim">No cases recorded yet. Until one is, every diagnosis reasons from the system model alone.</td></tr>'}</table></div>
+   </div>
+
    <div id="kbdetail"></div>
 
    <details class="card sysmodel">
@@ -640,6 +661,83 @@ async function delKb(n){
   if(!confirm(`Delete ${n}.md? The agent will no longer see this guidance.`))return;
   try{ await api('/kb/'+n,{method:'DELETE'}); $('#kbdetail').innerHTML=''; loadKb(); }
   catch(e){ alert(e.message); }
+}
+
+// ---------------- live with chat ----------------
+// A ticket here is queued on disk, not run through the graph. Nothing polls the queue
+// on the assistant's side — it is drained when someone asks it to — so the UI is honest
+// about a ticket sitting untouched rather than pretending work is underway.
+var CHAT_TIMER=null, CHAT_OPEN=null;
+
+const STATUS_LABEL={pending:'queued — say `go` in the chat', in_progress:'being worked on',
+                    done:'done', failed:'failed'};
+const STATUS_CLASS={pending:'warn', in_progress:'warn', done:'ok', failed:'bad'};
+
+async function loadChat(){
+  const q=await api('/bridge/queue');
+  const rows=q.sessions.map(s=>`<tr class="click" onclick="openChat('${esc(s.id)}')">
+     <td class="mono">${esc(s.id)}</td>
+     <td>${esc((s.question||'').slice(0,70))}</td>
+     <td class="${STATUS_CLASS[s.status]||'dim'}">${esc(STATUS_LABEL[s.status]||s.status)}</td>
+     <td><button class="sm" onclick="event.stopPropagation();openChat('${esc(s.id)}')">open</button></td>
+   </tr>`).join('');
+  $('#chatcount').textContent=q.pending?`(${q.pending})`:'';
+  $('#chat').innerHTML=`
+   <div class="card"><h3>Describe the fault</h3>
+     <p class="note">This does <b>not</b> run the graph. The ticket is queued on disk and
+       picked up in the Claude Code session, which reads the knowledge base and runs
+       read-only checks against the real hardware. Use the <b>Run</b> tab to exercise the
+       pipeline itself — that one uses recorded fixtures and never touches the bench.</p>
+     <textarea id="chatq" class="prose" style="min-height:90px"
+       placeholder="e.g. the radar stopped reporting detections about ten minutes ago"></textarea>
+     <div class="row" style="margin-top:8px">
+       <button class="sm yes" onclick="submitChat()">Queue it</button>
+       <span class="saved" id="chatv"></span></div>
+     <p class="note">Nothing watches this queue automatically. After queuing, type
+       <code>go</code> in the Claude Code chat and it will be picked up.</p>
+   </div>
+
+   <div class="card"><h3>Sessions <span class="dim" style="font-weight:400">— ${q.sessions.length}</span></h3>
+     <div class="scroll"><table><tr><th>id</th><th>ticket</th><th>status</th><th></th></tr>
+       ${rows||'<tr><td colspan="4" class="dim">Nothing queued yet.</td></tr>'}</table></div>
+   </div>
+   <div id="chatdetail"></div>`;
+  if(CHAT_OPEN) openChat(CHAT_OPEN);
+  clearInterval(CHAT_TIMER);
+  if(q.pending||q.working) CHAT_TIMER=setInterval(()=>{ if(!$('#chat').hidden) loadChat(); },4000);
+}
+
+async function submitChat(){
+  const text=$('#chatq').value.trim(); if(!text)return;
+  try{ const r=await api('/bridge/ticket',{method:'POST',
+         headers:{'content-type':'application/json'},body:JSON.stringify({question:text})});
+       $('#chatq').value=''; CHAT_OPEN=r.id; flash('chatv','queued as '+r.id); loadChat(); }
+  catch(e){ flash('chatv',e.message,true); }
+}
+
+async function openChat(id){
+  CHAT_OPEN=id;
+  const s=await api('/bridge/session/'+id).catch(()=>null);
+  const box=$('#chatdetail'); if(!box||!s)return;
+  const cmds=(s.commands||[]).map(c=>`<div style="margin-bottom:8px">
+     <div class="mono" style="font-size:12px">${c.readonly===false?'<span class="bad">CHANGES STATE</span> ':'<span class="ok">READ-ONLY</span> '}${esc(c.cmd)}</div>
+     ${c.output?`<pre style="max-height:220px">${esc(c.output)}</pre>`:''}</div>`).join('');
+  box.innerHTML=`
+   <div class="card"><h3>Session <span class="mono dim">${esc(s.id)}</span>
+     <span class="${STATUS_CLASS[s.status]||'dim'}" style="font-weight:400;font-size:12px">
+       — ${esc(STATUS_LABEL[s.status]||s.status)}</span>
+     <button class="sm" style="float:right" onclick="CHAT_OPEN=null;$('#chatdetail').innerHTML=''">Close</button></h3>
+     <p class="note">${esc(s.question||'')}</p>
+     ${s.report?reportCard(s.report):'<p class="note">No report yet.</p>'}
+     ${s.kb_gaps&&s.kb_gaps.length?`<div class="card" style="border-color:var(--warn)">
+       <h3>Documentation gaps</h3>
+       <p class="note">Facts used that were not in <code>system-model.md</code> or a
+         recorded case. Each one is a KB entry worth writing.</p>
+       <ul class="tight">${s.kb_gaps.map(g=>`<li>${esc(g)}</li>`).join('')}</ul></div>`:''}
+     ${cmds?`<h3 style="margin-top:14px">Checks run</h3>${cmds}`:''}
+     ${s.notes?`<p class="note">${esc(s.notes)}</p>`:''}
+     <p class="note">Trace: <code>traces/${esc(s.id)}.jsonl</code></p>
+   </div>`;
 }
 
 // ---------------- graph ----------------
@@ -1122,17 +1220,31 @@ function renderInv(){
   const rows=INV.systems.map(sy=>{
     const comps=sy.components||sy.sensors||[];
     const byRole=comps.reduce((m,c)=>((m[c.role||'other']=(m[c.role||'other']||0)+1),m),{});
-    return `<tr class="click" onclick="viewSys('${esc(sy.name)}')">
-     <td class="mono">${esc(sy.name)}</td>
+    const open=VIEW===sy.name&&!(EDIT&&EDIT.isNew);
+    // The detail expands in place, as a row under its own row — not in a separate card
+    // further down the page, which loses the connection to what you clicked.
+    return `<tr class="click${open?' open':''}" onclick="toggleSys('${esc(sy.name)}')">
+     <td class="mono"><span class="caret ${open?'open':''}">▶</span> ${esc(sy.name)}</td>
      <td>${esc(sy.site||'—')}</td>
      <td class="dim">${comps.length}</td>
      <td>${Object.entries(byRole).map(([r,n])=>`${roleTag(r)}<span class="dim"> ${n}</span>`).join(' ')||'—'}</td>
-     <td><button class="sm" onclick="event.stopPropagation();viewSys('${esc(sy.name)}')">open</button></td></tr>`;}).join('');
+     <td class="acts">
+       <button class="sm yes" onclick="event.stopPropagation();editSys('${esc(sy.name)}')">Edit</button>
+       <button class="sm no" onclick="event.stopPropagation();delSys('${esc(sy.name)}')">Delete</button>
+       <button class="sm" onclick="event.stopPropagation();toggleSys('${esc(sy.name)}')">
+         ${open?'Close':'Open'}</button></td></tr>`
+     + (open?`<tr class="detail"><td colspan="5" id="sysinline"></td></tr>`:'');}).join('');
 
   $('#inv').innerHTML=`
    <datalist id="domlist2">${INV.domains.map(d=>`<option value="${esc(d)}">`).join('')}</datalist>
    ${Object.entries(INV.type_catalog||{}).map(([r,ts])=>
      `<datalist id="types-${esc(r)}">${ts.map(t=>`<option value="${esc(t)}">`).join('')}</datalist>`).join('')}
+   <div class="card"><h3>Add a system</h3>
+     <div class="row"><input type="text" id="newsys" placeholder="lowercase name, e.g. tower1">
+       <button class="sm yes" onclick="newSys()">Create</button></div>
+   </div>
+   <div id="sysnew"></div>
+
    <div class="card"><h3>Systems</h3>
      <p class="note">A system groups everything on one platform — sensors, the compute box
        that runs the stack, the switch they hang off, a laptop left on site. Names live in a
@@ -1140,19 +1252,12 @@ function renderInv(){
        against; the same name twice is refused.</p>
      <div class="scroll"><table>
        <tr><th>system</th><th>site</th><th>parts</th><th>make-up</th><th></th></tr>
-       ${rows||'<tr><td colspan="5" class="dim">Nothing yet. Add a system below.</td></tr>'}
+       ${rows||'<tr><td colspan="5" class="dim">Nothing yet. Add one above.</td></tr>'}
      </table></div>
      <p class="note" style="margin-top:10px">Registry:
        <code>${esc(INV.path)}</code>${INV.exists?'':' <span class="warn">(not created yet)</span>'}
        · secrets: <code>${esc(INV.secrets_path)}</code></p>
    </div>
-
-   <div class="card"><h3>Add a system</h3>
-     <div class="row"><input type="text" id="newsys" placeholder="lowercase name, e.g. tower1">
-       <button class="sm yes" onclick="newSys()">Create</button></div>
-   </div>
-
-   <div id="sysdetail"></div>
 
    <div class="card"><h3>What the agent sees</h3>
      <p class="note">Rebuilt from a field allowlist in <code>inventory.py</code>, not by
@@ -1165,115 +1270,176 @@ function renderInv(){
   if(EDIT) renderEdit(); else if(VIEW) renderView();
 }
 
-// ---- read-only summary ----
-function viewSys(n){ VIEW=n; EDIT=null; renderInv(); }
-function closeView(){ VIEW=null; EDIT=null; renderInv(); }
+// ---- read-only summary, expanded in place ----
+const detailBox=()=>$(EDIT&&EDIT.isNew?'#sysnew':'#sysinline');
+
+function viewSys(n){
+  if(EDIT&&EDIT.orig!==n&&!discardOk())return;
+  VIEW=n; EDIT=null;
+  const sy=INV.systems.find(x=>x.name===n);
+  openDefaults(sy?(sy.components||sy.sensors||[]):[]);
+  renderInv();
+}
+function toggleSys(n){ (VIEW===n&&!EDIT) ? closeView() : viewSys(n); }
+
+// Collapsing used to discard an open editor without a word, so a failed save looked
+// like a successful one whose changes vanished.
+function discardOk(){
+  return !EDIT || confirm('Discard the unsaved changes to this system?');
+}
+function closeView(){ if(!discardOk())return; VIEW=null; EDIT=null; renderInv(); }
+
+// A system is presented as the categories a rig actually has — radar, camera, acoustic,
+// computers — rather than one flat list. Purely a view over `role` and `domain`: the
+// stored model is unchanged, so routing and the agent-facing inventory are untouched.
+// `other` is last and catches everything, so nothing a system holds can be hidden by a
+// category nobody thought of.
+const SECTIONS=[
+  {key:'radar',    label:'Radar',     add:{role:'sensor', domain:'radar',    scheme:'tcp'}},
+  {key:'camera',   label:'Camera',    add:{role:'sensor', domain:'camera',   scheme:'http'}},
+  {key:'acoustic', label:'Acoustic',  add:{role:'sensor', domain:'acoustic', scheme:'http'}},
+  {key:'computers',label:'Computers', add:{role:'compute',                   scheme:'tcp'}},
+  {key:'other',    label:'Other',     add:{role:'other',                     scheme:'tcp'}},
+];
+var SEC_OPEN=new Set();
+
+function sectionOf(c){
+  if(['radar','camera','acoustic'].includes(c.domain)) return c.domain;
+  if(['compute','laptop'].includes(c.role)) return 'computers';
+  return 'other';
+}
+function bucket(comps){
+  const m=Object.fromEntries(SECTIONS.map(s=>[s.key,[]]));
+  (comps||[]).forEach((c,i)=>m[sectionOf(c)].push({c,i}));
+  return m;
+}
+function openDefaults(comps){
+  SEC_OPEN=new Set(Object.entries(bucket(comps)).filter(([,v])=>v.length).map(([k])=>k));
+}
+function toggleSec(k){
+  SEC_OPEN.has(k)?SEC_OPEN.delete(k):SEC_OPEN.add(k);
+  if(EDIT) renderEdit(); else renderView();
+}
+const secHead=(sec,n,extra='')=>`<header onclick="toggleSec('${sec.key}')">
+   <span class="caret ${SEC_OPEN.has(sec.key)?'open':''}">▶</span>
+   <b>${esc(sec.label)}</b>
+   <span class="dim">${n||'none'}</span><span class="grow"></span>${extra}</header>`;
 
 function renderView(){
   const sy=INV.systems.find(x=>x.name===VIEW);
   if(!sy){ VIEW=null; return; }
-  const comps=sy.components||sy.sensors||[];
-  const box=$('#sysdetail'); if(!box)return;
+  const box=detailBox(); if(!box)return;
+  const groups=bucket(sy.components||sy.sensors||[]);
+
+  const body=SECTIONS.map(sec=>{
+    const items=groups[sec.key];
+    if(!items.length && sec.key==='other') return '';      // no empty catch-all
+    return `<div class="secg${items.length?'':' empty'}">
+      ${secHead(sec,items.length)}
+      ${SEC_OPEN.has(sec.key)&&items.length?`<div class="scroll"><table>
+        <tr><th>name</th><th>type</th><th>address</th><th>web</th><th>hardware</th>
+            <th>version</th><th>access</th></tr>
+        ${items.map(({c})=>`<tr>
+          <td class="mono">${esc(c.name)}</td>
+          <td class="mono dim">${esc(c.type||'—')}</td>
+          <td class="mono">${addrOf(c)}</td>
+          <td class="mono dim">${esc(c.web||'—')}</td>
+          <td>${esc(c.hardware||'—')}</td>
+          <td class="mono dim">${esc(c.software_version||'—')}</td>
+          <td class="dim">${esc(accessOf(c))}</td></tr>`).join('')}
+      </table></div>`:''}
+    </div>`;}).join('');
+
   box.innerHTML=`
-   <div class="card"><h3><span class="mono">${esc(sy.name)}</span>
-     <span class="dim" style="font-weight:400">${sy.site?' · '+esc(sy.site):''}</span>
-     <span style="float:right;display:flex;gap:6px">
-       <button class="sm yes" onclick="editSys('${esc(sy.name)}')">Edit</button>
-       <button class="sm no" onclick="delSys('${esc(sy.name)}')">Delete</button>
-       <button class="sm" onclick="closeView()">Close</button></span></h3>
+   <div class="inline">
      ${sy.description?`<p class="note">${esc(sy.description)}</p>`:''}
-     <div class="scroll"><table>
-       <tr><th>name</th><th>role</th><th>type</th><th>domain</th><th>address</th>
-           <th>hardware</th><th>version</th><th>access</th></tr>
-       ${comps.map(c=>`<tr>
-         <td class="mono">${esc(c.name)}</td>
-         <td>${roleTag(c.role)}</td>
-         <td class="mono dim">${esc(c.type||'—')}</td>
-         <td class="mono">${esc(c.domain||'—')}</td>
-         <td class="mono">${addrOf(c)}</td>
-         <td>${esc(c.hardware||'—')}</td>
-         <td class="mono dim">${esc(c.software_version||'—')}</td>
-         <td class="dim">${esc(accessOf(c))}</td></tr>`).join('')
-        ||'<tr><td colspan="8" class="dim">No components.</td></tr>'}
-     </table></div>
-     <p class="note">Read-only. Click <b>Edit</b> to change anything — passwords included,
-       which are shown masked there and never written to the registry file.</p>
+     ${body}
+     <p class="note">Read-only. Click <b>Edit</b> on the row above to change anything —
+       passwords included, which are shown masked there and never written to the registry
+       file.</p>
    </div>`;
-  box.scrollIntoView({behavior:'smooth',block:'nearest'});
 }
 
 // ---- dense editor ----
 function newSys(){
   const n=$('#newsys').value.trim(); if(!n)return;
   if(!/^[a-z][a-z0-9_-]{0,63}$/.test(n)) return alert('lowercase letters, digits, - or _');
-  EDIT={name:n,site:'',description:'',components:[],isNew:true}; VIEW=null;
+  EDIT={name:n,orig:n,site:'',description:'',components:[],isNew:true}; VIEW=null;
   renderInv();
 }
 function editSys(n){
   const sy=INV.systems.find(x=>x.name===n);
-  EDIT=JSON.parse(JSON.stringify({name:sy.name,site:sy.site,description:sy.description,
+  EDIT=JSON.parse(JSON.stringify({name:sy.name,orig:sy.name,site:sy.site,
+    description:sy.description,
     components:(sy.components||sy.sensors||[]).map(c=>({...c,ssh:c.ssh||{}})),isNew:false}));
-  VIEW=n; renderInv();
+  VIEW=n; openDefaults(EDIT.components); renderInv();
 }
 function cancelEdit(){ EDIT=null; renderInv(); }
 
-function addComp(){
-  EDIT.components.push({name:'',type:'',role:'sensor',domain:'',address:'',port:null,
-                        scheme:'tcp',hardware:'',software_version:'',ssh:{}});
+// Component names share ONE namespace across every system — that is what a tool
+// argument resolves against — so the next number is the next free one across the whole
+// inventory, not per system. Otherwise two systems would both get a "1" and the
+// registry would stop loading.
+function nextName(){
+  const used=new Set();
+  (INV.systems||[]).forEach(sy=>(sy.components||sy.sensors||[])
+    .forEach(c=>used.add(String(c.name))));
+  (EDIT?EDIT.components:[]).forEach(c=>used.add(String(c.name)));
+  let n=1; while(used.has(String(n))) n++;
+  return String(n);
+}
+
+function addComp(key){
+  const sec=SECTIONS.find(s=>s.key===key)||SECTIONS[0];
+  EDIT.components.push({name:nextName(),type:'',domain:'',address:'',port:null,
+                        hardware:'',software_version:'',web:'',ssh:{},
+                        role:'sensor', ...sec.add});
+  SEC_OPEN.add(sec.key);
   renderEdit();
 }
 function rmComp(i){ EDIT.components.splice(i,1); renderEdit(); }
 const setS=(i,k,v)=>{ EDIT.components[i][k]=v; };
 const setSsh=(i,k,v)=>{ (EDIT.components[i].ssh=EDIT.components[i].ssh||{})[k]=v; };
-function setRole(i,v){ setS(i,'role',v); renderEdit(); }
 
 function renderEdit(){
+  const box=detailBox(); if(!box)return;
   const fld=(span,label,inner)=>`<div class="fd" style="grid-column:span ${span}">
     <span>${label}</span>${inner}</div>`;
-  const txt=(i,k,ph)=>`<input type="text" value="${esc(EDIT.components[i][k]??'')}"
-    placeholder="${esc(ph||'')}" oninput="setS(${i},'${k}',this.value)">`;
-  const num=(i,k,ph)=>`<input type="number" min="1" max="65535"
-    value="${EDIT.components[i][k]??''}" placeholder="${esc(ph||'')}"
+  // "-" rather than a worked example: an empty field should read as "nothing here",
+  // not as a value somebody might mistake for a default.
+  const txt=(i,k)=>`<input type="text" value="${esc(EDIT.components[i][k]??'')}"
+    placeholder="-" oninput="setS(${i},'${k}',this.value)">`;
+  const num=(i,k)=>`<input type="number" min="1" max="65535"
+    value="${EDIT.components[i][k]??''}" placeholder="-"
     oninput="setS(${i},'${k}',this.valueAsNumber)">`;
 
-  const comps=EDIT.components.map((c,i)=>{
+  // Role, domain and scheme are set by the section a component is added into, so they
+  // are not fields here — the section IS the choice. A component therefore stays in the
+  // section it was created in; move it by removing and re-adding.
+  const compCard=(c,i)=>{
     const ssh=c.ssh||{}, fromEnv=ssh.password_in_environment, role=c.role||'sensor';
     return `<div class="comp">
       <header>${roleTag(role)}<b>${esc(c.name||'unnamed')}</b>
-        <span class="dim" style="font:11px var(--mono)">${esc(c.type||'no type')}</span>
+        <span class="dim" style="font:11px var(--mono)">${esc(c.type||'—')}</span>
         <span class="grow"></span>
         <button class="sm no" onclick="rmComp(${i})">Remove</button></header>
       <div class="fg">
-        ${fld(3,'Name',txt(i,'name','e.g. magos'))}
-        ${fld(2,'Role',`<select onchange="setRole(${i},this.value)">
-          ${(INV.roles||[]).map(r=>`<option value="${esc(r)}" ${role===r?'selected':''}>${esc(ROLE_LABEL[r]||r)}</option>`).join('')}
-        </select>`)}
+        ${fld(3,'Name',txt(i,'name'))}
         ${fld(4,'Hardware type',`<input type="text" list="types-${esc(role)}"
-          value="${esc(c.type??'')}" placeholder="e.g. magos_radar"
+          value="${esc(c.type??'')}" placeholder="-"
           oninput="setS(${i},'type',this.value)">`)}
-        ${fld(3,'Domain',`<input type="text" list="domlist2" value="${esc(c.domain??'')}"
-          placeholder="${role==='sensor'?'radar / acoustic / camera':'optional'}"
-          oninput="setS(${i},'domain',this.value)">`)}
+        ${fld(3,'IP address',txt(i,'address'))}
+        ${fld(2,'Port',num(i,'port'))}
 
-        ${fld(3,'IP address',txt(i,'address','192.168.40.60'))}
-        ${fld(2,'Port',num(i,'port','8080'))}
-        ${fld(2,'Scheme',`<select onchange="setS(${i},'scheme',this.value)">
-          ${['tcp','http','https'].map(x=>`<option ${c.scheme===x?'selected':''}>${x}</option>`).join('')}
-        </select>`)}
-        ${fld(3,'Hardware model',txt(i,'hardware','Magos AR-300'))}
-        ${fld(2,'Version',txt(i,'software_version','2.4.1'))}
+        ${fld(3,'Hardware model',txt(i,'hardware'))}
+        ${fld(2,'Version',txt(i,'software_version'))}
+        ${fld(4,'Web address',txt(i,'web'))}
+        ${fld(3,'Username',`<input type="text" value="${esc(ssh.user??'')}"
+          placeholder="-" oninput="setSsh(${i},'user',this.value)">`)}
 
-        ${fld(2,'SSH user',`<input type="text" value="${esc(ssh.user??'')}"
-          placeholder="default" oninput="setSsh(${i},'user',this.value)">`)}
-        ${fld(2,'SSH port',`<input type="number" min="1" max="65535"
-          value="${ssh.port??''}" placeholder="22"
-          oninput="setSsh(${i},'port',this.valueAsNumber)">`)}
-        ${fld(4,'Key file',`<input type="text" value="${esc(ssh.key_file??'')}"
-          placeholder="~/.ssh/id_ed25519" oninput="setSsh(${i},'key_file',this.value)">`)}
         ${fld(4,'Password',`<div class="pwrow">
           <input type="password" id="pw-${i}" value="${esc(ssh.password??'')}"
-            ${fromEnv?'disabled':''}
-            placeholder="${fromEnv?'set in the environment':'blank = key auth'}"
+            ${fromEnv?'disabled':''} placeholder="-"
             oninput="setSsh(${i},'password',this.value)">
           <button class="sm" type="button" onclick="togglePw(${i})">show</button>
           ${ssh.password&&!fromEnv?`<button class="sm no" type="button" onclick="clearPw(${i})">clear</button>`:''}
@@ -1282,25 +1448,39 @@ function renderEdit(){
       <p class="note">Stored as <code>${esc(ssh.password_env||'(derived from the name on save)')}</code>
         ${fromEnv?'<span class="badge">from environment</span>':''} —
         a password typed here goes to the secrets file, never to the registry.</p>
+    </div>`;};
+
+  const groups=bucket(EDIT.components);
+  const body=SECTIONS.map(sec=>{
+    const items=groups[sec.key];
+    const add=`<button class="sm" onclick="event.stopPropagation();addComp('${sec.key}')">
+      + Add ${esc(sec.label.toLowerCase())}</button>`;
+    return `<div class="secg${items.length?'':' empty'}">
+      ${secHead(sec,items.length,add)}
+      ${SEC_OPEN.has(sec.key)?`<div class="secbody">
+        ${items.map(({c,i})=>compCard(c,i)).join('')
+          ||'<p class="note">Nothing here yet.</p>'}</div>`:''}
     </div>`;}).join('');
 
-  $('#sysdetail').innerHTML=`
-   <div class="card"><h3>${EDIT.isNew?'New system':'Editing'}:
-     <span class="mono">${esc(EDIT.name)}</span> <span class="saved" id="iv"></span></h3>
+  box.innerHTML=`
+   <div class="inline">
+     <header>${EDIT.isNew?'<b>New system</b>':''}
+       <span class="grow"></span><span class="saved" id="iv"></span></header>
      <div class="fg" style="margin-bottom:12px">
-       ${fld(4,'Site',`<input type="text" value="${esc(EDIT.site??'')}" placeholder="beit-yanai"
+       ${fld(3,'Name',`<input type="text" value="${esc(EDIT.name??'')}"
+         placeholder="lowercase, e.g. tower1" oninput="EDIT.name=this.value">`)}
+       ${fld(3,'Site',`<input type="text" value="${esc(EDIT.site??'')}" placeholder="beit-yanai"
          oninput="EDIT.site=this.value">`)}
-       ${fld(8,'Description',`<input type="text" value="${esc(EDIT.description??'')}"
+       ${fld(6,'Description',`<input type="text" value="${esc(EDIT.description??'')}"
          placeholder="model-visible; no secrets" oninput="EDIT.description=this.value">`)}
      </div>
-     ${comps||'<p class="note">No components yet.</p>'}
-     <div class="row" style="margin-top:8px">
-       <button class="sm" onclick="addComp()">+ Add component</button>
+     ${body}
+     ${EDIT.error?`<div class="alert"><b>Not saved.</b> ${esc(EDIT.error)}</div>`:''}
+     <div class="row" style="margin-top:10px">
        <button class="sm yes" onclick="saveSys()">Save system</button>
-       <button class="sm" onclick="${EDIT.isNew?'cancelEdit()':`viewSys('${esc(EDIT.name)}')`}">Cancel</button>
+       <button class="sm" onclick="${EDIT.isNew?'cancelEdit()':`viewSys('${esc(EDIT.orig)}')`}">Cancel</button>
      </div>
    </div>`;
-  $('#sysdetail').scrollIntoView({behavior:'smooth',block:'nearest'});
 }
 
 function togglePw(i){
@@ -1312,23 +1492,31 @@ function togglePw(i){
 function clearPw(i){ setSsh(i,'password',''); setSsh(i,'clear_password',true); renderEdit(); }
 
 async function saveSys(){
-  const payload={site:EDIT.site||null,description:EDIT.description||null,
+  const payload={new_name:(EDIT.name||'').trim(),
+    site:EDIT.site||null,description:EDIT.description||null,
     components:EDIT.components.map(c=>({
       name:(c.name||'').trim(), type:(c.type||'').trim(), role:c.role||'sensor',
       domain:c.domain||null, address:c.address||null,
       port:Number.isFinite(c.port)?c.port:null, scheme:c.scheme||null,
       hardware:c.hardware||null, software_version:c.software_version||null,
-      description:c.description||null,
-      ssh:(c.ssh&&Object.values(c.ssh).some(v=>v!==''&&v!=null&&!Number.isNaN(v)))?{
-        user:c.ssh.user||null, port:Number.isFinite(c.ssh.port)?c.ssh.port:null,
-        key_file:c.ssh.key_file||null, password_env:c.ssh.password_env||null,
+      web:c.web||null, description:c.description||null,
+      // Only what the form edits. Sending back the SSH port and key file would
+      // round-trip values nobody can see — and one stale bad value would then block
+      // every save of an unrelated field. The server keeps them.
+      ssh:(c.ssh&&(c.ssh.user||c.ssh.password||c.ssh.password_env||c.ssh.clear_password))?{
+        user:c.ssh.user||null, password_env:c.ssh.password_env||null,
         password:c.ssh.password||null, clear_password:!!c.ssh.clear_password}:null}))};
   try{
-    const name=EDIT.name;
-    INV=await api('/inventory/system/'+name,{method:'PUT',
+    // Address what exists; new_name carries the rename. Re-open whatever the server
+    // ended up calling it.
+    INV=await api('/inventory/system/'+EDIT.orig,{method:'PUT',
       headers:{'content-type':'application/json'},body:JSON.stringify(payload)});
-    EDIT=null; VIEW=name; renderInv();
-  }catch(e){ flash('iv',e.message,true); }
+    EDIT=null; VIEW=INV.name||null; renderInv();
+  }catch(e){
+    // Sticky and next to the button, not a flash in a header that may be scrolled
+    // out of view — a save that failed silently reads exactly like one that worked.
+    EDIT.error=e.message; renderEdit();
+  }
 }
 
 async function delSys(n){
@@ -1406,12 +1594,13 @@ async function showAudit(){
       <td class="mono">${esc(e.by)}</td><td>${esc(e.change)}</td></tr>`).join('')}</table></div>`
     : '<p class="note">No changes recorded.</p>';
 }
-Object.assign(window,{decide,showTrace,showKb,toggleKb,closeKb,saveKb,newKb,delKb,
+Object.assign(window,{decide,showTrace,loadChat,submitChat,openChat,
+  showKb,toggleKb,closeKb,saveKb,newKb,delKb,
   slugify,previewSlug,addSym,rmSym,renderTopics,toggleTopic,addTopic,removeTopic,renderRemovable,
   saveAgent,addAgent,delAgent,saveFlow,savePost,saveTool,resetTool,saveCmds,resetAll,showAudit,
   togglePerm,renderPerms,
   loadGraph,renderFlow,pick,unlink,chipDrag,chipDrop,laneOver,laneOut,laneDrop,
-  loadInv,newSys,editSys,viewSys,closeView,cancelEdit,addComp,rmComp,setS,setSsh,setRole,
+  loadInv,newSys,editSys,viewSys,toggleSys,toggleSec,closeView,cancelEdit,addComp,rmComp,setS,setSsh,nextName,
   saveSys,delSys,togglePw,clearPw});
 
 </script></body></html>
