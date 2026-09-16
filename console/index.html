@@ -3,10 +3,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>support-agent console</title>
 <style>
-:root{--bg:#fbfbfa;--fg:#1a1a18;--dim:#6b6b66;--line:#e2e2dd;--card:#fff;
-      --ok:#1f7a4d;--warn:#9a6a00;--bad:#a32b2b;--accent:#2f5fd0;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+:root{--bg:#fbfbfa;--fg:#1a1a18;--dim:#6b6b66;--line:#e2e2dd;--card:#fff;--sunk:#f4f4f1;
+      --ok:#1f7a4d;--warn:#9a6a00;--bad:#a32b2b;--accent:#2f5fd0;--mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+      --r:10px;--r-sm:7px;--t:170ms cubic-bezier(.2,.7,.3,1);
+      --sh1:0 1px 2px rgba(20,20,18,.06),0 1px 3px rgba(20,20,18,.05);
+      --sh2:0 6px 16px rgba(20,20,18,.10),0 2px 5px rgba(20,20,18,.07);
+      --sh3:0 14px 30px rgba(20,20,18,.16),0 4px 8px rgba(20,20,18,.08);
+      --tint:rgba(47,95,208,.09);--tint-w:rgba(154,106,0,.11);--ring:rgba(47,95,208,.28)}
 @media(prefers-color-scheme:dark){:root{--bg:#16171a;--fg:#e8e8e4;--dim:#9a9a94;--line:#2c2e33;
-      --card:#1d1f23;--ok:#5fd39b;--warn:#e0b050;--bad:#f08a8a;--accent:#7aa2f7}}
+      --card:#1d1f23;--sunk:#141518;--ok:#5fd39b;--warn:#e0b050;--bad:#f08a8a;--accent:#7aa2f7;
+      --sh1:0 1px 2px rgba(0,0,0,.4);--sh2:0 6px 18px rgba(0,0,0,.5);--sh3:0 16px 34px rgba(0,0,0,.6);
+      --tint:rgba(122,162,247,.14);--tint-w:rgba(224,176,80,.14);--ring:rgba(122,162,247,.4)}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 *{box-sizing:border-box}
 body{background:var(--bg);color:var(--fg);font:14px/1.55 system-ui,-apple-system,sans-serif;
      margin:0;padding:0 16px 48px}
@@ -17,20 +25,32 @@ h1{font-size:17px;margin:0;font-weight:650;letter-spacing:-.01em}
 .pill.mock{color:var(--ok);border-color:var(--ok)}
 .pill.bad{color:var(--bad);border-color:var(--bad)}
 nav{display:flex;gap:2px;margin:14px 0 18px;flex-wrap:wrap}
-nav button{background:none;border:1px solid transparent;border-radius:7px;padding:6px 12px;
-  font:inherit;color:var(--dim);cursor:pointer}
-nav button[aria-selected=true]{background:var(--card);border-color:var(--line);color:var(--fg);font-weight:600}
-.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:12px}
+nav button{background:none;border:1px solid transparent;border-radius:var(--r-sm);padding:6px 12px;
+  font:inherit;color:var(--dim);cursor:pointer;transition:background var(--t),color var(--t),border-color var(--t)}
+nav button:hover{color:var(--fg);background:var(--tint)}
+nav button[aria-selected=true]{background:var(--card);border-color:var(--line);color:var(--fg);
+  font-weight:600;box-shadow:var(--sh1)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+  padding:14px 16px;margin-bottom:12px;box-shadow:var(--sh1)}
 .card h3{margin:0 0 8px;font-size:13px;font-weight:650;letter-spacing:.01em}
 .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-input[type=text],textarea{flex:1;min-width:200px;background:var(--bg);color:var(--fg);
-  border:1px solid var(--line);border-radius:7px;padding:9px 11px;font:inherit}
+input[type=text],input[type=number],input[type=password],textarea{flex:1;min-width:0;
+  background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:var(--r-sm);
+  padding:9px 11px;font:inherit;transition:border-color var(--t),box-shadow var(--t)}
+input:focus-visible,textarea:focus-visible,select:focus-visible{outline:none;
+  border-color:var(--accent);box-shadow:0 0 0 3px var(--ring)}
+input[type=text]{min-width:200px}
 textarea{font:12.5px/1.5 var(--mono);width:100%;min-height:260px}
-button.go{background:var(--accent);color:#fff;border:0;border-radius:7px;padding:9px 16px;
-  font:inherit;font-weight:600;cursor:pointer}
+button.go{background:var(--accent);color:#fff;border:0;border-radius:var(--r-sm);padding:9px 16px;
+  font:inherit;font-weight:600;cursor:pointer;box-shadow:var(--sh1);transition:filter var(--t),box-shadow var(--t),transform var(--t)}
+button.go:hover:not(:disabled){filter:brightness(1.08);box-shadow:var(--sh2);transform:translateY(-1px)}
+button.go:active:not(:disabled){transform:translateY(0)}
 button.go:disabled{opacity:.45;cursor:not-allowed}
 button.sm{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;
-  padding:5px 11px;font:inherit;cursor:pointer}
+  padding:5px 11px;font:inherit;cursor:pointer;transition:background var(--t),border-color var(--t),color var(--t)}
+button.sm:hover{background:var(--tint);border-color:var(--accent)}
+button.sm.yes:hover{background:color-mix(in srgb,var(--ok) 12%,transparent);border-color:var(--ok)}
+button.sm.no:hover{background:color-mix(in srgb,var(--bad) 12%,transparent);border-color:var(--bad)}
 button.sm.yes{border-color:var(--ok);color:var(--ok)}
 button.sm.no{border-color:var(--bad);color:var(--bad)}
 code,pre{font-family:var(--mono)}
@@ -58,23 +78,158 @@ ul.tight{margin:6px 0;padding-left:20px}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
 label.chk{display:inline-flex;align-items:center;gap:5px;margin:0 10px 4px 0;font:12.5px var(--mono)}
 textarea.p{min-height:92px}
+textarea.prose{font:13.5px/1.6 system-ui,-apple-system,sans-serif}
 .danger{border-color:var(--bad)}
 .badge{font:10.5px/1 var(--mono);padding:3px 6px;border-radius:5px;border:1px solid var(--warn);
   color:var(--warn);margin-left:6px}
 .saved{color:var(--ok);font-size:12px;margin-left:8px}
-svg.g{width:100%;height:auto;display:block}
-svg.g text{font:11px ui-monospace,Menlo,monospace;fill:var(--fg)}
-svg.g .lbl{font-size:10px;fill:var(--dim)}
-svg.g rect{fill:var(--card);stroke:var(--line);stroke-width:1.5}
-svg.g rect.ag{stroke:var(--accent)}
-svg.g rect.post{stroke:var(--ok)}
-svg.g rect.off{stroke:var(--line);stroke-dasharray:3 3;opacity:.55}
-svg.g rect.gate{stroke:var(--warn);stroke-dasharray:4 3}
-svg.g rect.term{fill:var(--bg)}
-svg.g path,svg.g line{stroke:var(--dim);fill:none;stroke-width:1.4}
-svg.g .req{stroke:var(--warn);stroke-dasharray:4 3}
-svg.g .yes{stroke:var(--ok)}
-svg.g .no{stroke:var(--bad)}
+/* ---------- execution diagram ---------- */
+svg.g{width:100%;height:auto;display:block;overflow:visible;margin:0 auto}
+svg.g text{font:11.5px/1 ui-monospace,Menlo,monospace;fill:var(--fg);font-weight:600;letter-spacing:-.01em}
+svg.g .lbl{font-size:9.5px;fill:var(--dim);font-weight:400;letter-spacing:0}
+svg.g g.n rect{fill:var(--card);stroke:var(--line);stroke-width:1.25;
+  transition:stroke var(--t),filter var(--t),opacity var(--t)}
+svg.g g.n{filter:drop-shadow(0 1px 1.5px rgba(20,20,18,.10));transition:filter var(--t)}
+svg.g g.n:hover{filter:drop-shadow(0 5px 12px rgba(20,20,18,.20))}
+svg.g g.n rect.bar{stroke:none;fill:var(--dim);opacity:.85}
+svg.g g.n.ag rect.card{stroke:var(--accent)}
+svg.g g.n.ag rect.bar{fill:var(--accent)}
+svg.g g.n.post rect.card{stroke:var(--ok)}
+svg.g g.n.post rect.bar{fill:var(--ok)}
+svg.g g.n.gate rect.card{stroke:var(--warn);stroke-dasharray:5 3}
+svg.g g.n.gate rect.bar{fill:var(--warn)}
+svg.g g.n.off rect{stroke:var(--line);stroke-dasharray:3 3;opacity:.5}
+svg.g g.n.off text{opacity:.6}
+svg.g g.n.term rect{fill:var(--sunk);stroke:var(--line)}
+svg.g path,svg.g line{stroke:var(--dim);fill:none;stroke-width:1.35;stroke-linecap:round;
+  opacity:.75;transition:opacity var(--t),stroke-width var(--t)}
+svg.g .req{stroke:var(--warn);stroke-dasharray:4 3;opacity:.9}
+svg.g .rail{opacity:.42;stroke-width:1.15}
+svg.g:hover .rail{opacity:.6}
+svg.g .yes{stroke:var(--ok);opacity:.95}
+svg.g .no{stroke:var(--bad);opacity:.95}
+@media(prefers-color-scheme:dark){
+  svg.g g.n{filter:drop-shadow(0 1px 2px rgba(0,0,0,.5))}
+  svg.g g.n:hover{filter:drop-shadow(0 6px 14px rgba(0,0,0,.65))}}
+
+/* ---------- flow editor: draggable chips ---------- */
+.lane{display:flex;gap:9px;flex-wrap:wrap;align-items:stretch;min-height:58px;padding:9px;
+  border:1.5px dashed var(--line);border-radius:var(--r);background:var(--sunk);
+  transition:border-color var(--t),background var(--t),box-shadow var(--t)}
+.lane.over{border-color:var(--accent);border-style:solid;background:var(--tint);
+  box-shadow:inset 0 0 0 1px var(--ring)}
+.lane .empty{color:var(--dim);font-size:12.5px;align-self:center;padding:0 4px}
+.chip{position:relative;display:flex;flex-direction:column;gap:2px;padding:8px 13px;
+  border-radius:9px;border:1px solid var(--accent);background:var(--card);cursor:grab;
+  user-select:none;min-width:112px;box-shadow:var(--sh1);
+  transition:transform var(--t),box-shadow var(--t),border-color var(--t),opacity var(--t)}
+.chip::before{content:'';position:absolute;inset:0 auto 0 0;width:3px;border-radius:9px 0 0 9px;
+  background:var(--accent);opacity:.85;transition:opacity var(--t)}
+.chip:hover{transform:translateY(-2px);box-shadow:var(--sh2)}
+.chip:active{cursor:grabbing}
+.chip.off{border-color:var(--line);border-style:dashed;opacity:.72}
+.chip.off::before{background:var(--dim);opacity:.4}
+.chip.dragging{opacity:.45;transform:scale(.97) rotate(-1.2deg);box-shadow:var(--sh3)}
+.chip.ins-before{box-shadow:-3px 0 0 var(--accent),var(--sh1)}
+.chip.ins-after{box-shadow:3px 0 0 var(--accent),var(--sh1)}
+.chip b{font:12.5px/1.3 var(--mono);font-weight:650;letter-spacing:-.01em}
+.chip small{font-size:10.5px;color:var(--dim)}
+
+/* ---------- prerequisite editor ---------- */
+svg.dep{width:100%;height:auto;display:block;touch-action:none;overflow:visible;margin:0 auto}
+svg.dep g.dn{cursor:pointer;transition:filter var(--t)}
+svg.dep g.dn rect.bar{stroke:none;fill:var(--accent);opacity:.9}
+svg.dep g.dn rect.card{fill:var(--card);stroke:var(--accent);stroke-width:1.3;
+  transition:stroke var(--t),stroke-width var(--t),fill var(--t)}
+svg.dep g.dn:hover{filter:drop-shadow(0 4px 10px rgba(20,20,18,.18))}
+svg.dep g.dn:hover rect.card{stroke-width:2}
+svg.dep g.dn.sel rect.card{stroke:var(--warn);stroke-width:2.4;fill:var(--tint-w)}
+svg.dep g.dn.sel rect.bar{fill:var(--warn)}
+svg.dep g.dn.cand rect.card{stroke-dasharray:5 3}
+svg.dep g.dn.cand:hover rect.card{fill:var(--tint);stroke-dasharray:none}
+svg.dep text{font:11.5px var(--mono);font-weight:600;fill:var(--fg);pointer-events:none}
+svg.dep .sub{font-size:9.5px;font-weight:400;fill:var(--dim)}
+svg.dep path.dep{stroke:var(--warn);stroke-dasharray:5 3;fill:none;stroke-width:1.6;
+  stroke-linecap:round;opacity:.85;transition:opacity var(--t),stroke-width var(--t)}
+svg.dep g.edge:hover path.dep{opacity:1;stroke-width:2.6;stroke-dasharray:none}
+svg.dep path.dep.bad{stroke:var(--bad);opacity:1}
+svg.dep path.hit{stroke:transparent;stroke-width:16;fill:none;cursor:pointer}
+.alert{border:1px solid var(--bad);background:color-mix(in srgb,var(--bad) 8%,transparent);
+  border-radius:var(--r-sm);padding:9px 12px;margin-top:10px;font-size:12.5px}
+.alert b{color:var(--bad)}
+button.sm:disabled{opacity:.45;cursor:not-allowed}
+button.sm:disabled:hover{background:var(--bg);border-color:var(--line)}
+
+/* ---------- dense field grid ---------- */
+.fg{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:9px 10px}
+.fd{display:flex;flex-direction:column;gap:3px;min-width:0}
+.fd>span{font-size:10.5px;color:var(--dim);letter-spacing:.02em;text-transform:uppercase;font-weight:600}
+.fd input,.fd select{width:100%;min-width:0;padding:7px 9px;font-size:13px}
+.comp{border:1px solid var(--line);border-radius:var(--r);padding:11px 13px;margin-bottom:9px;
+  background:var(--card);transition:border-color var(--t),box-shadow var(--t)}
+.comp:hover{border-color:var(--ring);box-shadow:var(--sh1)}
+.comp>header{display:flex;align-items:center;gap:8px;margin-bottom:9px}
+.comp>header b{font:12.5px var(--mono);font-weight:650}
+.comp>header .grow{margin-left:auto}
+.rolet{font:10px/1 var(--mono);text-transform:uppercase;letter-spacing:.06em;padding:3px 7px;
+  border-radius:20px;border:1px solid var(--line);color:var(--dim);white-space:nowrap}
+.rolet.sensor{border-color:var(--accent);color:var(--accent)}
+.rolet.compute{border-color:var(--ok);color:var(--ok)}
+.rolet.network{border-color:var(--warn);color:var(--warn)}
+.rolet.laptop,.rolet.power,.rolet.other{border-color:var(--dim)}
+.pwrow{display:flex;gap:5px;align-items:center}
+.pwrow input{flex:1;min-width:0}
+.sym{display:flex;gap:6px;margin-bottom:6px;align-items:center}
+.sym input{flex:1}
+.ro{opacity:.62}
+.ro input,.ro textarea,.ro select{cursor:not-allowed}
+select{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:var(--r-sm);
+  padding:9px 11px;font:inherit;transition:border-color var(--t),box-shadow var(--t)}
+fieldset{border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;margin:0 0 10px}
+fieldset>input[type=text]{width:100%;min-width:0}
+legend{font:11px/1 var(--mono);color:var(--dim);padding:0 6px;text-transform:uppercase;letter-spacing:.06em}
+.kv{display:grid;grid-template-columns:130px 1fr;gap:8px 10px;align-items:center}
+.kv label{font-size:12px;color:var(--dim)}
+.kv input,.kv select{width:100%;min-width:0}
+.hint{font-size:12px;color:var(--dim);margin:8px 0 4px}
+/* system model: last on the page, folded away, read-only */
+details.sysmodel{padding:10px 14px}
+details.sysmodel>summary{display:flex;align-items:center;gap:9px;flex-wrap:wrap;
+  cursor:pointer;list-style:none;font-size:12.5px}
+details.sysmodel>summary::-webkit-details-marker{display:none}
+details.sysmodel>summary::before{content:'▶';color:var(--dim);font-size:10px;
+  transition:transform var(--t)}
+details.sysmodel[open]>summary::before{transform:rotate(90deg)}
+details.sysmodel>summary b{font-size:13px;font-weight:650}
+details.sysmodel>summary .dim{margin-left:auto;font:11px var(--mono)}
+details.sysmodel pre{max-height:340px;overflow:auto;font-size:11.5px;line-height:1.5}
+/* collapsible entries on Agents & permissions */
+.ent header{display:flex;align-items:center;gap:9px;cursor:pointer;user-select:none;
+  margin:0 0 2px}
+.ent header b{font:13px var(--mono);font-weight:650;letter-spacing:-.01em}
+.ent header .grow{margin-left:auto}
+.ent.ro header{cursor:default}
+.ent .summ{font-size:12.5px;color:var(--dim);margin:5px 0 8px;max-width:78ch}
+.ent .body{margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+.caret{display:inline-block;color:var(--dim);font-size:10px;width:9px;
+  transition:transform var(--t)}
+.caret.open{transform:rotate(90deg)}
+.tchip{display:inline-block;font:11px var(--mono);padding:3px 8px;border-radius:20px;
+  border:1px solid var(--line);color:var(--dim);margin:0 5px 5px 0;white-space:nowrap}
+.tchip.on{border-color:var(--accent);color:var(--accent)}
+.tchip.none{border-style:dashed}
+button.tchip{cursor:pointer;background:none;font-family:var(--mono);
+  transition:border-color var(--t),color var(--t),background var(--t)}
+button.tchip:hover{border-color:var(--accent);color:var(--accent);background:var(--tint)}
+/* read-only summary */
+.sum{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px 16px;margin:2px 0 4px}
+.sum div{min-width:0}
+.sum dt{font-size:10.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.03em;font-weight:600}
+.sum dd{margin:1px 0 0;font:12.5px var(--mono);overflow-wrap:anywhere}
+tr.click{cursor:pointer;transition:background var(--t)}
+tr.click:hover{background:var(--tint)}
+@media(max-width:720px){.fg{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .fg>*{grid-column:span 4!important}}
 </style></head><body><div class="wrap">
 
 <header>
@@ -90,7 +245,8 @@ svg.g .no{stroke:var(--bad)}
   <button data-t="traces" aria-selected="false">Traces</button>
   <button data-t="kb" aria-selected="false">Knowledge</button>
   <button data-t="graph" aria-selected="false">Graph</button>
-  <button data-t="perms" aria-selected="false">Tools &amp; permissions</button>
+  <button data-t="perms" aria-selected="false">Agents &amp; permissions</button>
+  <button data-t="inv" aria-selected="false">Inventory &amp; systems</button>
 </nav>
 
 <section id="run">
@@ -110,27 +266,37 @@ svg.g .no{stroke:var(--bad)}
 <section id="kb" hidden></section>
 <section id="graph" hidden></section>
 <section id="perms" hidden></section>
+<section id="inv" hidden></section>
 
 </div><script>
 const $=s=>document.querySelector(s), esc=s=>String(s??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const api=(p,o)=>fetch('/api'+p,o).then(async r=>{if(!r.ok)throw new Error((await r.json().catch(()=>({}))).detail||r.status);return r.json()});
-let META=null, CUR=null, TIMER=null;
+var META=null, CUR=null, TIMER=null;
 
 document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('#tabs button').forEach(x=>x.setAttribute('aria-selected',x===b));
-  ['run','approvals','traces','kb','graph','perms'].forEach(t=>$('#'+t).hidden=(t!==b.dataset.t));
-  ({approvals:loadApprovals,traces:loadTraces,kb:loadKb,graph:loadGraph,perms:loadPerms}[b.dataset.t]||(()=>{}))();
+  ['run','approvals','traces','kb','graph','perms','inv'].forEach(t=>$('#'+t).hidden=(t!==b.dataset.t));
+  ({approvals:loadApprovals,traces:loadTraces,kb:loadKb,graph:loadGraph,inv:loadInv,perms:loadPerms}[b.dataset.t]||(()=>{}))();
 });
 
 api('/meta').then(m=>{
   META=m;
   $('#mode').textContent='mode: '+m.mode;
   $('#model').textContent=m.model;
+  const c=m.credentials||{ready:false};
   const k=$('#keystate');
-  k.textContent=m.api_key_set?'API key set':'no API key';
-  k.className='pill'+(m.api_key_set?'':' bad');
-  $('#go').disabled=!m.api_key_set;
-  if(!m.api_key_set)$('#live').innerHTML='<div class="card"><h3>Not ready</h3><p class="note">ANTHROPIC_API_KEY is not set in the server environment. Stop the console, export the key, and restart it.</p></div>';
+  k.textContent=c.ready?('auth: '+c.source):'no credentials';
+  k.className='pill'+(c.ready?'':' bad');
+  k.title=c.warning||'';
+  $('#go').disabled=!c.ready;
+  if(!c.ready)$('#live').innerHTML=`<div class="card"><h3>Not ready</h3>
+    <p class="note">No Anthropic credentials resolve in the console's environment. The SDK
+      looks for <code>ANTHROPIC_API_KEY</code>, then <code>ANTHROPIC_AUTH_TOKEN</code>, then
+      an OAuth profile from <code>ant auth login</code>, then workload identity federation —
+      any one of them is enough. Set one, then restart the console.</p>
+    ${c.warning?`<p class="note bad">${esc(c.warning)}</p>`:''}</div>`;
+  else if(c.warning) $('#live').innerHTML=`<div class="card"><h3>Check your credentials</h3>
+    <p class="note bad">${esc(c.warning)}</p></div>`;
   loadApprovals();
 });
 
@@ -148,7 +314,7 @@ async function refresh(){
   if(!CUR)return;
   const s=await api('/session/'+CUR).catch(()=>null); if(!s)return;
   const st=s.state||{}, done=['done','error','awaiting_approval'].includes(s.status);
-  if(done){clearInterval(TIMER);$('#go').disabled=!META.api_key_set;}
+  if(done){clearInterval(TIMER);$('#go').disabled=!(META.credentials||{}).ready;}
   const steps=(META.order||[]).map(a=>{
     const v=(st.visited||[]).includes(a), act=(st.next||[]).includes(a);
     return `<span class="step ${act?'active':v?'done':''}">${v?'✓ ':''}${esc(a)}</span>`}).join('');
@@ -221,56 +387,253 @@ async function showTrace(id){
     <pre>${esc(JSON.stringify(t.entries,null,1))}</pre></div>`;
 }
 
-async function loadKb(){
-  const {docs}=await api('/kb');
-  $('#kb').innerHTML=`
-   <div class="card"><h3>Knowledge base</h3>
-     <p class="note">Every document here is loaded into the cached system prompt at the start of
-       a session, so an edit reaches the next run — not one already in flight. Keep entries short
-       and symptom-first; this text competes for the model's attention with the findings.</p>
-     <div class="scroll"><table><tr><th>document</th><th>size</th><th></th></tr>
-     ${docs.map(d=>`<tr><td class="mono">${esc(d.name)}</td><td class="dim">${d.bytes} B</td>
-       <td><button class="sm" onclick="showKb('${esc(d.name)}')">edit</button>
-           <button class="sm no" onclick="delKb('${esc(d.name)}')">delete</button></td></tr>`).join('')}
-     </table></div>
-   </div>
-   <div class="card"><h3>New document</h3>
-     <div class="row"><input type="text" id="kbnew" placeholder="kebab-case-name (no .md)">
-       <button class="sm yes" onclick="newKb()">Create</button></div>
-     <p class="note">Starts from a Symptoms / Root cause / Checks / Fix skeleton, matching the
-       runbook entries seeded from <code>docs/launcher/troubleshooting.md</code>.</p>
-   </div>
-   <div id="kbdetail"></div>`;
+var KBDOC=null;  // {name, topics[], symptoms[], body} — the form's working copy
+                 // var, not let: inline on* handlers resolve against the global object
+var TOPICS_ALL=[];                          // every topic in use, plus the seeded ones
+var TOPICS_REMOVABLE=[];                    // created here, used by no case — safe to drop
+var TOPICS_SEL={kbnew:[], kbdoc:[]};        // what each picker currently has selected
+
+// A topic is free text and multi-select: a case can be both "network" and "radar",
+// which is how the hijack case is found from either direction. Adding one is just
+// using it — nothing else in the system has to be told about it.
+const topicPicker=which=>`
+  <div id="${which}-topics"></div>
+  <div class="row" style="margin-top:8px;gap:6px">
+    <input type="text" id="${which}-newtopic" style="max-width:240px"
+      placeholder="new topic, e.g. hydraulics"
+      onkeydown="if(event.key==='Enter'){event.preventDefault();addTopic('${which}')}">
+    <button class="sm" type="button" onclick="addTopic('${which}')">+ Add topic</button>
+  </div>`;
+
+function renderTopics(which){
+  const box=$('#'+which+'-topics'); if(!box)return;
+  const sel=TOPICS_SEL[which]||[];
+  box.innerHTML=TOPICS_ALL.map(t=>{
+    const on=sel.includes(t);
+    return `<button type="button" class="tchip ${on?'on':''}" onclick="toggleTopic('${which}','${esc(t)}')"
+      title="${on?'Remove':'Add'} ${esc(t)}">${on?'✓ ':''}${esc(t)}</button>`;}).join(' ')
+    || '<span class="dim">No topics yet — add the first one below.</span>';
+}
+function toggleTopic(which,t){
+  const sel=TOPICS_SEL[which]; const i=sel.indexOf(t);
+  i<0?sel.push(t):sel.splice(i,1);
+  renderTopics(which);
+}
+// Persisted server-side, not just in this tab: the list is otherwise derived from what
+// cases carry, so a topic on no case would vanish on the next refresh.
+async function addTopic(which){
+  const el=$('#'+which+'-newtopic'); const t=(el.value||'').trim().toLowerCase();
+  if(!t)return;
+  try{
+    const r=await api('/topics',{method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({name:t})});
+    TOPICS_ALL=r.all_topics; TOPICS_REMOVABLE=r.removable_topics;
+    if(!TOPICS_SEL[which].includes(t)) TOPICS_SEL[which].push(t);
+    el.value='';
+    renderTopics('kbnew'); renderTopics('kbdoc'); renderRemovable();
+  }catch(e){ alert(e.message); }
 }
 
+async function removeTopic(t){
+  if(!confirm(`Remove the topic "${t}"? It is used by no case.`))return;
+  try{
+    const r=await api('/topics/'+encodeURIComponent(t),{method:'DELETE'});
+    TOPICS_ALL=r.all_topics; TOPICS_REMOVABLE=r.removable_topics;
+    for(const k of Object.keys(TOPICS_SEL))
+      TOPICS_SEL[k]=TOPICS_SEL[k].filter(x=>x!==t);
+    renderTopics('kbnew'); renderTopics('kbdoc'); renderRemovable();
+  }catch(e){ alert(e.message); }
+}
+
+function renderRemovable(){
+  const box=$('#kbnew-removable'); if(!box)return;
+  box.innerHTML=TOPICS_REMOVABLE.length
+    ? `<span class="dim">Added here, used by no case yet — </span>`
+      + TOPICS_REMOVABLE.map(t=>`<button type="button" class="tchip"
+          onclick="removeTopic('${esc(t)}')" title="Remove ${esc(t)}">${esc(t)} ×</button>`).join(' ')
+    : '';
+}
+// Mirrors _slugify in console/server.py. The server is authoritative — this only shows
+// what is about to happen. tests/test_kb_api.py runs both over the same inputs so the
+// preview cannot start lying about the filename.
+function slugify(raw){
+  return (raw||'').normalize('NFKD').replace(/[^\x00-\x7F]/g,'').toLowerCase()
+    .replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,64).replace(/-+$/,'');
+}
+
+function previewSlug(){
+  const el=$('#kbnew-slug'); if(!el)return;
+  const slug=slugify($('#kbnew').value);
+  el.innerHTML=slug
+    ? `Saved as <code>${esc(slug)}.md</code>`
+    : '<span class="warn">Needs at least one letter or digit.</span>';
+}
+
+const topicChips=ts=>(ts&&ts.length)
+  ? ts.map(t=>`<span class="tchip on">${esc(t)}</span>`).join(' ')
+  : '<span class="dim">—</span>';
+
+async function loadKb(){
+  const [{docs,all_topics,removable_topics}, sm] =
+    await Promise.all([api('/kb'), api('/system-model')]);
+  TOPICS_ALL=all_topics; TOPICS_REMOVABLE=removable_topics; TOPICS_SEL.kbnew=[];
+  const rows=docs.map(d=>`<tr>
+     <td class="mono">${esc(d.name)}</td>
+     <td>${topicChips(d.topics)}</td>
+     <td class="${d.symptom_count?'dim':'warn'}">${d.symptom_count
+        ||'0 — add some'}</td>
+     <td class="dim">${d.bytes} B</td>
+     <td><button class="sm" onclick="toggleKb('${esc(d.name)}')">edit</button>
+         <button class="sm no" onclick="delKb('${esc(d.name)}')">delete</button></td></tr>`).join('');
+  $('#kb').innerHTML=`
+   <div class="card"><h3>Recorded cases <span class="dim" style="font-weight:400">— ${docs.length}</span></h3>
+     <p class="note">Faults that were actually diagnosed here. These are <b>not</b> in the
+       prompt — they are retrieved with <code>search_runbook</code>, which is what lets the
+       history grow without growing every request. The topics and the symptom list are what
+       a ticket gets matched against, so keep symptoms short and in the words a reporter
+       would use. A new case normally arrives through the approval queue rather than here.</p>
+     <div class="scroll"><table><tr><th>case</th><th>topics</th><th>symptoms</th><th>size</th><th></th></tr>
+       ${rows||'<tr><td colspan="5" class="dim">No cases recorded yet. Until one is, every diagnosis reasons from the system model alone.</td></tr>'}</table></div>
+   </div>
+
+   <div class="card"><h3>Add a case by hand</h3>
+     <p class="note">Two steps. This creates the file and immediately opens the editor
+       below, where you fill in the <b>symptoms</b>, the <b>root cause</b> and the
+       <b>fix</b>. Write the name however you like — the server turns it into a filename.
+       It cannot be changed afterwards, so describe the fault, not the ticket.</p>
+     <div class="row">
+       <input type="text" id="kbnew" oninput="previewSlug()"
+              placeholder="describe the fault, e.g. Radar WebSocket keeps flapping">
+       <button class="sm yes" onclick="newKb()">Create &amp; open editor</button></div>
+     <p class="note" id="kbnew-slug"></p>
+     <p class="hint">Topics — click to select any number, or add one</p>
+     ${topicPicker('kbnew')}
+     <p class="note" id="kbnew-removable"></p>
+     <p class="note">Topics decide which past case a ticket matches. They are <b>not</b>
+       routing domains: which agents may run is decided by <code>graph.DOMAINS</code> and
+       the inventory, not by this field.</p>
+   </div>
+   <div id="kbdetail"></div>
+
+   <details class="card sysmodel">
+     <summary><b>System model</b>
+       <span class="badge">read-only · derived from the code</span>
+       <span class="dim">${(sm.text.length/1024).toFixed(1)} KB · in every prompt</span>
+     </summary>
+     <p class="note">What the agent reasons from when a problem matches no recorded case.
+       ${esc(sm.why_read_only||'')} <code>${esc(sm.path)}</code> — no save button here on
+       purpose.</p>
+     <pre>${esc(sm.text||'(missing)')}</pre>
+   </details>`;
+  renderTopics('kbnew'); renderRemovable(); previewSlug();
+}
+
+function closeKb(){ KBDOC=null; const b=$('#kbdetail'); if(b) b.innerHTML=''; }
+
+// Clicking "edit" on the case already open closes it, so the editor can be dismissed
+// without saving, reloading or leaving the tab.
+function toggleKb(n){ (KBDOC && KBDOC.name===n) ? closeKb() : showKb(n); }
+
 async function showKb(n){
-  const d=await api('/kb/'+n);
-  $('#kbdetail').innerHTML=`
-   <div class="card"><h3>${esc(n)}.md <span class="saved" id="kv"></span></h3>
-     <textarea id="kbtext" style="min-height:420px">${esc(d.text)}</textarea>
-     <div class="row" style="margin-top:8px">
-       <button class="sm yes" onclick="saveKb('${esc(n)}')">Save</button>
-       <button class="sm" onclick="showKb('${esc(n)}')">Revert</button>
-       <span class="note">Takes effect on the next session.</span>
-     </div>
-   </div>`;
+  KBDOC=await api('/kb/'+n);
+  TOPICS_ALL=[...new Set([...(KBDOC.all_topics||[]),...(KBDOC.topics||[])])].sort();
+  TOPICS_REMOVABLE=KBDOC.removable_topics||TOPICS_REMOVABLE;
+  TOPICS_SEL.kbdoc=[...(KBDOC.topics||[])];
+  renderKb();
   $('#kbdetail').scrollIntoView({behavior:'smooth',block:'nearest'});
 }
 
-async function saveKb(n){
-  try{ const r=await api('/kb/'+n,{method:'PUT',headers:{'content-type':'application/json'},
-         body:JSON.stringify({text:$('#kbtext').value})});
-       flash('kv',`saved · ${r.bytes} B`); loadKb(); }
+function renderKb(){
+  const d=KBDOC, sec=d.sections||{title:'',intro:'',root_cause:'',checks:'',fix:'',extra:''};
+  d.sections=sec;
+  $('#kbdetail').innerHTML=`
+   <div class="card"><h3>${esc(d.name)}.md <span class="saved" id="kv"></span></h3>
+     ${d.topics.length||d.symptoms.length?'':`<p class="note warn">This case predates the
+       structured editor, so it has no topics or symptoms yet. Filling them in makes it
+       match tickets more reliably; the text below is unchanged.</p>`}
+     <fieldset><legend>Topics</legend>
+       ${topicPicker('kbdoc')}
+       <p class="note">Any number. A case can be both <code>network</code> and
+         <code>radar</code> — it is then found from either direction.</p>
+     </fieldset>
+     <fieldset><legend>Symptoms</legend>
+       <div id="kb-syms"></div>
+       <button class="sm" onclick="addSym()">+ Add symptom</button>
+       <p class="note">One observable per line, as a reporter would describe it
+         ("no tracks on the display"), not as a metric name.</p>
+     </fieldset>
+     <fieldset><legend>Title</legend>
+       <input type="text" id="kb-title" value="${esc(sec.title)}"
+              placeholder="what the fault was, in one line"
+              oninput="KBDOC.sections.title=this.value">
+     </fieldset>
+     <fieldset><legend>Context <span class="dim">— optional</span></legend>
+       <textarea class="prose" id="kb-intro" style="min-height:60px"
+         placeholder="where this was observed, e.g. a config comment or a recorded capture"
+         oninput="KBDOC.sections.intro=this.value">${esc(sec.intro)}</textarea>
+     </fieldset>
+     <fieldset><legend>Root cause</legend>
+       <textarea class="prose" id="kb-rc" style="min-height:150px"
+         placeholder="what was actually wrong — not the symptom"
+         oninput="KBDOC.sections.root_cause=this.value">${esc(sec.root_cause)}</textarea>
+     </fieldset>
+     <fieldset><legend>Checks <span class="dim">— read-only</span></legend>
+       <textarea id="kb-checks" style="min-height:120px"
+         placeholder="commands that confirm it, indented four spaces. Nothing that changes state."
+         oninput="KBDOC.sections.checks=this.value">${esc(sec.checks)}</textarea>
+     </fieldset>
+     <fieldset><legend>Fix</legend>
+       <textarea class="prose" id="kb-fix" style="min-height:120px"
+         placeholder="what resolved it, and how to confirm it worked"
+         oninput="KBDOC.sections.fix=this.value">${esc(sec.fix)}</textarea>
+     </fieldset>
+     ${sec.extra?`<fieldset><legend>Other sections</legend>
+       <textarea id="kb-extra" style="min-height:120px"
+         oninput="KBDOC.sections.extra=this.value">${esc(sec.extra)}</textarea>
+       <p class="note">Headings this form does not have a field for, kept as written so an
+         edit here cannot quietly delete them.</p>
+     </fieldset>`:''}
+     <div class="row">
+       <button class="sm yes" onclick="saveKb()">Save</button>
+       <button class="sm" onclick="showKb('${esc(d.name)}')">Revert</button>
+       <button class="sm" onclick="closeKb()">Close</button>
+       <span class="note">Takes effect immediately — cases are read at search time.</span>
+     </div>
+   </div>`;
+  renderTopics('kbdoc');
+  renderSyms();
+}
+
+function renderSyms(){
+  const box=$('#kb-syms'); if(!box)return;
+  box.innerHTML=KBDOC.symptoms.map((v,i)=>`<div class="sym">
+     <input type="text" value="${esc(v)}" oninput="KBDOC.symptoms[${i}]=this.value"
+            placeholder="e.g. the acoustic sensor shows no tracks">
+     <button class="sm no" onclick="rmSym(${i})">remove</button></div>`).join('')
+   || '<p class="note">None yet.</p>';
+}
+function addSym(){ KBDOC.symptoms.push(''); renderSyms();
+  const ins=document.querySelectorAll('#kb-syms input'); ins[ins.length-1]?.focus(); }
+function rmSym(i){ KBDOC.symptoms.splice(i,1); renderSyms(); }
+
+async function saveKb(){
+  const payload={topics:[...TOPICS_SEL.kbdoc],
+                 symptoms:KBDOC.symptoms.map(s=>s.trim()).filter(Boolean),
+                 sections:KBDOC.sections};
+  try{ const r=await api('/kb/'+KBDOC.name,{method:'PUT',headers:{'content-type':'application/json'},
+         body:JSON.stringify(payload)});
+       flash('kv',`saved · ${r.bytes} B`); await loadKb(); showKb(KBDOC.name); }
   catch(e){ flash('kv',e.message,true); }
 }
 
 async function newKb(){
-  const n=$('#kbnew').value.trim();
-  if(!n)return;
-  try{ await api('/kb',{method:'POST',headers:{'content-type':'application/json'},
-         body:JSON.stringify({name:n})});
-       await loadKb(); showKb(n); }
-  catch(e){ alert(e.message); }
+  const n=$('#kbnew').value.trim(); if(!n)return;
+  try{
+    // Open whatever the SERVER named it, not what was typed — they differ by design.
+    const r=await api('/kb',{method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({name:n,topics:[...TOPICS_SEL.kbnew],symptoms:[],body:''})});
+    await loadKb(); showKb(r.name);
+  }catch(e){ alert(e.message); }
 }
 
 async function delKb(n){
@@ -285,65 +648,87 @@ async function loadGraph(){
   const eff = cfg.effective;
   const N=(x,y,w,h,label,cls,sub)=>({x,y,w,h,label,cls,sub});
   const ags=g.agents, n=ags.length;
-  const AW=124, AH=46, GAP=14;
-  const rowW = n*AW + (n-1)*GAP;
-  const W = Math.max(rowW + 60, 620), cx = W/2;
-  const x0 = cx - rowW/2;
-  const nodes=[
-    N(cx-40,  8, 80,26,'START','term'),
-    N(cx-70, 66,140,34,'supervisor','', g.supervisor_picks?'routes by model':'fixed order'),
-  ];
-  ags.forEach((a,i)=>nodes.push(N(x0+i*(AW+GAP),150,AW,AH,a.name,a.in_order?'ag':'off',
-    a.in_order?(a.tools.length+' tool'+(a.tools.length===1?'':'s')):'not in order')));
+  // Size the agent box to its label. A fixed width clipped "acoustic_deep_dive".
+  const longest=Math.max(10,...ags.map(a=>a.name.length));
+  const AW=Math.max(126,Math.min(206,Math.round(longest*7.1+22))), AH=48, GAP=16;
+  const rowW=n*AW+(n-1)*GAP;
+  const W=Math.max(rowW+96,680), cx=W/2, x0=cx-rowW/2;
+  const ySup=70, hSup=36, supB=ySup+hSup, yAg=206, agB=yAg+AH;
+  const railY=agB+20, railL=x0-20, railR=x0+rowW+20;
+  const yS=railY+52, hS=36;
   const post=(g.post_agents||[]);
-  const yS=240, yC=post.length?302:0, yP=post.length?366:302,
-        ySave=yP+68, yEnd=ySave;
-  nodes.push(N(cx-70,yS,140,34,'synthesize','','builds the report'));
-  post.forEach(pa=>nodes.push(N(cx-104,yC,208,38,pa.name,'post','rewrites it for the client')));
-  nodes.push(N(cx-92,yP,184,38,'propose_scenario','gate','waits for you'));
-  nodes.push(N(cx-186,ySave,110,30,'save','','writes kb/'));
-  nodes.push(N(cx+80,yEnd,110,30,'END','term'));
-  nodes.push(N(cx-186,ySave+52,110,26,'END','term'));
+  const yC=post.length?yS+66:0, yP=(post.length?yC+44:yS+62)+18,
+        ySave=yP+72, yEnd=ySave;
+
+  const nodes=[
+    N(cx-42,10,84,26,'START','term'),
+    N(cx-70,ySup,140,hSup,'supervisor','',g.supervisor_picks?'routes by model':'fixed order'),
+  ];
+  ags.forEach((a,i)=>nodes.push(N(x0+i*(AW+GAP),yAg,AW,AH,a.name,a.in_order?'ag':'off',
+    a.in_order?(a.tools.length+' tool'+(a.tools.length===1?'':'s')):'not in order')));
+  nodes.push(N(cx-70,yS,140,hS,'synthesize','','builds the report'));
+  post.forEach(pa=>nodes.push(N(cx-108,yC,216,40,pa.name,'post','rewrites it for the client')));
+  nodes.push(N(cx-96,yP,192,40,'propose_scenario','gate','waits for you'));
+  nodes.push(N(cx-192,ySave,112,30,'save','','writes kb/'));
+  nodes.push(N(cx+82,yEnd,112,30,'END','term'));
+  nodes.push(N(cx-192,ySave+54,112,28,'END','term'));
 
   const cxOf=i=>x0+i*(AW+GAP)+AW/2;
+  const R=10;                                   // corner radius on the rails
   let paths='';
-  paths+=`<line x1="${cx}" y1="34" x2="${cx}" y2="66"/>`;
-  ags.forEach((a,i)=>{
-    if(!a.in_order) return;
-    paths+=`<path d="M ${cx} 100 C ${cx} 125, ${cxOf(i)} 125, ${cxOf(i)} 150"/>`;
-    // loop back to supervisor down the outside
-    const side = cxOf(i) < cx ? x0-22 : x0+rowW+22;
-    paths+=`<path d="M ${cxOf(i)} 196 C ${cxOf(i)} 220, ${side} 210, ${side} 83 L ${cx-70} 83"
-             marker-end="url(#ar)"/>`;
-  });
-  // requires edges (dashed, between agent boxes)
-  ags.forEach((a,i)=>(a.requires||[]).forEach(r=>{
-    const j=ags.findIndex(x=>x.name===r); if(j<0)return;
-    paths+=`<path class="req" d="M ${cxOf(j)} 150 C ${cxOf(j)} 132, ${cxOf(i)} 132, ${cxOf(i)} 150"
-             marker-end="url(#arw)"/>`;
-  }));
-  paths+=`<line x1="${cx}" y1="196" x2="${cx}" y2="${yS}" stroke-dasharray="3 3"/>`;
-  if(post.length){
-    paths+=`<line x1="${cx}" y1="${yS+34}" x2="${cx}" y2="${yC}" marker-end="url(#ar)"/>`;
-    paths+=`<line x1="${cx}" y1="${yC+38}" x2="${cx}" y2="${yP}" marker-end="url(#ar)"/>`;
-  } else {
-    paths+=`<line x1="${cx}" y1="${yS+34}" x2="${cx}" y2="${yP}" marker-end="url(#ar)"/>`;
+  paths+=`<line x1="${cx}" y1="36" x2="${cx}" y2="${ySup}"/>`;
+
+  const live=ags.map((a,i)=>i).filter(i=>ags[i].in_order);
+  // Fan out to each agent.
+  live.forEach(i=>{paths+=`<path d="M ${cx} ${supB} C ${cx} ${supB+26}, ${cxOf(i)} ${yAg-26}, ${cxOf(i)} ${yAg}"/>`;});
+  // One shared return rail instead of a sweeping curve per agent — with six agents the
+  // per-agent curves crossed the whole diagram and buried the boxes underneath.
+  if(live.length){
+    live.forEach(i=>{paths+=`<line x1="${cxOf(i)}" y1="${agB}" x2="${cxOf(i)}" y2="${railY}"/>`;});
+    const far=cxOf(live[live.length-1]);
+    paths+=`<path class="rail" d="M ${far} ${railY} L ${railL+R} ${railY} Q ${railL} ${railY} ${railL} ${railY-R}
+      L ${railL} ${supB+18+R} Q ${railL} ${supB+18} ${railL+R} ${supB+18}
+      L ${cx-56-R} ${supB+18} Q ${cx-56} ${supB+18} ${cx-56} ${supB+8}
+      L ${cx-56} ${supB}" marker-end="url(#ar)"/>`;
   }
-  paths+=`<path class="yes" d="M ${cx-40} ${yP+38} C ${cx-40} ${ySave-14}, ${cx-131} ${ySave-14}, ${cx-131} ${ySave}" marker-end="url(#arg)"/>`;
-  paths+=`<path class="no"  d="M ${cx+40} ${yP+38} C ${cx+40} ${yEnd-14}, ${cx+135} ${yEnd-14}, ${cx+135} ${yEnd}" marker-end="url(#arr)"/>`;
-  paths+=`<line x1="${cx-131}" y1="${ySave+30}" x2="${cx-131}" y2="${ySave+52}"/>`;
+  // requires: short arcs in the gap between the supervisor and the agent row.
+  ags.forEach((a,i)=>{ if(!a.in_order) return; (a.requires||[]).forEach(r=>{
+    const j=ags.findIndex(x=>x.name===r); if(j<0||!ags[j].in_order)return;
+    const h=Math.min(46,16+Math.abs(i-j)*9);
+    paths+=`<path class="req" d="M ${cxOf(j)} ${yAg} C ${cxOf(j)} ${yAg-h}, ${cxOf(i)} ${yAg-h}, ${cxOf(i)} ${yAg}"
+             marker-end="url(#arw)"/>`;
+  });});
+  // "done" leaves the supervisor on the right and drops past the agent row.
+  paths+=`<path class="rail" stroke-dasharray="4 4" d="M ${cx+70} ${ySup+hSup/2} L ${railR-R} ${ySup+hSup/2}
+    Q ${railR} ${ySup+hSup/2} ${railR} ${ySup+hSup/2+R} L ${railR} ${yS+hS/2-R}
+    Q ${railR} ${yS+hS/2} ${railR-R} ${yS+hS/2} L ${cx+70} ${yS+hS/2}" marker-end="url(#ar)"/>`;
+
+  if(post.length){
+    paths+=`<line x1="${cx}" y1="${yS+hS}" x2="${cx}" y2="${yC}" marker-end="url(#ar)"/>`;
+    paths+=`<line x1="${cx}" y1="${yC+40}" x2="${cx}" y2="${yP}" marker-end="url(#ar)"/>`;
+  } else {
+    paths+=`<line x1="${cx}" y1="${yS+hS}" x2="${cx}" y2="${yP}" marker-end="url(#ar)"/>`;
+  }
+  paths+=`<path class="yes" d="M ${cx-44} ${yP+40} C ${cx-44} ${ySave-16}, ${cx-136} ${ySave-16}, ${cx-136} ${ySave}" marker-end="url(#arg)"/>`;
+  paths+=`<path class="no"  d="M ${cx+44} ${yP+40} C ${cx+44} ${yEnd-16}, ${cx+138} ${yEnd-16}, ${cx+138} ${yEnd}" marker-end="url(#arr)"/>`;
+  paths+=`<line x1="${cx-136}" y1="${ySave+30}" x2="${cx-136}" y2="${ySave+54}"/>`;
 
   const boxes=nodes.map(d=>`
-    <g><rect class="${d.cls}" x="${d.x}" y="${d.y}" width="${d.w}" height="${d.h}" rx="7"/>
-    <text x="${d.x+d.w/2}" y="${d.y+(d.sub?18:d.h/2+4)}" text-anchor="middle">${esc(d.label)}</text>
-    ${d.sub?`<text class="lbl" x="${d.x+d.w/2}" y="${d.y+32}" text-anchor="middle">${esc(d.sub)}</text>`:''}</g>`).join('');
+    <g class="n ${d.cls}">
+      <rect class="card" x="${d.x}" y="${d.y}" width="${d.w}" height="${d.h}" rx="9"/>
+      ${d.cls&&d.cls!=='term'?`<rect class="bar" x="${d.x}" y="${d.y+7}" width="3.5"
+        height="${d.h-14}" rx="2"/>`:''}
+      <text x="${d.x+d.w/2}" y="${d.y+(d.sub?18:d.h/2+4)}" text-anchor="middle">${esc(d.label)}</text>
+      ${d.sub?`<text class="lbl" x="${d.x+d.w/2}" y="${d.y+32}" text-anchor="middle">${esc(d.sub)}</text>`:''}
+      <title>${esc(d.label)}${d.sub?' — '+esc(d.sub):''}</title></g>`).join('');
 
   const mk=(id,c)=>`<marker id="${id}" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6"
     markerHeight="6" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="${c}" stroke="none"/></marker>`;
 
   $('#graph').innerHTML=`
    <div class="card"><h3>Execution graph</h3>
-    <svg class="g" viewBox="0 0 ${W} ${ySave+92}" role="img" aria-label="agent execution graph">
+    <svg class="g" viewBox="-4 0 ${W+8} ${ySave+96}" style="max-width:${W+8}px"
+         role="img" aria-label="agent execution graph">
       <defs>${mk('ar','var(--dim)')}${mk('arw','var(--warn)')}${mk('arg','var(--ok)')}${mk('arr','var(--bad)')}</defs>
       ${paths}${boxes}
     </svg>
@@ -356,6 +741,10 @@ async function loadGraph(){
         needs <code>${a.needs_context.map(esc).join(', ')}</code> to have been extracted from an
         earlier agent's tool output — if that agent runs but its tools fail,
         <b>${esc(a.name)}</b> stays blocked rather than probing blind.`).join('')}
+      ${ags.filter(a=>(a.scope_context||[]).length).map(a=>`<br><b>${esc(a.name)}</b> applies only
+        when <code>${a.scope_context.map(esc).join(', ')}</code> was extracted — a domain expert
+        with nothing in its domain is <b>not applicable</b> rather than blocked, so it is left
+        out of the report instead of appearing there as a check we failed to run.`).join('')}
       <span class="ok">Green</span>: you approved. <span class="bad">Red</span>: you rejected.
       <code>save</code> is the only node that writes, and it is reachable only through the gate.
       Ceiling of ${g.max_steps} agent steps per session.
@@ -363,54 +752,315 @@ async function loadGraph(){
         <code>order</code>, so the supervisor can never pick it — add it to the order to enable it.`:''}
     </p>
    </div>
-   <div class="card"><h3>Flow</h3>
-     <p class="note">Order is the sequence the supervisor may pick from. Requires is a hard
-       precondition it cannot violate — an agent is ineligible until its prerequisites have run.
-       Saving redraws the diagram above.</p>
-     <p class="dim" style="margin:8px 0 4px">Order (comma separated)</p>
-     <input type="text" id="f-order" value="${esc(eff.order.join(', '))}">
-     <p class="dim" style="margin:10px 0 4px">Requires — one per line, <code>agent: prereq, prereq</code></p>
-     <textarea id="f-req" style="min-height:76px">${esc(Object.entries(eff.requires).map(([k,v])=>`${k}: ${v.join(', ')}`).join('\n'))}</textarea>
-     <label class="chk" style="margin-top:8px"><input type="checkbox" id="f-sup" ${eff.supervisor_picks?'checked':''}>
-       supervisor picks the next agent (uncheck for a fixed pipeline)</label>
-     <div><button class="sm yes" onclick="saveFlow()">Save flow</button><span class="saved" id="fv"></span></div>
+   <div id="flowed"></div>`;
+
+  FLOW={order:[...g.order], requires:JSON.parse(JSON.stringify(eff.requires||{})),
+        picks:g.supervisor_picks, all:g.agents, sel:null};
+  renderFlow();
+}
+
+// ---------------- visual flow editor ----------------
+var FLOW=null, DRAG=null;
+const BW=126, BH=42, GAP=18, DY=62;
+
+function agentInfo(n){ return (FLOW.all.find(a=>a.name===n))||{name:n,tools:[]}; }
+
+function flowProblems(){
+  // A prerequisite must run earlier. Reordering can make an existing edge point
+  // backwards; the server rejects that on save, so say so before they press it.
+  const out=[];
+  FLOW.order.forEach((dep,i)=>(FLOW.requires[dep]||[]).forEach(pre=>{
+    const j=FLOW.order.indexOf(pre);
+    if(j<0) out.push({dep,pre,why:`${pre} is not in the pipeline, so ${dep} could never run`});
+    else if(j>i) out.push({dep,pre,why:`${dep} requires ${pre}, but runs before it`});
+  }));
+  return out;
+}
+
+function renderFlow(){
+  const pool=FLOW.all.map(a=>a.name).filter(n=>!FLOW.order.includes(n));
+  const problems=flowProblems();
+  const chip=(n,off)=>{const a=agentInfo(n);
+    return `<div class="chip${off?' off':''}" draggable="true" data-name="${esc(n)}"
+      ondragstart="chipDrag(event)" ondragend="chipDrop()">
+      <b>${esc(n)}</b><small>${a.tools.length} tool${a.tools.length===1?'':'s'}</small></div>`;};
+
+  $('#flowed').innerHTML=`
+   <div class="card"><h3>Pipeline</h3>
+     <p class="note">Drag to reorder. The supervisor may only pick from this lane, in any
+       order the preconditions allow — position sets what is <i>possible</i>, not a fixed
+       sequence. Drag an agent down to the shelf to take it out of the pipeline entirely.</p>
+     <p class="hint">In the pipeline — left to right</p>
+     <div class="lane" id="lane-order" ondragover="laneOver(event)" ondragleave="laneOut(event)"
+          ondrop="laneDrop(event,'order')">${FLOW.order.map(n=>chip(n,false)).join('')||
+          '<span class="empty">Empty — drag an agent here.</span>'}</div>
+     <p class="hint" style="margin-top:12px">Defined but not in the pipeline — the supervisor can never pick these</p>
+     <div class="lane" id="lane-pool" ondragover="laneOver(event)" ondragleave="laneOut(event)"
+          ondrop="laneDrop(event,'pool')">${pool.map(n=>chip(n,true)).join('')||
+          '<span class="empty">None — every defined agent is in the pipeline.</span>'}</div>
    </div>
-   <div class="card"><h3>Mermaid export <span class="dim" style="font-weight:400">— from langgraph</span></h3>
-     <pre>${esc(g.mermaid||'(unavailable)')}</pre></div>`;
+
+   <div class="card"><h3>Prerequisites</h3>
+     <p class="note">Click an agent, then click one to its <b>left</b> to make that a
+       prerequisite: the supervisor cannot pick the first until the second has run. Click an
+       arrow to remove it. A prerequisite must run earlier, which is why only the left side
+       is offered.</p>
+     ${FLOW.order.length?depSvg():'<p class="dim">Put agents in the pipeline first.</p>'}
+     ${FLOW.sel?`<p class="note warn">Selected <b>${esc(FLOW.sel)}</b> — now click a
+        prerequisite to its left, or <a href="#" onclick="FLOW.sel=null;renderFlow();return false">cancel</a>.</p>`:''}
+     ${problems.length?`<div class="alert"><b>This flow cannot be saved.</b>
+        <ul class="tight">${problems.map(p=>`<li>${esc(p.why)} — drag it back, or click the
+          red arrow to drop the prerequisite.</li>`).join('')}</ul></div>`:''}
+   </div>
+
+   <div class="card"><h3>Routing mode</h3>
+     <label class="chk"><input type="checkbox" id="f-sup" ${FLOW.picks?'checked':''}
+       onchange="FLOW.picks=this.checked">
+       supervisor picks the next agent (uncheck for a fixed pipeline)</label>
+     <p class="note">Either way the choice is constrained to what is eligible in code —
+       order, prerequisites, and the context gates. Routing cannot widen them.</p>
+     <div class="row" style="margin-top:8px">
+       <button class="sm yes" onclick="saveFlow()" ${problems.length?'disabled':''}
+         title="${problems.length?'Fix the prerequisite order first':'Save'}">Save flow</button>
+       <button class="sm" onclick="loadGraph()">Discard changes</button>
+       <span class="saved" id="fv"></span></div>
+   </div>`;
+}
+
+function depSvg(){
+  const n=FLOW.order.length, W=20+n*BW+(n-1)*GAP, H=DY+BH+12;
+  const x=i=>10+i*(BW+GAP), cx=i=>x(i)+BW/2;
+  let arcs='';
+  FLOW.order.forEach((dep,i)=>(FLOW.requires[dep]||[]).forEach(pre=>{
+    const j=FLOW.order.indexOf(pre); if(j<0)return;
+    const h=Math.min(46,16+Math.abs(i-j)*11);
+    const back=j>i;                       // prerequisite scheduled after its dependant
+    const d=`M ${cx(j)} ${DY} C ${cx(j)} ${DY-h}, ${cx(i)} ${DY-h}, ${cx(i)} ${DY}`;
+    arcs+=`<g class="edge"><path class="dep${back?' bad':''}" d="${d}"
+             marker-end="url(#${back?'depb':'depa'})"/>
+           <path class="hit" d="${d}" onclick="unlink('${esc(dep)}','${esc(pre)}')">
+             <title>Remove: ${esc(dep)} requires ${esc(pre)}</title></path></g>`;
+  }));
+  const sel=FLOW.sel, si=sel?FLOW.order.indexOf(sel):-1;
+  const boxes=FLOW.order.map((nm,i)=>{
+    const isSel=nm===sel, cand=si>=0&&i<si;
+    const deps=(FLOW.requires[nm]||[]).length;
+    return `<g class="dn${isSel?' sel':''}${cand?' cand':''}" onclick="pick('${esc(nm)}')">
+       <rect class="card" x="${x(i)}" y="${DY}" width="${BW}" height="${BH}" rx="9"/>
+       <rect class="bar" x="${x(i)}" y="${DY+7}" width="3.5" height="${BH-14}" rx="2"/>
+       <text x="${cx(i)}" y="${DY+(deps?19:BH/2+4)}" text-anchor="middle">${esc(nm)}</text>
+       ${deps?`<text class="sub" x="${cx(i)}" y="${DY+32}" text-anchor="middle">${deps} prereq${deps===1?'':'s'}</text>`:''}
+       <title>${cand?`Make ${esc(nm)} a prerequisite of ${esc(sel)}`
+         :isSel?`${esc(nm)} selected — click one to its left`:`Select ${esc(nm)}`}</title></g>`;}).join('');
+  return `<svg class="dep" viewBox="0 0 ${W} ${H}" style="max-width:${W}px"
+    role="img" aria-label="prerequisite editor">
+    <defs><marker id="depa" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6"
+      orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--warn)" stroke="none"/></marker>
+      <marker id="depb" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6"
+      orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--bad)" stroke="none"/></marker></defs>
+    ${arcs}${boxes}</svg>`;
+}
+
+function pick(n){
+  if(!FLOW.sel){ FLOW.sel=n; return renderFlow(); }
+  if(FLOW.sel===n){ FLOW.sel=null; return renderFlow(); }
+  const i=FLOW.order.indexOf(FLOW.sel), j=FLOW.order.indexOf(n);
+  if(j<i){
+    const cur=FLOW.requires[FLOW.sel]||[];
+    FLOW.requires[FLOW.sel]=cur.includes(n)?cur.filter(x=>x!==n):[...cur,n];
+    if(!FLOW.requires[FLOW.sel].length) delete FLOW.requires[FLOW.sel];
+    FLOW.sel=null;
+  } else { FLOW.sel=n; }   // clicked to the right: treat as selecting that one instead
+  renderFlow();
+}
+function unlink(dep,pre){
+  FLOW.requires[dep]=(FLOW.requires[dep]||[]).filter(x=>x!==pre);
+  if(!FLOW.requires[dep].length) delete FLOW.requires[dep];
+  renderFlow();
+}
+
+function chipDrag(e){
+  DRAG=e.currentTarget.dataset.name;
+  e.currentTarget.classList.add('dragging');
+  e.dataTransfer.effectAllowed='move';
+  e.dataTransfer.setData('text/plain',DRAG);
+}
+function chipDrop(){ document.querySelectorAll('.chip.dragging').forEach(c=>c.classList.remove('dragging')); }
+function laneOver(e){
+  e.preventDefault();
+  const lane=e.currentTarget; lane.classList.add('over');
+  const others=[...lane.querySelectorAll('.chip')].filter(c=>c.dataset.name!==DRAG);
+  others.forEach(c=>c.classList.remove('ins-before','ins-after'));
+  if(!others.length)return;
+  let i=others.findIndex(c=>{const r=c.getBoundingClientRect();return e.clientX<r.left+r.width/2});
+  if(i<0) others[others.length-1].classList.add('ins-after');
+  else others[i].classList.add('ins-before');
+}
+function clearMarks(lane){ (lane||document).querySelectorAll('.chip')
+  .forEach(c=>c.classList.remove('ins-before','ins-after')); }
+function laneOut(e){ e.currentTarget.classList.remove('over'); clearMarks(e.currentTarget); }
+
+function laneDrop(e,lane){
+  e.preventDefault(); e.currentTarget.classList.remove('over'); clearMarks();
+  const name=DRAG||e.dataTransfer.getData('text/plain'); DRAG=null;
+  if(!name)return;
+  const idx=insertAt(e.currentTarget,e.clientX,name);
+  FLOW.order=FLOW.order.filter(n=>n!==name);
+  if(lane==='order'){
+    FLOW.order.splice(Math.min(idx,FLOW.order.length),0,name);
+  } else {
+    // Out of the pipeline: drop every prerequisite edge that mentions it, otherwise the
+    // save is rejected for referring to an agent that can never run.
+    delete FLOW.requires[name];
+    Object.keys(FLOW.requires).forEach(k=>{
+      FLOW.requires[k]=FLOW.requires[k].filter(d=>d!==name);
+      if(!FLOW.requires[k].length) delete FLOW.requires[k];
+    });
+  }
+  if(FLOW.sel&&!FLOW.order.includes(FLOW.sel)) FLOW.sel=null;
+  renderFlow();
+}
+function insertAt(laneEl,clientX,moving){
+  const chips=[...laneEl.querySelectorAll('.chip')].filter(c=>c.dataset.name!==moving);
+  for(let i=0;i<chips.length;i++){
+    const r=chips[i].getBoundingClientRect();
+    if(clientX < r.left+r.width/2) return i;
+  }
+  return chips.length;
+}
+
+async function saveFlow(){
+  try{ await api('/config/flow',{method:'PUT',headers:{'content-type':'application/json'},
+         body:JSON.stringify({order:FLOW.order,requires:FLOW.requires,supervisor_picks:FLOW.picks})});
+       flash('fv','saved'); loadGraph(); }
+  catch(e){ flash('fv',e.message,true); }
 }
 
 // ---------------- editable config ----------------
-let CFG=null;
+var CFG=null;
+// Which entries are expanded. Kept across re-renders so a save does not collapse the
+// card you are working in.
+var OPEN={agent:new Set(), post:new Set(), tool:new Set()};
+
+function firstSentence(t,cap){
+  const s=String(t||'').replace(/\s+/g,' ').trim();
+  const cut=s.indexOf('. ');
+  const out=(cut>0&&cut<cap)?s.slice(0,cut+1):s;
+  return out.length>cap?out.slice(0,cap-1).replace(/\s\S*$/,'')+'…':out;
+}
+
+function togglePerm(kind,name){
+  OPEN[kind].has(name)?OPEN[kind].delete(name):OPEN[kind].add(name);
+  renderPerms();
+}
+
 async function loadPerms(){
   CFG=await api('/config'); META=await api('/meta');
+  renderPerms();
+}
+
+function entry(kind,name,{badges='',summary='',chips='',body='',ro=false,actions=''}){
+  const open=OPEN[kind].has(name);
+  const tog=ro?'':`onclick="togglePerm('${kind}','${esc(name)}')"`;
+  return `<div class="card ent ${ro?'ro':''}">
+    <header ${tog}>
+      ${ro?'':`<span class="caret ${open?'open':''}">▶</span>`}
+      <b>${esc(name)}</b>${badges}
+      <span class="grow"></span>
+      ${actions}
+      ${ro?'':`<button class="sm" onclick="event.stopPropagation();togglePerm('${kind}','${esc(name)}')">
+        ${open?'Done':'Edit'}</button>`}
+    </header>
+    ${summary?`<p class="summ">${summary}</p>`:''}
+    ${chips?`<div>${chips}</div>`:''}
+    ${open&&body?`<div class="body">${body}</div>`:''}
+  </div>`;
+}
+
+function renderPerms(){
   const eff=CFG.effective, over=CFG.overridden_keys;
   const allTools=META.tools.map(t=>t.name);
+  const sup=CFG.supervisor||{};
 
-  const agentCards=Object.entries(eff.agents).map(([name,a])=>`
-   <div class="card"><h3>${esc(name)}
-     <button class="sm no" style="float:right" onclick="delAgent('${esc(name)}')">delete</button></h3>
-     <textarea class="p" id="ap-${name}">${esc(a.prompt)}</textarea>
-     <div style="margin:8px 0">${allTools.map(t=>`<label class="chk">
-       <input type="checkbox" data-a="${name}" value="${t}" ${(a.tools||[]).includes(t)?'checked':''}> ${esc(t)}</label>`).join('')}</div>
-     <button class="sm yes" onclick="saveAgent('${esc(name)}')">Save agent</button>
-     <span class="saved" id="sv-${name}"></span>
-   </div>`).join('');
+  const supCard=entry('agent','supervisor',{
+    ro:true,
+    badges:'<span class="badge">read-only · routing engine</span>',
+    summary:esc(firstSentence(sup.role,180)),
+    chips:'<span class="tchip none">no tools — it routes, it does not gather</span>',
+  })+`<p class="note" style="margin:-6px 0 12px 2px">Routing:
+     ${sup.picks?'model picks the next eligible agent':'fixed order — routing off'} ·
+     ceiling ${esc(sup.max_steps)} steps · may pick from
+     <code>${(sup.eligible_pool||[]).map(esc).join(', ')||'—'}</code>.
+     Change what it may pick, and in what order, in the <b>Graph</b> tab.</p>`;
 
-  const toolCards=META.tools.map(t=>`
-   <div class="card"><h3>${esc(t.name)}
-     <span class="${t.side_effect==='none'?'ok':'bad'}" style="font-weight:400;font-size:12px">
-       side effect: ${esc(t.side_effect)}</span>
-     ${eff.tool_descriptions[t.name]?'<span class="badge">overridden</span>':''}</h3>
-     <p class="note">Params: <code>${t.params.join(', ')||'none'}</code>. This text is what the
-       model reads to decide when to call it.</p>
-     <textarea class="p" id="td-${t.name}">${esc(t.description)}</textarea>
-     <button class="sm yes" onclick="saveTool('${esc(t.name)}')">Save description</button>
-     <button class="sm" onclick="resetTool('${esc(t.name)}')">Revert to default</button>
-     <span class="saved" id="tv-${t.name}"></span>
-   </div>`).join('');
+  const agentCards=Object.entries(eff.agents).map(([name,a])=>{
+    const inOrder=(eff.order||[]).includes(name);
+    const scope=a.scope_context||[], needs=a.needs_context||[];
+    const badges=[
+      inOrder?'':'<span class="badge">not in the pipeline</span>',
+      scope.length?`<span class="badge">scoped: ${scope.map(esc).join(', ')}</span>`:'',
+      needs.length?`<span class="badge">needs: ${needs.map(esc).join(', ')}</span>`:'',
+    ].join('');
+    const chips=allTools.filter(t=>(a.tools||[]).includes(t))
+      .map(t=>`<span class="tchip on">${esc(t)}</span>`).join('')
+      || '<span class="tchip none">no tools</span>';
+    const body=`
+      <p class="dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;
+        font-weight:600;margin:0 0 4px">Role</p>
+      <textarea class="p" id="ap-${name}">${esc(a.prompt)}</textarea>
+      <p class="dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;
+        font-weight:600;margin:10px 0 4px">Tools it may call</p>
+      <div>${allTools.map(t=>`<label class="chk">
+        <input type="checkbox" data-a="${name}" value="${t}" ${(a.tools||[]).includes(t)?'checked':''}> ${esc(t)}</label>`).join('')}</div>
+      <div class="row" style="margin-top:10px">
+        <button class="sm yes" onclick="saveAgent('${esc(name)}')">Save agent</button>
+        <button class="sm no" onclick="delAgent('${esc(name)}')">Delete</button>
+        <span class="saved" id="sv-${name}"></span></div>`;
+    return entry('agent',name,{badges,summary:esc(firstSentence(a.prompt,190)),chips,body});
+  }).join('');
+
+  const postCards=Object.entries(eff.post_agents||{}).map(([name,a])=>{
+    const body=`
+      <p class="note">Transforms the finished report. Drafts are scanned for internal
+        identifiers before anything is sent.</p>
+      <textarea class="p" style="min-height:190px" id="pa-${name}">${esc(a.prompt)}</textarea>
+      <p class="note">Tools are disabled, and not merely unchecked: a post-synthesis agent
+        runs through <code>llm.run_text_agent</code>, which has no tool loop at all, so a
+        tool ticked here would be silently ignored rather than called. Enabling it needs a
+        graph change, not a checkbox.</p>
+      <div class="row"><button class="sm yes" onclick="savePost('${esc(name)}')">Save prompt</button>
+        <span class="saved" id="pv-${name}"></span></div>`;
+    return entry('post',name,{
+      badges:'<span class="badge">after synthesize</span>',
+      summary:esc(firstSentence(a.prompt,190)),
+      chips:'<span class="tchip none">no tools — it transforms the report</span>',
+      body});
+  }).join('');
+
+  const toolCards=META.tools.map(t=>{
+    const overridden=!!eff.tool_descriptions[t.name];
+    const used=Object.entries(eff.agents).filter(([,a])=>(a.tools||[]).includes(t.name))
+      .map(([n])=>n);
+    const badges=[
+      t.side_effect==='none'?'':`<span class="badge">side effect: ${esc(t.side_effect)}</span>`,
+      overridden?'<span class="badge">overridden</span>':'',
+    ].join('');
+    const chips=(used.length?used:['— not given to any agent'])
+      .map(n=>`<span class="tchip ${used.length?'on':'none'}">${esc(n)}</span>`).join('');
+    const body=`
+      <p class="note">Params: <code>${t.params.join(', ')||'none'}</code>. This text is what
+        the model reads to decide when to call it.</p>
+      <textarea class="p" id="td-${t.name}">${esc(t.description)}</textarea>
+      <div class="row" style="margin-top:8px">
+        <button class="sm yes" onclick="saveTool('${esc(t.name)}')">Save description</button>
+        <button class="sm" onclick="resetTool('${esc(t.name)}')">Revert to default</button>
+        <span class="saved" id="tv-${t.name}"></span></div>`;
+    return entry('tool',t.name,{badges,summary:esc(firstSentence(t.description,190)),chips,body});
+  }).join('');
 
   $('#perms').innerHTML=`
-   <h2 class="sec">Agents <em>routed by the supervisor · gather evidence with tools</em></h2>
+   <h2 class="sec">Agents <em>click one to edit its role and tools</em></h2>
+   ${supCard}
    ${agentCards}
    <div class="card"><h3>Add an agent</h3>
      <div class="row"><input type="text" id="na" placeholder="name (lowercase, e.g. storage)">
@@ -419,17 +1069,9 @@ async function loadPerms(){
    </div>
 
    <h2 class="sec">Post-synthesis agents <em>fixed position in the graph · no tools</em></h2>
-   ${Object.entries(eff.post_agents||{}).map(([name,a])=>`
-     <div class="card"><h3>${esc(name)} <span class="dim" style="font-weight:400;font-size:12px">
-       — runs after synthesize, no tools</span></h3>
-       <p class="note">Transforms the finished report. It gathers no evidence, so it is not in
-         the supervisor pool and takes no tools. Drafts are scanned for internal identifiers
-         before anything is sent.</p>
-       <textarea class="p" style="min-height:190px" id="pa-${name}">${esc(a.prompt)}</textarea>
-       <button class="sm yes" onclick="savePost('${esc(name)}')">Save prompt</button>
-       <span class="saved" id="pv-${name}"></span></div>`).join('')}
+   ${postCards}
 
-   <h2 class="sec">Tools <em>what the model reads to decide when to call them</em></h2>
+   <h2 class="sec">Tools <em>the summary is the first line the model reads</em></h2>
    ${toolCards}
 
    <h2 class="sec">Permissions <em>what may run, and what may be addressed</em></h2>
@@ -444,11 +1086,10 @@ async function loadPerms(){
        <span class="saved" id="cv"></span></div>
    </div>
 
-   <div class="card"><h3>Addressable nodes <span class="dim" style="font-weight:400">— from ${esc(META.permissions.inventory&&Object.keys(META.permissions.inventory).length?'the gotcha30 config':'nothing')}</span></h3>
-     <p class="note">Derived from the gotcha30 config named by <code>GOTCHA30_CONFIG</code>, with
-       credential keys dropped while parsing. Point the agent at a different deployment by changing
-       that env var, not by typing hosts here — the config is the source of truth.</p>
-     <pre>${esc(Object.values(META.permissions.inventory).map(n=>`${(n.name||'').padEnd(15)} ${(n.type||'').padEnd(22)} ${n.endpoint?(n.endpoint.scheme+'://'+n.endpoint.host+(n.endpoint.port?':'+n.endpoint.port:'')):'—'}`).join('\n'))}</pre>
+   <div class="card"><h3>Addressable systems</h3>
+     <p class="note">The systems an agent may name are managed in the
+       <b>Inventory &amp; systems</b> tab. Credentials there never reach a prompt: the
+       model-facing view is rebuilt from a field allowlist.</p>
    </div>
 
    <h2 class="sec">Configuration source <em>where these values come from</em></h2>
@@ -463,6 +1104,241 @@ async function loadPerms(){
      </div>
      <div id="auditbox"></div>
    </div>`;
+}
+
+// ---------------- inventory & systems ----------------
+var INV=null, EDIT=null, VIEW=null;
+
+async function loadInv(){ INV=await api('/inventory'); renderInv(); }
+
+const ROLE_LABEL={sensor:'Sensor',compute:'Compute',laptop:'Laptop',network:'Network',
+                  power:'Power',other:'Other'};
+const roleTag=r=>`<span class="rolet ${esc(r||'other')}">${esc(ROLE_LABEL[r]||r||'other')}</span>`;
+const addrOf=c=>c.address?`${esc(c.address)}${c.port?':'+c.port:''}`:'—';
+const accessOf=c=>{const k=c.ssh||{};
+  return k.key_file?'key':(k.password?'password':(k.password_env?'env var':'—'));};
+
+function renderInv(){
+  const rows=INV.systems.map(sy=>{
+    const comps=sy.components||sy.sensors||[];
+    const byRole=comps.reduce((m,c)=>((m[c.role||'other']=(m[c.role||'other']||0)+1),m),{});
+    return `<tr class="click" onclick="viewSys('${esc(sy.name)}')">
+     <td class="mono">${esc(sy.name)}</td>
+     <td>${esc(sy.site||'—')}</td>
+     <td class="dim">${comps.length}</td>
+     <td>${Object.entries(byRole).map(([r,n])=>`${roleTag(r)}<span class="dim"> ${n}</span>`).join(' ')||'—'}</td>
+     <td><button class="sm" onclick="event.stopPropagation();viewSys('${esc(sy.name)}')">open</button></td></tr>`;}).join('');
+
+  $('#inv').innerHTML=`
+   <datalist id="domlist2">${INV.domains.map(d=>`<option value="${esc(d)}">`).join('')}</datalist>
+   ${Object.entries(INV.type_catalog||{}).map(([r,ts])=>
+     `<datalist id="types-${esc(r)}">${ts.map(t=>`<option value="${esc(t)}">`).join('')}</datalist>`).join('')}
+   <div class="card"><h3>Systems</h3>
+     <p class="note">A system groups everything on one platform — sensors, the compute box
+       that runs the stack, the switch they hang off, a laptop left on site. Names live in a
+       single namespace across every system, because a name is what a tool argument resolves
+       against; the same name twice is refused.</p>
+     <div class="scroll"><table>
+       <tr><th>system</th><th>site</th><th>parts</th><th>make-up</th><th></th></tr>
+       ${rows||'<tr><td colspan="5" class="dim">Nothing yet. Add a system below.</td></tr>'}
+     </table></div>
+     <p class="note" style="margin-top:10px">Registry:
+       <code>${esc(INV.path)}</code>${INV.exists?'':' <span class="warn">(not created yet)</span>'}
+       · secrets: <code>${esc(INV.secrets_path)}</code></p>
+   </div>
+
+   <div class="card"><h3>Add a system</h3>
+     <div class="row"><input type="text" id="newsys" placeholder="lowercase name, e.g. tower1">
+       <button class="sm yes" onclick="newSys()">Create</button></div>
+   </div>
+
+   <div id="sysdetail"></div>
+
+   <div class="card"><h3>What the agent sees</h3>
+     <p class="note">Rebuilt from a field allowlist in <code>inventory.py</code>, not by
+       stripping fields from the rows above. Credentials have no path into it: the
+       <code>access</code> block is never carried over, and a password lives in the secrets
+       file, never in the registry. This is the exact text that goes into the cached system
+       prompt.</p>
+     <pre>${esc(INV.agent_prompt||'(no systems)')}</pre>
+   </div>`;
+  if(EDIT) renderEdit(); else if(VIEW) renderView();
+}
+
+// ---- read-only summary ----
+function viewSys(n){ VIEW=n; EDIT=null; renderInv(); }
+function closeView(){ VIEW=null; EDIT=null; renderInv(); }
+
+function renderView(){
+  const sy=INV.systems.find(x=>x.name===VIEW);
+  if(!sy){ VIEW=null; return; }
+  const comps=sy.components||sy.sensors||[];
+  const box=$('#sysdetail'); if(!box)return;
+  box.innerHTML=`
+   <div class="card"><h3><span class="mono">${esc(sy.name)}</span>
+     <span class="dim" style="font-weight:400">${sy.site?' · '+esc(sy.site):''}</span>
+     <span style="float:right;display:flex;gap:6px">
+       <button class="sm yes" onclick="editSys('${esc(sy.name)}')">Edit</button>
+       <button class="sm no" onclick="delSys('${esc(sy.name)}')">Delete</button>
+       <button class="sm" onclick="closeView()">Close</button></span></h3>
+     ${sy.description?`<p class="note">${esc(sy.description)}</p>`:''}
+     <div class="scroll"><table>
+       <tr><th>name</th><th>role</th><th>type</th><th>domain</th><th>address</th>
+           <th>hardware</th><th>version</th><th>access</th></tr>
+       ${comps.map(c=>`<tr>
+         <td class="mono">${esc(c.name)}</td>
+         <td>${roleTag(c.role)}</td>
+         <td class="mono dim">${esc(c.type||'—')}</td>
+         <td class="mono">${esc(c.domain||'—')}</td>
+         <td class="mono">${addrOf(c)}</td>
+         <td>${esc(c.hardware||'—')}</td>
+         <td class="mono dim">${esc(c.software_version||'—')}</td>
+         <td class="dim">${esc(accessOf(c))}</td></tr>`).join('')
+        ||'<tr><td colspan="8" class="dim">No components.</td></tr>'}
+     </table></div>
+     <p class="note">Read-only. Click <b>Edit</b> to change anything — passwords included,
+       which are shown masked there and never written to the registry file.</p>
+   </div>`;
+  box.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+
+// ---- dense editor ----
+function newSys(){
+  const n=$('#newsys').value.trim(); if(!n)return;
+  if(!/^[a-z][a-z0-9_-]{0,63}$/.test(n)) return alert('lowercase letters, digits, - or _');
+  EDIT={name:n,site:'',description:'',components:[],isNew:true}; VIEW=null;
+  renderInv();
+}
+function editSys(n){
+  const sy=INV.systems.find(x=>x.name===n);
+  EDIT=JSON.parse(JSON.stringify({name:sy.name,site:sy.site,description:sy.description,
+    components:(sy.components||sy.sensors||[]).map(c=>({...c,ssh:c.ssh||{}})),isNew:false}));
+  VIEW=n; renderInv();
+}
+function cancelEdit(){ EDIT=null; renderInv(); }
+
+function addComp(){
+  EDIT.components.push({name:'',type:'',role:'sensor',domain:'',address:'',port:null,
+                        scheme:'tcp',hardware:'',software_version:'',ssh:{}});
+  renderEdit();
+}
+function rmComp(i){ EDIT.components.splice(i,1); renderEdit(); }
+const setS=(i,k,v)=>{ EDIT.components[i][k]=v; };
+const setSsh=(i,k,v)=>{ (EDIT.components[i].ssh=EDIT.components[i].ssh||{})[k]=v; };
+function setRole(i,v){ setS(i,'role',v); renderEdit(); }
+
+function renderEdit(){
+  const fld=(span,label,inner)=>`<div class="fd" style="grid-column:span ${span}">
+    <span>${label}</span>${inner}</div>`;
+  const txt=(i,k,ph)=>`<input type="text" value="${esc(EDIT.components[i][k]??'')}"
+    placeholder="${esc(ph||'')}" oninput="setS(${i},'${k}',this.value)">`;
+  const num=(i,k,ph)=>`<input type="number" min="1" max="65535"
+    value="${EDIT.components[i][k]??''}" placeholder="${esc(ph||'')}"
+    oninput="setS(${i},'${k}',this.valueAsNumber)">`;
+
+  const comps=EDIT.components.map((c,i)=>{
+    const ssh=c.ssh||{}, fromEnv=ssh.password_in_environment, role=c.role||'sensor';
+    return `<div class="comp">
+      <header>${roleTag(role)}<b>${esc(c.name||'unnamed')}</b>
+        <span class="dim" style="font:11px var(--mono)">${esc(c.type||'no type')}</span>
+        <span class="grow"></span>
+        <button class="sm no" onclick="rmComp(${i})">Remove</button></header>
+      <div class="fg">
+        ${fld(3,'Name',txt(i,'name','e.g. magos'))}
+        ${fld(2,'Role',`<select onchange="setRole(${i},this.value)">
+          ${(INV.roles||[]).map(r=>`<option value="${esc(r)}" ${role===r?'selected':''}>${esc(ROLE_LABEL[r]||r)}</option>`).join('')}
+        </select>`)}
+        ${fld(4,'Hardware type',`<input type="text" list="types-${esc(role)}"
+          value="${esc(c.type??'')}" placeholder="e.g. magos_radar"
+          oninput="setS(${i},'type',this.value)">`)}
+        ${fld(3,'Domain',`<input type="text" list="domlist2" value="${esc(c.domain??'')}"
+          placeholder="${role==='sensor'?'radar / acoustic / camera':'optional'}"
+          oninput="setS(${i},'domain',this.value)">`)}
+
+        ${fld(3,'IP address',txt(i,'address','192.168.40.60'))}
+        ${fld(2,'Port',num(i,'port','8080'))}
+        ${fld(2,'Scheme',`<select onchange="setS(${i},'scheme',this.value)">
+          ${['tcp','http','https'].map(x=>`<option ${c.scheme===x?'selected':''}>${x}</option>`).join('')}
+        </select>`)}
+        ${fld(3,'Hardware model',txt(i,'hardware','Magos AR-300'))}
+        ${fld(2,'Version',txt(i,'software_version','2.4.1'))}
+
+        ${fld(2,'SSH user',`<input type="text" value="${esc(ssh.user??'')}"
+          placeholder="default" oninput="setSsh(${i},'user',this.value)">`)}
+        ${fld(2,'SSH port',`<input type="number" min="1" max="65535"
+          value="${ssh.port??''}" placeholder="22"
+          oninput="setSsh(${i},'port',this.valueAsNumber)">`)}
+        ${fld(4,'Key file',`<input type="text" value="${esc(ssh.key_file??'')}"
+          placeholder="~/.ssh/id_ed25519" oninput="setSsh(${i},'key_file',this.value)">`)}
+        ${fld(4,'Password',`<div class="pwrow">
+          <input type="password" id="pw-${i}" value="${esc(ssh.password??'')}"
+            ${fromEnv?'disabled':''}
+            placeholder="${fromEnv?'set in the environment':'blank = key auth'}"
+            oninput="setSsh(${i},'password',this.value)">
+          <button class="sm" type="button" onclick="togglePw(${i})">show</button>
+          ${ssh.password&&!fromEnv?`<button class="sm no" type="button" onclick="clearPw(${i})">clear</button>`:''}
+        </div>`)}
+      </div>
+      <p class="note">Stored as <code>${esc(ssh.password_env||'(derived from the name on save)')}</code>
+        ${fromEnv?'<span class="badge">from environment</span>':''} —
+        a password typed here goes to the secrets file, never to the registry.</p>
+    </div>`;}).join('');
+
+  $('#sysdetail').innerHTML=`
+   <div class="card"><h3>${EDIT.isNew?'New system':'Editing'}:
+     <span class="mono">${esc(EDIT.name)}</span> <span class="saved" id="iv"></span></h3>
+     <div class="fg" style="margin-bottom:12px">
+       ${fld(4,'Site',`<input type="text" value="${esc(EDIT.site??'')}" placeholder="beit-yanai"
+         oninput="EDIT.site=this.value">`)}
+       ${fld(8,'Description',`<input type="text" value="${esc(EDIT.description??'')}"
+         placeholder="model-visible; no secrets" oninput="EDIT.description=this.value">`)}
+     </div>
+     ${comps||'<p class="note">No components yet.</p>'}
+     <div class="row" style="margin-top:8px">
+       <button class="sm" onclick="addComp()">+ Add component</button>
+       <button class="sm yes" onclick="saveSys()">Save system</button>
+       <button class="sm" onclick="${EDIT.isNew?'cancelEdit()':`viewSys('${esc(EDIT.name)}')`}">Cancel</button>
+     </div>
+   </div>`;
+  $('#sysdetail').scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+
+function togglePw(i){
+  const el=$('#pw-'+i); if(!el)return;
+  const showing=el.type==='text';
+  el.type=showing?'password':'text';
+  el.nextElementSibling.textContent=showing?'show':'hide';
+}
+function clearPw(i){ setSsh(i,'password',''); setSsh(i,'clear_password',true); renderEdit(); }
+
+async function saveSys(){
+  const payload={site:EDIT.site||null,description:EDIT.description||null,
+    components:EDIT.components.map(c=>({
+      name:(c.name||'').trim(), type:(c.type||'').trim(), role:c.role||'sensor',
+      domain:c.domain||null, address:c.address||null,
+      port:Number.isFinite(c.port)?c.port:null, scheme:c.scheme||null,
+      hardware:c.hardware||null, software_version:c.software_version||null,
+      description:c.description||null,
+      ssh:(c.ssh&&Object.values(c.ssh).some(v=>v!==''&&v!=null&&!Number.isNaN(v)))?{
+        user:c.ssh.user||null, port:Number.isFinite(c.ssh.port)?c.ssh.port:null,
+        key_file:c.ssh.key_file||null, password_env:c.ssh.password_env||null,
+        password:c.ssh.password||null, clear_password:!!c.ssh.clear_password}:null}))};
+  try{
+    const name=EDIT.name;
+    INV=await api('/inventory/system/'+name,{method:'PUT',
+      headers:{'content-type':'application/json'},body:JSON.stringify(payload)});
+    EDIT=null; VIEW=name; renderInv();
+  }catch(e){ flash('iv',e.message,true); }
+}
+
+async function delSys(n){
+  if(!confirm(`Delete system "${n}"? Its components stop being addressable by the agent.`))return;
+  try{ const r=await api('/inventory/system/'+n,{method:'DELETE'});
+       INV=r; EDIT=null; VIEW=null; renderInv();
+       if(r.orphaned_secrets?.length)
+         alert('Deleted. These stored secrets were kept, in case you still need them:\n\n'
+               +r.orphaned_secrets.join('\n'));
+  }catch(e){ alert(e.message); }
 }
 
 const flash=(id,msg,bad)=>{const e=$('#'+id); if(!e)return; e.textContent=msg;
@@ -486,18 +1362,6 @@ async function delAgent(n){
   if(!confirm(`Delete agent "${n}"?`))return;
   try{ await api('/config/agent/'+n,{method:'DELETE'}); loadPerms(); }
   catch(e){ alert(e.message); }
-}
-async function saveFlow(){
-  const order=$('#f-order').value.split(',').map(s=>s.trim()).filter(Boolean);
-  const requires={};
-  $('#f-req').value.split('\n').forEach(l=>{
-    if(!l.trim())return; const [k,v]=l.split(':');
-    if(k&&v!==undefined) requires[k.trim()]=v.split(',').map(s=>s.trim()).filter(Boolean);
-  });
-  try{ await api('/config/flow',{method:'PUT',headers:{'content-type':'application/json'},
-         body:JSON.stringify({order,requires,supervisor_picks:$('#f-sup').checked})});
-       flash('fv','saved'); loadGraph(); }
-  catch(e){ flash('fv',e.message,true); }
 }
 async function savePost(n){
   try{ await api('/config/post_agent/'+n,{method:'PUT',headers:{'content-type':'application/json'},
@@ -542,7 +1406,12 @@ async function showAudit(){
       <td class="mono">${esc(e.by)}</td><td>${esc(e.change)}</td></tr>`).join('')}</table></div>`
     : '<p class="note">No changes recorded.</p>';
 }
-Object.assign(window,{decide,showTrace,showKb,saveKb,newKb,delKb,saveAgent,addAgent,delAgent,saveFlow,savePost,
-  saveTool,resetTool,saveCmds,resetAll,showAudit});
+Object.assign(window,{decide,showTrace,showKb,toggleKb,closeKb,saveKb,newKb,delKb,
+  slugify,previewSlug,addSym,rmSym,renderTopics,toggleTopic,addTopic,removeTopic,renderRemovable,
+  saveAgent,addAgent,delAgent,saveFlow,savePost,saveTool,resetTool,saveCmds,resetAll,showAudit,
+  togglePerm,renderPerms,
+  loadGraph,renderFlow,pick,unlink,chipDrag,chipDrop,laneOver,laneOut,laneDrop,
+  loadInv,newSys,editSys,viewSys,closeView,cancelEdit,addComp,rmComp,setS,setSsh,setRole,
+  saveSys,delSys,togglePw,clearPw});
 
 </script></body></html>

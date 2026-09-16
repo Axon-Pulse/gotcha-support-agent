@@ -1,0 +1,2 @@
+dumbo-backend	exited	Exited (137) 7 hours ago	dumbo/backend:2.4.1
+dumbo-frontend	running	Up 7 hours	dumbo/frontend:2.4.1

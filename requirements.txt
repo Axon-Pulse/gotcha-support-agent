@@ -6,4 +6,5 @@ langgraph-checkpoint==4.2.0
 langgraph-checkpoint-sqlite==3.1.1
 pytest==9.1.1
 PyYAML==6.0.3
+slack-bolt==1.27.0
 uvicorn==0.53.0

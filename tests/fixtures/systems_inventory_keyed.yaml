@@ -1,0 +1,12 @@
+# Key auth only — no password_env anywhere.
+version: 1
+systems:
+  magos:
+    type: magos_radar
+    domain: radar
+    address: 192.168.40.60
+    access:
+      ssh:
+        user: magos
+        port: 2222
+        key_file: ~/.ssh/gotcha_magos

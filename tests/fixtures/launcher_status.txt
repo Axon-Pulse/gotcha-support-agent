@@ -1,0 +1,102 @@
+[eCAL][Config] Yaml configuration loaded from "/etc/ecal/ecal.yaml".
+echo protobuf message output for topic /launcher/status
+
+timestamp: 1786981143700
+launcher_state: "RUNNING"
+nodes {
+  name: "magos"
+  path: "/site/radar"
+  state: PROC_RUNNING
+  pid: 291847
+  exit_code: 0
+  start_time_ms: 1786954453700
+  uptime_ms: 26690000
+  command: "./build/bin/magos_node -c configs/two_sensor_test.yaml -n magos"
+}
+nodes {
+  name: "asu"
+  path: "/sensors/asu"
+  state: PROC_RUNNING
+  pid: 291846
+  exit_code: 0
+  start_time_ms: 1786954453700
+  uptime_ms: 26690000
+  command: "./build/bin/asu_node -c configs/two_sensor_test.yaml -n asu"
+}
+nodes {
+  name: "tracker"
+  path: "/processing"
+  state: PROC_RUNNING
+  pid: 291845
+  exit_code: 0
+  start_time_ms: 1786954453700
+  uptime_ms: 26690000
+  command: "python3 -m nodes.tracker --config configs/two_sensor_test.yaml"
+}
+nodes {
+  name: "event_manager"
+  path: "/processing"
+  state: PROC_RUNNING
+  pid: 291844
+  exit_code: 0
+  start_time_ms: 1786954453700
+  uptime_ms: 26690000
+  command: "python3 -m nodes.event_manager --config configs/two_sensor_test.yaml"
+}
+total_nodes: 4
+running_nodes: 4
+stopped_nodes: 0
+failed_nodes: 0
+uptime_ms: 26690000
+session_title: "Two-Sensor Test (Magos + ASU)"
+config_path: "configs/two_sensor_test.yaml"
+
+timestamp: 1786981143950
+launcher_state: "RUNNING"
+nodes {
+  name: "magos"
+  path: "/site/radar"
+  state: PROC_RUNNING
+  pid: 498064
+  exit_code: 0
+  start_time_ms: 1786981113700
+  uptime_ms: 30000
+  command: "./build/bin/magos_node -c configs/two_sensor_test.yaml -n magos"
+}
+nodes {
+  name: "asu"
+  path: "/sensors/asu"
+  state: PROC_RUNNING
+  pid: 498063
+  exit_code: 0
+  start_time_ms: 1786981113700
+  uptime_ms: 30000
+  command: "./build/bin/asu_node -c configs/two_sensor_test.yaml -n asu"
+}
+nodes {
+  name: "tracker"
+  path: "/processing"
+  state: PROC_RUNNING
+  pid: 498062
+  exit_code: 0
+  start_time_ms: 1786981113700
+  uptime_ms: 30000
+  command: "python3 -m nodes.tracker --config configs/two_sensor_test.yaml"
+}
+nodes {
+  name: "event_manager"
+  path: "/processing"
+  state: PROC_RUNNING
+  pid: 498061
+  exit_code: 0
+  start_time_ms: 1786981113700
+  uptime_ms: 30000
+  command: "python3 -m nodes.event_manager --config configs/two_sensor_test.yaml"
+}
+total_nodes: 4
+running_nodes: 4
+stopped_nodes: 0
+failed_nodes: 0
+uptime_ms: 30000
+session_title: "Two-Sensor Test (Magos + ASU)"
+config_path: "configs/two_sensor_test.yaml"

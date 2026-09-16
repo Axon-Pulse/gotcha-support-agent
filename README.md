@@ -11,12 +11,14 @@ node inventory; never imports from it.
 | `graph.py` | The LangGraph state machine + the **only** code that writes to `kb/`. |
 | `agents.py` | **Agent definitions and ordering.** Edit this to add/reorder agents. |
 | `registry.py` | `@tool` decorator, autoloads `tools/`, refuses write tools. |
-| `transport.py` | **The only code that runs a command.** Allowlist + mock/live switch. |
-| `inventory.py` | The node allowlist, built from a gotcha30 config. Drops credentials. |
+| `transport.py` | **The only code that runs a command**, and the only one that reveals a secret. |
+| `inventory.py` | The system allowlist. **Public view** for the model, **private lookup** for transport. |
+| `systems_inventory.example.yaml` | Template for the central registry. Holds env var *names*, never secrets. |
 | `llm.py` | Anthropic calls: model, thinking, effort, prompt caching. |
 | `state.py` | Graph state; `Finding` and `Scenario` shapes. |
 | `tools/*.py` | **One file per diagnostic area.** Drop a new file here to add a tool. |
-| `kb/*.md` | **Knowledge.** Plain markdown, loaded into the cached system prompt. |
+| `kb/system-model.md` | **How the system works.** Code-derived, always in the cached prompt, read-only. |
+| `kb/cases/*.md` | **What has actually gone wrong.** One file per incident, retrieved by search. |
 | `tests/` | Fixtures from a real faulty run + the safety assertions. |
 | `traces/` | One JSONL per session: findings, transcript, report. |
 | `graph.db` | Checkpoints. Lets a pending approval survive a restart. |
@@ -48,7 +50,9 @@ def get_x() -> dict:
 
 Autoloaded. Then list `"get_x"` in an agent's `tools` in `agents.py`.
 
-**Add knowledge** — drop a `.md` in `kb/`. Loaded at startup into the cached prefix.
+**Add knowledge** — a new incident is a `.md` in `kb/cases/`, normally written by the
+approval gate rather than by hand. Mechanism that is true of the system regardless of any
+incident belongs in `kb/system-model.md` instead.
 
 **Add an agent** — an entry in `agents.py` (prompt + tool names), then put it in `ORDER`.
 
@@ -58,14 +62,15 @@ supervisor cannot violate. `SUPERVISOR_PICKS = False` turns it into a fixed pipe
 **Permissions** live in three places, all in code, all reviewable:
 
 1. `transport.ALLOWED` — the commands that may ever run. Keys, not strings; no `shell=True`.
-2. `inventory.py` — the nodes that may be addressed. The model cannot name a host.
+2. `inventory.py` — the systems that may be addressed. The model cannot name a host.
 3. `registry.load_tools()` — refuses any module declaring `SIDE_EFFECT = "write"`.
 
 ## The approval gate
 
-`synthesize` may *propose* a new runbook entry. `propose_scenario` then calls
+`synthesize` may *propose* a new case. `propose_scenario` then calls
 `interrupt()`: the graph stops, state is checkpointed, and you get `[y / e = edit / N]`.
-Only on `y` does `save` write to `kb/`. The agent has no write tool, so it cannot add a
+Only on `y` does `save` write to `kb/cases/`, in the same frontmatter shape the console
+editor reads. The agent has no write tool, so it cannot add a
 scenario on its own.
 
 Same seam covers remediation later: give a `restart_node` tool `SIDE_EFFECT = "write"`
@@ -75,22 +80,71 @@ and it is refused at registration until an approval node is wired in front of it
 
     .venv/bin/python -m pytest tests/ -q
 
+`tests/conftest.py` isolates every test from the registry at the repo root: those are
+live operator data, so a test that read them would fail for reasons unrelated to the
+code. Each test starts with no registry unless it points `SYSTEMS` at its own fixture.
+
+The console UI has no build step and no browser in CI, so `tests/test_console_render.py`
+runs `console/index.html`'s inline script under node against a DOM stub and calls every
+render path — which catches a typo in a template literal before it blanks a tab. It is
+skipped when node is not installed.
+
 ## Console
 
     .venv/bin/python -m uvicorn console.server:app --port 8765
     # then open http://localhost:8765
 
-Six tabs: **Run** (mock sessions; watch each agent fire, with per-agent cache and token
+Seven tabs: **Run** (mock sessions; watch each agent fire, with per-agent cache and token
 counts), **Approvals** (the queue — edit the markdown in place, then approve or reject),
-**Traces**, **Knowledge** (edit runbook documents and create new ones), **Graph** (the
-diagram plus the flow editor), and **Tools & permissions**.
+**Traces**, **Knowledge** (a structured runbook editor), **Graph** (the diagram plus a
+drag-and-drop flow editor), **Agents & permissions**, and **Inventory & systems**.
 
 The console sets `AGENT_MODE=mock` before importing anything, so it cannot touch the real
 system. Live runs stay a deliberate command-line act.
 
+### Inventory & systems
+
+A visual editor for `systems_inventory.yaml`, and the last tab because it is reference
+data rather than something you touch during a session.
+
+A **system** groups everything on one platform, and it is not limited to sensors: each
+**component** carries a `role` — `sensor`, `compute`, `laptop`, `network`, `power` or
+`other` — alongside its address, port, scheme, hardware model, software version, domain
+and SSH access. A compute box or a switch is addressable and diagnosable like anything
+else, so they share the one namespace; `role` is what tells them apart. `components:` is
+the current key and `sensors:` is still read as an alias, so older registries keep
+loading and keep defaulting to `role: sensor`.
+
+Clicking a system opens a **read-only summary** — one row per component, with the access
+column showing `key`, `password` or `—`. Editing is an explicit **Edit** click, which
+swaps in a dense 12-column grid that puts name/role/type/domain on one row and
+address/port/scheme/model/version on the next, rather than a field per line.
+
+An access block is validated on the way in: a port outside 1-65535, an invalid username,
+or a key or password with no user to log in as is refused with the field named. Those
+are exactly the shapes `credentials()` raises on at run time, so they are caught at the
+keystroke instead. Validation is scoped to the system being saved — a half-filled block
+saved earlier does not make the rest of the registry read-only.
+
+Typing a password is allowed here — this is a human at localhost — but **the value never
+enters the registry**. On save it goes to `secrets.local.env` (gitignored, mode 0600) and
+only `password_env: NAME` is written to the YAML, with the variable name derived from the
+sensor name if you do not supply one. Reopening the system shows the password again,
+masked behind a reveal toggle. A variable already exported in the environment wins over
+the stored file and is shown read-only, since the console cannot unset it.
+
+Every write is validated by loading the result through `inventory.py` — the same code the
+agent path uses — and **rolled back if it does not load**, so an inline secret, a
+duplicate sensor name or a hostname where an address belongs is refused before it can
+break a session. Deleting a system deliberately **keeps** its stored secret and names it
+in the confirmation, rather than silently destroying a credential you may still need.
+
+The tab shows the model-facing view beside the editor: the exact text that goes into the
+cached system prompt, rebuilt from a field allowlist rather than by stripping fields.
+
 ### Editing configuration from the UI
 
-**Tools & permissions** edits agent prompts, which tools each agent may call, the tool
+**Agents & permissions** edits agent prompts, which tools each agent may call, the tool
 descriptions the model reads, the order and its `requires` preconditions, and the allowed
 command table. Changes land in `overrides.json`, layered over the code defaults in
 `agents.py` / `transport.py` / `tools/`; clearing a field reverts to the default.
@@ -110,43 +164,334 @@ reason. Adding a shell binary (`bash`, `sh`, `env`, `xargs`…) to the command t
 *allowed* but prompts for confirmation first, because the argv-list protection does not
 apply to a shell.
 
-The **addressable node list stays read-only**: it is derived from the gotcha30 config
-named by `GOTCHA30_CONFIG`, with credential keys dropped during parsing. Point the agent
-at another deployment by changing that env var, not by typing hosts into a box.
+The **supervisor** appears in the agents list but is **read-only**: it has no prompt of
+its own — one is assembled from the live eligibility set on every hop — and no tools. What
+it may pick, and in what order, is changed in the **Graph** tab.
+
+**Post-synthesis agents** (`customer_communicator`) are editable, but their tool list is
+shown *disabled* rather than hidden. They run through `llm.run_text_agent`, which has no
+tool loop at all, so a tool ticked there would be silently ignored rather than called —
+and they run after the evidence phase, so a diagnostic call could not change the report
+they are rewriting. Enabling it is a graph change, not a checkbox.
+
+The addressable-systems list is no longer shown here; it lives in **Inventory & systems**.
 
 ### Knowledge
 
-Documents are editable in place and new ones start from the Symptoms / Root cause /
-Checks / Fix skeleton the seeded runbook entries use. Names are kebab-case and every
-write is resolved against `kb/` before it lands, so a name cannot escape the directory.
+Two halves, split by lifecycle rather than by topic.
 
-Because the whole of `kb/` is concatenated into the cached system prompt at session
-start, an edit reaches the **next** run, not one already in flight — and it invalidates
-the prompt cache, so the first session after an edit pays full input price once.
+**`kb/system-model.md`** — how the system works: the three independent views and what each
+is blind to, health vs launcher semantics, the probe verdicts and which cannot support a
+conclusion, and the reasoning rules for a fault with no precedent. It is derived from the
+code, **always in the cached system prompt**, and **read-only in the console** — a
+generated document that people hand-edit is one that drifts. Tests pin its facts against
+their source: every registered tool must be named in it, every `probe_endpoint` verdict
+must appear, and the health timeout and process states must match gotcha30.
+
+**`kb/cases/*.md`** — one file per fault actually diagnosed here. These are **not** in the
+prompt; they are reached with `search_runbook`. That is the point: the history can grow
+without growing every request, and without invalidating the cached prefix on every
+approval. It is also what makes `search_runbook` load-bearing — when the whole KB was in
+the prompt, searching it was re-fetching something the model could already see.
+
+One file per case, not one growing file, for three reasons: `save` keeps writing one file
+per approval with no append logic to corrupt; each case keeps its own topic frontmatter so
+the structured editor works unchanged; and the lexical index ranks individual incidents
+rather than returning the same single document for every query.
+
+A match needs at least one distinctive token — an identifier or a long word. Everyday
+words add to the score but cannot create a hit on their own, or a query about something
+genuinely new would silently recall an unrelated case, which is the one outcome the split
+exists to prevent. **No hits is a result**: it means reason from the system model.
+
+The case editor is a structured form, not a markdown box. A field per part rather than one markdown box: **topics** (multi-select, any number),
+**symptoms** (a dynamic list), then **title**, **context**, **root cause**, **checks** and
+**fix** as separate sections. The backend splits the body on its headings and reassembles
+it, so `graph._render` and the editor write the same shape and an agent-proposed case
+opens in the same form as a hand-written one.
+
+A heading the form has no field for — an `Evidence` section, say — is surfaced in an
+**Other sections** box rather than dropped: an editor that silently deletes what it cannot
+display is worse than one big textarea. The **checks** section keeps its leading indent,
+because that four-space indent is what makes it a code block rather than prose.
+
+Together they become YAML frontmatter plus a markdown body:
+
+```markdown
+---
+topics:
+  - network
+  - radar
+symptoms:
+  - the radar stopped responding
+  - ping to the sensor times out
+---
+
+# Tailscale subnet route hijacks the sensor LAN
+...
+```
+
+**Topics are deliberately not called domains.** A routing domain in `graph.DOMAINS`
+decides which *agent* may run; a topic decides which *past case* a ticket matches. Sharing
+the word invited the reasonable expectation that adding a tag would summon an expert. A
+case may carry several — the hijack case is both `network` and `radar`, so it is found
+from either direction — and a new topic is created simply by using it. `domain:` and
+`domains:` are still read, so cases written before the rename keep opening.
+
+Opening a case parses the frontmatter back into the fields, and **Close** dismisses the
+editor in place (as does clicking *edit* again on the open case). **Documents written
+before the editor have no frontmatter and are not broken by it**: the whole file becomes
+the body, the fields come back empty, and the editor says so. Frontmatter is only
+emitted when there is something to record, so a plain document stays plain.
+
+The frontmatter is read by the model too, which is the point — the topics and the
+symptom list are what a ticket gets matched against. **Credentials are not just an API key.** The console gates the Run button on whether *any*
+credential resolves — `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, an OAuth profile from
+`ant auth login`, or workload identity federation — in the SDK's own precedence order. It
+also calls out the two documented traps: an `ANTHROPIC_API_KEY` set to the empty string
+still wins its precedence slot and authenticates with nothing, and setting both a key and
+a token makes the SDK send both, which the API rejects.
+
+**The filename is derived, not typed.** Write the name however you like — "Radar
+WebSocket keeps flapping!" — and the server slugifies it to `radar-websocket-keeps-flapping.md`,
+previewing the result live as you type. Slugification happens **only on create**, because
+that is the one moment the filename is chosen; every other route still resolves a name
+strictly, since slugifying on read or delete would mean a request for one file could
+quietly reach another. The result is re-validated against the same guard, so a traversal
+attempt is confined (`../../etc/passwd` becomes `etc-passwd`) rather than followed.
+
+The preview in the page and the rule on the server are separate implementations, so a
+test runs both over the same inputs — if they drift, the preview starts lying about where
+the case will land.
+
+Editing a **case** takes effect immediately for retrieval — it is read at search time,
+not at session start, and it does not touch the prompt cache. Editing the **system model**
+reaches the next run rather than one already in flight, and invalidates the cached prefix,
+so the first session afterwards pays full input price once. That asymmetry is the reason
+for the split: the half that changes often is the half that is not cached.
 
 ### Graph
 
 The **Graph** tab draws the execution graph: START → supervisor → agents (each looping
 back) → synthesize → the approval gate → `save` or END. Dashed amber edges are `requires`
 preconditions; green and red are the approve/reject branches. Agents defined but missing
-from `order` are greyed out, since the supervisor can never pick them. LangGraph's own
-mermaid export is included below the diagram. The **flow editor** lives here too — editing
-the order or the `requires` preconditions redraws the diagram immediately.
+from `order` are greyed out, since the supervisor can never pick them.
+
+Below it is a **visual flow editor**, no library:
+
+- **Pipeline** — agents are draggable chips in two lanes. Drag within the top lane to
+  reorder; drag to the bottom shelf to take an agent out of the pipeline entirely, which
+  also drops every prerequisite edge mentioning it (otherwise the save would be rejected
+  for referring to an agent that can never run).
+- **Prerequisites** — click an agent, then click one to its **left** to make that a
+  prerequisite. Only the left side is offered because a prerequisite must run earlier,
+  which is exactly what `config_store.validate_flow` enforces. Click an arrow to remove it.
+
+Saving redraws the diagram. The validator still has the last word — but the editor no
+longer lets you compose a save it would reject: a prerequisite pointing backwards after a
+reorder is drawn **red**, named in a banner, and disables the save button until it is
+fixed. A cycle or a duplicate is still caught server-side.
+
+Both diagrams cap their rendered width, since an SVG with `width:100%` and a viewBox
+narrower than its container is scaled *up* and renders visibly zoomed.
 
 
-## Prerequisites: `requires` vs `needs_context`
+## Prerequisites: `requires`, `needs_context`, `scope_context`
 
-`agents.py` declares two kinds of gate, both enforced in `graph._eligible()`:
+`agents.py` declares three kinds of gate, all enforced in `graph._eligible()`:
 
 - **`requires`** — agent B cannot run until agent A has run at all. Pure ordering.
 - **`needs_context`** — agent B cannot run until a named fact has actually been
   *extracted from tool output*. `network` needs `probe_targets`, so if `triage` runs but
   every tool errors, `network` stays ineligible instead of probing the whole inventory on
-  a guess. The reason lands in `state["blocked"]` and reaches the report.
+  a guess.
+- **`scope_context`** — same gate, different meaning when it is unmet. A missing
+  `needs_context` key means *we could not find out*; a missing `scope_context` key means
+  *there was nothing to find out*. `radar_deep_dive` scopes on `radar_targets`, so on an
+  acoustic-only fault it is **not applicable** rather than blocked, and is left out of
+  the report instead of appearing there as a check we failed to run.
 
 Context is extracted by `graph._extract_context()` from the **structured tool payloads**,
 never from the model's prose — an agent that narrates "the radar looks unreachable"
 without a tool returning a node must not unlock the network agent.
+
+A blocked agent's reason lands in `state["blocked"]`, reaches the Slack summary, and is
+appended to the `synthesize` prompt as "Checks that could NOT be performed" with an
+instruction to list them under `unknowns`. Without that the report reads as complete
+while a gated agent never ran — the exact overconfidence the gates exist to prevent.
+The one exception to the scope rule is a **blind run**: if nothing was observed at all,
+an empty `radar_targets` is ignorance rather than the absence of a radar fault, so scope
+misses are reported like any other gap.
+
+### `requires` must never name a gated agent
+
+`requires` means "has run", and a gated agent may never run. Writing
+`requires: ["network"]` on a deep-dive deadlocks it permanently the first time `network`
+is blocked on `probe_targets`. Domain experts therefore require `triage` only; sequencing
+after the plumbing checks is done by position in `order`, and since every agent receives
+the full findings digest, a deep-dive can read the network verdict and is told to defer
+to an ambiguous one. `tests/test_domain_routing.py` asserts this generically, so the
+guard fails the moment someone adds such a `requires`.
+
+## Domain experts
+
+Functional agents (`triage`, `knowledge`, `topology`, `network`) give breadth: which
+nodes are suspect, and whether the fault is in shared plumbing. Domain experts give depth
+on one hardware type, and are unlocked by `graph.DOMAINS` mapping a node's type to a
+domain:
+
+| expert | scope key | tools |
+|---|---|---|
+| `acoustic_deep_dive` | `acoustic_targets` | `get_asu_service_status`, `search_runbook` |
+| `radar_deep_dive` | `radar_targets` | `get_radar_status`, `search_runbook` |
+| `camera_deep_dive` | `camera_targets` | `get_camera_status`, `search_runbook` |
+| `infrastructure_expert` | `infrastructure_targets` | `get_tower_status`, `search_runbook` |
+
+**An expert gets its own domain tool and `search_runbook`, and nothing else.** In
+particular it does not get `get_system_health`: triage already called it, and every agent
+is handed the full findings digest, so the health rows are in front of the expert without
+a second call. Holding the tool invites a redundant call; holding another domain's tool
+invites a diagnosis of hardware it is not expert in. A test asserts the scoping, and
+another asserts no expert's prompt names a tool it cannot call.
+
+**The two type vocabularies are reversed word order**, so every model needs both
+spellings. Taken from gotcha30: `configs/*.yaml` for the left column, the `node_type`
+literals in the node sources for the right.
+
+| domain | `inventory.py` (config) | health proto `node_type` |
+|---|---|---|
+| radar | `magos_radar` | `radar_magos` |
+| radar | `elm2135_radar` | `radar_elm2135` |
+| acoustic | `asu`, `python_asu` | `acoustic_asu` |
+| camera | `meduza_optic` | `optic_meduza` |
+| camera | `python_optic_ptz` | `optic_ptz` |
+| camera | `python_optic_verification` | `optic_verification` |
+
+So `DOMAINS` enumerates both spellings and matches on set membership; a substring rule
+gets `magos_radar` and `radar_magos` right half the time. `optic_scanning_asu` is named
+like an ASU but is emitted by `python/nodes/optic_scanning_node` — it is in the **camera**
+domain, not acoustic. gotcha30 calls the family "optic" and the console calls it
+"camera"; `inventory.DOMAIN_ALIASES` normalises that once at load, so there are never two
+domain keys for one piece of hardware, one of which would match no agent. Either spelling is enough to
+place a node, so a node that never started — no health message, therefore no proto type
+— still routes correctly via the config. A test asserts the table stays in sync with
+both sources, so a new node type fails a test rather than silently routing to nothing.
+
+### The platform-fault signature
+
+`infrastructure_expert` is the odd one out: **nothing publishes health for a mast**, so no
+node ever reports that a tower is misaligned. Its trigger is structural instead — two or
+more suspect components sharing one `system` in the registry, which is exactly the
+discriminator `kb/tower.md` uses: an angular error shared across a tower is the tower's
+yaw, an error on one sensor alone is that sensor's mount. One suspect is deliberately not
+enough. Because the key comes from the registry's `system` field, it only fires once
+`systems_inventory.yaml` groups components into platforms.
+
+### Placeholder tools
+
+`get_radar_status`, `get_camera_status` and `get_tower_status` are **declared but not
+implemented**. They share `tools/_placeholder.py`, which enforces three things a stub
+would otherwise get wrong:
+
+- **No invented measurements.** A plausible number would be cited by the model, quoted by
+  `synthesize` as evidence, and land in a report that is confidently wrong about hardware
+  nobody looked at. They run one read-only liveness probe and return `implemented: false`.
+- **No `nodes` key in the payload.** `graph._extract_context` reads `nodes` out of tool
+  results to decide which agents may run, so a placeholder contributing there would gate
+  real agents on placeholder output.
+- **A failed probe is a finding, not a crash.** "The radar did not answer" belongs in the
+  payload, not in a traceback.
+
+Each one's description opens with `PLACEHOLDER — the <domain> check is NOT implemented
+yet` and says what it *will* do, so the model calls it for reachability and reports that
+the domain check could not be performed rather than inventing one. A cross-domain call is
+refused: `get_radar_status` on a camera comes back with `refused`, not a reading.
+
+All four experts ship **defined but absent from `DEFAULT_ORDER`**. `graph.build()` creates a
+node for every agent in `agents.py`, so enabling one is an `order` edit in the console,
+not a code change, and the Graph tab greys out anything the supervisor can never pick.
+
+Their permitted commands live in `transport.DEFAULT_ALLOWED` — `radar_status` and
+`tower_status` are an SSH `uptime`, `camera_status` is a `curl` that discards the body —
+so the permission surface is reviewable in a diff now rather than being added under time
+pressure later. They are code defaults, not `overrides.json` entries; `overrides.json`
+stays for console edits layered on top.
+
+Two details in `transport.run_on` that these commands forced:
+
+- **Credentials are resolved only for a command that actually logs in.** An HTTP probe
+  against a camera with no SSH access block must not be refused for lacking one.
+- **`%{http_code}` is curl's placeholder, not ours.** The substitution pattern carries a
+  negative lookbehind for `%`, or filling any curl command raises `unknown placeholder`.
+
+## The central inventory
+
+`inventory.py` is the only authority for names, addresses and credentials, and it keeps
+two views of the registry apart:
+
+- **Public** — `load()`, `names()`, `require()`, `as_prompt()`. Logical name, type,
+  domain, site, description, endpoint. This is what reaches the model, the tool enums
+  and the LangGraph state. It is built from a field **allowlist** (`_PUBLIC_FIELDS`), so
+  a key nobody anticipated cannot ride along into a prompt.
+- **Private** — `credentials(name)`. Resolved at call time, never cached, never returned
+  into graph state. A test asserts `transport.py` is its **only** caller, so the
+  credential path has one chokepoint the way command execution does.
+
+Agents address systems by logical name (`"magos"`, `"camera_ptz_1"`). A name that does
+not resolve is refused, so the model cannot reach anything not in the registry and
+cannot name a host at all.
+
+### The registry file
+
+    cp systems_inventory.example.yaml systems_inventory.yaml && $EDITOR $_
+
+Loaded if present (`SYSTEMS_INVENTORY` overrides the path), and it **overlays** the
+gotcha30 deployment config on matching names — so a node the launcher runs can gain a
+site and access details without being listed twice. Absent, nothing changes.
+
+**The file may never contain a secret value.** It holds `password_env:` — the *name* of
+an environment variable — or `key_file:`, a path. `inventory.py` walks the document
+before anything else touches it and raises `InventoryError` naming the offending key if
+it finds an inline `password`, `token`, `secret`, `api_key` and so on. A secret inside a
+file that gets read into a model-facing process is a problem no later redaction fixes,
+so it fails at startup instead. That refusal is also what makes the file safe to commit;
+gitignore it anyway if mapping your estate is itself sensitive.
+
+### Secrets that cannot be stringified by accident
+
+`credentials()` returns any password wrapped in `inventory.Secret`, which renders as
+`***` through `str()`, `repr()`, f-strings, `%s` and `json.dumps(default=str)` — that
+last one being exactly the path `registry.call()` uses to serialise a tool payload, and
+therefore the way a credential would otherwise reach graph state. `reveal()` is the one
+deliberate way out, and it is called in exactly one place.
+
+### Targeted execution
+
+`transport.run_on(key, node)` runs an allowlisted command against one system:
+
+```python
+"remote_uptime": ("ssh", "-p", "{ssh_port}", "{ssh_user}@{host}", "uptime"),
+```
+
+The placeholders are filled from the inventory record for a **logical name** — they are
+not free-form and cannot come from the model. An unknown placeholder is fatal rather
+than passed through. `run_on` injects `ConnectTimeout` and `StrictHostKeyChecking`
+itself rather than trusting the table, so a console edit cannot quietly drop them.
+
+If a password is configured it goes into the child process **environment** (`SSHPASS`,
+with `sshpass -e` as ssh's direct parent), never onto an argv where `ps` shows it to
+every local user. With key auth instead, `BatchMode=yes` is set so a call fails rather
+than hanging on a prompt. In mock mode `run_on` reads a fixture and never resolves a
+credential at all — a test asserts this, because console sessions run in mock mode and
+must not touch the estate.
+
+### Driving routing from the registry
+
+A system may declare `domain: radar` outright. `graph._extract_context` prefers that
+over the `DOMAINS` type table, and emits `<domain>_targets` for any domain the registry
+names — so a new hardware class becomes routable by editing the registry rather than
+`graph.py`. The template's `camera_ptz_1` declares `domain: optic`, which produces
+`optic_targets` today even though no optic expert exists yet.
 
 ## Customer communicator
 
@@ -165,12 +510,65 @@ follows 95% of the time, and 95% is not good enough for outbound customer mail.
 `slack_app.py` is an **adapter, not a node**. The graph knows nothing about Slack; a test
 asserts `graph.py`, `agents.py` and `llm.py` never mention it.
 
-    pip install slack-sdk
-    export SLACK_BOT_TOKEN=xoxb-... SLACK_SIGNING_SECRET=... SLACK_INTERNAL_CHANNEL=C0...
-    uvicorn slack_app:app --port 3000
+    pip install slack-bolt
+    export SLACK_BOT_TOKEN=xoxb-...        SLACK_APP_TOKEN=xapp-...
+    export SLACK_ALLOWED_CHANNELS=C0...    SLACK_ADMIN_CHANNEL=C0...
+    python slack_app.py
 
-Four things it handles that matter in production: the 3-second ACK (diagnosis runs in a
-background thread, Slack gets 200 immediately); deduplication on `event_id`, since Slack
-resends on timeout; routing the **approval interrupt to a staff channel, never the
-customer thread**; and holding a leaked or escalating draft for review instead of sending
-it, with the customer getting a neutral holding reply.
+**Socket Mode**, so no inbound port is exposed — the app holds an outbound WebSocket and
+the `xapp-` token authenticates it, which is why there is no request signature to verify.
+Note it needs *outbound* egress to Slack; Socket Mode solves inbound firewall rules only.
+
+### The audience is Tier 1, not the customer
+
+Engineers get the **technical report**: root cause, confidence, evidence quoting real tool
+output, the checks that could not run, which agents ran and which tools failed, and the
+trace path. They do **not** get the `customer_communicator` draft — that agent exists to
+strip node names, IPs, PIDs, paths, topic names and tool names, which is precisely what an
+engineer needs to act. The draft is still produced; `/draft <session>` posts it, with its
+`safe_to_send` state and any leak flags, for when someone is about to forward something to
+a client.
+
+A report from a mock-mode run says so, in the acknowledgement and again in the report. A
+fixture answer must not be mistaken for a live diagnosis.
+
+### One message is one session
+
+Never resume a checkpoint for a new question. `findings` and `visited` are `operator.add`,
+so a reused thread has every agent already visited: `_eligible()` returns nothing, the
+supervisor goes straight to `synthesize`, and it re-summarises the **old** evidence against
+the **new** question — silently. Each Slack message therefore gets a fresh `session_id`,
+and a test asserts the only `Command(resume=...)` in the file is the approval path.
+
+Every run writes `traces/<session_id>.jsonl` in the same shape the CLI and console use,
+plus an `origin` block recording who asked, in which channel, and in which mode. An
+interface with no audit trail is the wrong one to make primary.
+
+### Admission is fail-closed
+
+`SLACK_ALLOWED_CHANNELS` and `SLACK_ALLOWED_USERS` are checked **before the graph runs**.
+With neither set the bot refuses everyone — workspace membership is not authorisation, any
+member can DM a bot, and guests or Slack Connect users may be in the workspace. DMs are off
+unless `SLACK_ALLOW_DMS=1` *and* the user is named. There is a per-user cooldown and a
+concurrency cap, because a chat surface invites casual use and every run is several model
+calls at `effort: high`.
+
+Socket Mode still redelivers envelopes, so deduplication on `event_id` survived the port
+from the Events API even though signature verification did not.
+
+### Approval stays an admin decision
+
+Writing to `kb/cases/` is admin business, so it defaults to **the console**. The interrupt
+is announced in `SLACK_ADMIN_CHANNEL`, never in the engineer's thread. `/approve` works
+only if `SLACK_APPROVERS` names people, and then only for those users and only in the admin
+channel.
+
+### Config edits reach the bot without a restart
+
+`build()` reads the agent set at build time, so the gateway stats `overrides.json` on each
+request and rebuilds when it changes. Without it, an admin reordering agents in the console
+would see no effect in Slack until someone restarted the process — a silent seam, and
+exactly the one this split creates.
+
+Concurrent sessions share one SQLite checkpoint file, so the gateway enables WAL at
+startup; without it the second simultaneous diagnosis meets `database is locked`.

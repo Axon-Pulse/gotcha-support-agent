@@ -11,11 +11,7 @@ sys.path.insert(0, str(ROOT))
 import config_store as C  # noqa: E402
 
 
-@pytest.fixture(autouse=True)
-def isolated(tmp_path, monkeypatch):
-    monkeypatch.setattr(C, "PATH", tmp_path / "overrides.json")
-    monkeypatch.setattr(C, "AUDIT", tmp_path / "audit.jsonl")
-    yield
+# Isolation of config_store.PATH / AUDIT is handled for every test by tests/conftest.py.
 
 
 def test_override_layers_over_default_and_reverts():

@@ -5,3 +5,7 @@ traces/
 graph.db*
 .pytest_cache/
 config_audit.jsonl
+# Anchored to the repo root: unanchored, these would also swallow
+# tests/fixtures/systems_inventory.yaml, which must be committed.
+/secrets.local.env
+/systems_inventory.yaml

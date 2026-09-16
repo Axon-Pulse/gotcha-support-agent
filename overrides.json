@@ -1,1 +1,56 @@
-{}
+{
+  "agents": {
+    "knowledge": {
+      "prompt": "Search the runbook for the symptom pattern described. Quote the relevant guidance. If nothing matches, say so plainly.",
+      "tools": [
+        "search_runbook"
+      ]
+    },
+    "network": {
+      "needs_context": [
+        "probe_targets"
+      ],
+      "prompt": "Check reachability of the endpoints triage flagged. A ping result is only meaningful together with its route: report the verdict verbatim and never upgrade an ambiguous verdict into a conclusion about hardware.",
+      "requires": [
+        "triage"
+      ],
+      "tools": [
+        "probe_endpoint"
+      ]
+    },
+    "topology": {
+      "prompt": "Check eCAL wiring. A subscriber with no publisher means the node that should publish it is not running. Two disjoint PID groups publishing the same topics means two launcher sessions are running at once.",
+      "requires": [
+        "triage"
+      ],
+      "tools": [
+        "get_ecal_topology"
+      ]
+    },
+    "triage": {
+      "prompt": "Get the overall picture: which nodes are unhealthy, which are not running at all. Report what you see; do not speculate about causes yet. Name the affected nodes explicitly \u2014 later agents depend on that list.",
+      "provides": [
+        "observed_nodes",
+        "suspect_nodes"
+      ],
+      "tools": [
+        "get_system_health",
+        "get_process_table"
+      ]
+    }
+  },
+  "order": [
+    "triage",
+    "knowledge",
+    "topology",
+    "network"
+  ],
+  "requires": {
+    "network": [
+      "triage"
+    ],
+    "topology": [
+      "triage"
+    ]
+  }
+}

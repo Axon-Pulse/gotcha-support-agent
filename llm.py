@@ -17,6 +17,7 @@ log = logging.getLogger(__name__)
 
 MODEL = os.environ.get("AGENT_MODEL", "claude-opus-5")
 KB_DIR = Path(__file__).resolve().parent / "kb"
+SYSTEM_MODEL_NAME = "system-model.md"
 _client: anthropic.Anthropic | None = None
 
 
@@ -28,8 +29,15 @@ def client() -> anthropic.Anthropic:
 
 
 def _kb() -> str:
-    return "\n\n---\n\n".join(
-        f"# file: {p.name}\n{p.read_text()}" for p in sorted(KB_DIR.glob("*.md")))
+    """The system model, and ONLY the system model.
+
+    Recorded cases are deliberately not here. They grow without bound, so putting them in
+    the prompt would grow every request with the corpus and invalidate the cached prefix
+    on every approval. They are reached with search_runbook instead — which is also what
+    makes that tool load-bearing rather than redundant.
+    """
+    path = KB_DIR / SYSTEM_MODEL_NAME
+    return path.read_text() if path.exists() else ""
 
 
 def system_blocks(agent_prompt: str) -> list[dict]:
@@ -44,7 +52,7 @@ def system_blocks(agent_prompt: str) -> list[dict]:
         "you would need. Guessing is worse than escalating.\n"
         "- Never claim a sensor is faulty on the basis of an ambiguous network verdict.\n\n"
         f"# Nodes in this deployment\n{inventory.as_prompt()}\n\n"
-        f"# Runbook\n{_kb()}"
+        f"# System model\n{_kb()}"
     )
     return [
         {"type": "text", "text": shared, "cache_control": {"type": "ephemeral"}},

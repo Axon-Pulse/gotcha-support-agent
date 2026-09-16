@@ -117,17 +117,5 @@ def test_slack_is_not_a_graph_node():
         assert "slack" not in f.read_text().lower(), f"{f.name} must not know about Slack"
 
 
-def test_signature_verification_and_dedup():
-    import hashlib
-    import hmac
-    import time
-
-    import slack_app as S
-    S.SIGNING_SECRET = "shh"
-    ts, body = str(int(time.time())), b'{"ok":1}'
-    sig = "v0=" + hmac.new(b"shh", f"v0:{ts}:".encode() + body, hashlib.sha256).hexdigest()
-    assert S.verify(body, ts, sig)
-    assert not S.verify(body + b"x", ts, sig)                 # tampered
-    assert not S.verify(body, str(int(time.time()) - 10**6), sig)   # replayed
-    S._seen.clear()
-    assert (S.already_handled("E9"), S.already_handled("E9")) == (False, True)
+# Gateway behaviour — allowlist, dedup, audience, tracing — is in
+# tests/test_slack_gateway.py. What matters here is only that Slack stays out of the graph.

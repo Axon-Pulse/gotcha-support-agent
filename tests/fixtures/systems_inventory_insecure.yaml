@@ -1,0 +1,10 @@
+# Deliberately wrong: a secret VALUE in the registry. Loading must fail.
+version: 1
+systems:
+  magos:
+    type: magos_radar
+    address: 192.168.40.60
+    access:
+      ssh:
+        user: magos
+        password: hunter2

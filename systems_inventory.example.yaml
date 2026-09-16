@@ -1,0 +1,83 @@
+# Central registry of the systems we support, and the sensors inside them.
+#
+# ───────────────────────────────────────────────────────────────────────────────
+# THIS FILE MUST NEVER CONTAIN A SECRET VALUE.
+#
+# It holds the NAME of an environment variable (`password_env:`) or the PATH to a
+# private key (`key_file:`) — never a password, token or key itself. inventory.py
+# REFUSES to load a file with an inline secret and names the key to fix, so the
+# mistake fails loudly at startup instead of sitting in a process that talks to a
+# model. That refusal is what makes this file safe to commit and safe to read.
+#
+# The console's Inventory tab edits this file. When you type a password there it is
+# written to secrets.local.env (gitignored, mode 0600) and only the env var NAME
+# lands here.
+# ───────────────────────────────────────────────────────────────────────────────
+#
+#   cp systems_inventory.example.yaml systems_inventory.yaml && $EDITOR $_
+#
+# Absent, only the gotcha30 config is used. Point elsewhere with SYSTEMS_INVENTORY.
+#
+# Agents see ONLY: logical name, type, domain, system, site, description, hardware,
+# software version and endpoint. They never see the `access:` block, and they cannot
+# name a host — every tool takes a logical name that must resolve here, or the call
+# is refused.
+
+version: 1
+
+# Applied to any sensor that does not set the field itself.
+defaults:
+  ssh:
+    user: gotcha
+    port: 22
+
+systems:
+
+  # A system groups the sensors mounted on one platform. Sensor names live in a single
+  # namespace across all systems, because that is what a tool argument resolves against.
+  tower1:
+    site: beit-yanai
+    description: "Shared construction tower, two sensors"
+    # An access block here is inherited by every sensor below; a sensor may override it.
+    sensors:
+
+      magos:
+        type: magos_radar        # matched against graph.DOMAINS as a fallback
+        domain: radar            # explicit wins: routes to radar_deep_dive
+        address: 192.168.40.60
+        port: 8080
+        scheme: tcp
+        hardware: "Magos AR-300"
+        software_version: "2.4.1"
+        access:
+          ssh:
+            user: magos
+            port: 22
+            key_file: ~/.ssh/gotcha_magos        # preferred — nothing to leak
+            password_env: MAGOS_SSH_PW           # fallback — the NAME of an env var
+
+      asu:
+        type: asu
+        domain: acoustic
+        address: 127.0.0.1
+        port: 8000
+        scheme: http
+        hardware: "Dumbo acoustic backend (local Docker service)"
+        software_version: "2.4.1"
+        # No access block. There is nothing to log into — it is a local container.
+
+  # A system with no `sensors:` key IS a sensor. Both shapes load.
+  camera_ptz_1:
+    type: optic_ptz
+    domain: optic                # no optic expert exists yet; routing is ready for one
+    site: beit-yanai
+    description: "PTZ camera, ONVIF"
+    address: 192.168.40.71
+    port: 80
+    scheme: http
+    hardware: "Hikvision DS-2DE"
+    software_version: "5.7.3"
+    access:
+      ssh:
+        user: admin
+        password_env: CAMERA_PTZ_1_SSH_PW

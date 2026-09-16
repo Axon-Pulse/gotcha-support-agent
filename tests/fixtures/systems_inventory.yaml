@@ -1,0 +1,39 @@
+version: 1
+defaults:
+  ssh:
+    user: gotcha
+    port: 22
+systems:
+  magos:
+    type: magos_radar
+    domain: radar
+    site: beit-yanai
+    description: "Magos AR-300 radar, tower1"
+    address: 192.168.40.60
+    port: 8080
+    scheme: tcp
+    access:
+      ssh:
+        user: magos
+        key_file: ~/.ssh/gotcha_magos
+        password_env: TEST_MAGOS_SSH_PW
+  camera_ptz_1:
+    type: optic_ptz
+    domain: optic
+    site: beit-yanai
+    description: "PTZ camera, ONVIF"
+    address: 192.168.40.71
+    port: 80
+    scheme: http
+    access:
+      ssh:
+        user: admin
+        password_env: TEST_CAMERA_SSH_PW
+  asu:
+    type: asu
+    domain: acoustic
+    site: beit-yanai
+    description: "Dumbo acoustic backend, local Docker service"
+    address: 127.0.0.1
+    port: 8000
+    scheme: http
