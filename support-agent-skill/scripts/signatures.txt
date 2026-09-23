@@ -1,0 +1,18 @@
+# Log signatures -> KB case. One per line: <case-slug>|<extended regex, matched case-insensitively>
+# Taken from the "Evidence" sections of kb/cases/*.md. When a case is added or its evidence
+# changes, update this file too. Slugs starting with "ok:" are good signs, not faults.
+ui-shows-tracks-over-dallas|py_glue or protobuf not available|MockDataProvider|Dallas Defense Center
+py-glue-stale-or-missing|py_glue\.configmerge is missing|needs the transport bindings|No module named .py_glue
+old-wheel-partial-degradation|py_glue events unavailable|py_glue sensor contract unavailable|py_glue scan-range telemetry unavailable|py_glue wheel lacks event media|BeamFormRequest proto has no request_id|Could not create .* service client
+node-died-no-message|heartbeat timeout|Failed to exec|Failed to change directory to|Node not responding|Node experiencing critical issues|PROC_CRASHED|PROC_KILLED
+override-silently-ignored|declares no runnable node|override is being ignored|FATAL CONFIG
+tracker-never-classifies-drone|load_model: failed to load model|bundle has neither|no model name configured|No module named .torch
+ok:classifier-loaded|load_model: loaded model
+camera-offline-onvif|camera OFFLINE|ONVIF connect failed for|onvif-zeep not installed|No media profiles on camera|has no PTZ configuration|has no PTZ support|PtzControl call timed out
+no-video-in-ui|ffmpeg not found|Video pipeline disabled|stream_unavailable|Video pipeline error|remux reader error
+radar-connected-but-no-detections|SetParams failed|Cannot open binary file
+gateway-bound-to-loopback|WebSocket connection rejected from
+container-up-but-nonfunctional|503 Service Unavailable
+env-missing-vars-after-upgrade|machine not initialized
+asu-backend-never-reachable|asu_connected["': =]+false|localhost:8000.*(refused|failed|error)
+end-on-first-complete-resets-system|First node completed:|Platform .* repositioned
