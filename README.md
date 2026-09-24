@@ -14,7 +14,8 @@ node inventory; never imports from it.
 | `transport.py` | **The only code that runs a command**, and the only one that reveals a secret. |
 | `inventory.py` | The system allowlist. **Public view** for the model, **private lookup** for transport. |
 | `systems_inventory.example.yaml` | Template for the central registry. Holds env var *names*, never secrets. |
-| `llm.py` | Anthropic calls: model, thinking, effort, prompt caching. |
+| `llm.py` | Anthropic calls: model, thinking, effort, prompt caching, token totals. |
+| `env_file.py` | Loads `.env` into the environment. Never overrides an exported variable. |
 | `state.py` | Graph state; `Finding` and `Scenario` shapes. |
 | `tools/*.py` | **One file per diagnostic area.** Drop a new file here to add a tool. |
 | `kb/system-model.md` | **How the system works.** Code-derived, always in the cached prompt, read-only. |
@@ -27,6 +28,14 @@ node inventory; never imports from it.
 
     cp .env.example .env && $EDITOR .env      # ANTHROPIC_API_KEY, GOTCHA30_REPO
     .venv/bin/python run.py "the acoustic sensor shows no tracks"
+
+Get the key from [console.anthropic.com](https://console.anthropic.com) → Settings → API
+keys → Create key; it is shown once. `.env` is read at startup by `env_file.py` and
+**never overrides a variable you exported** — a shell export, a systemd unit or a
+container's environment always wins, so a stale `.env` cannot shadow the key you are
+testing with. If you would rather not keep it in a file at all, `export
+ANTHROPIC_API_KEY=sk-ant-…` or `ant auth login` both work, and so does typing it into the
+console's Run tab (see below).
 
     .venv/bin/python run.py --resume <session_id>   # finish a pending approval
     AGENT_MODE=live .venv/bin/python run.py "..."   # real commands, not fixtures
@@ -251,6 +260,32 @@ credential resolves — `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, an OAuth pr
 also calls out the two documented traps: an `ANTHROPIC_API_KEY` set to the empty string
 still wins its precedence slot and authenticates with nothing, and setting both a key and
 a token makes the SDK send both, which the API rejects.
+
+**A key can be typed into the Run tab**, which is the same split the device passwords use:
+the value goes to `secrets.local.env` (mode 0600, gitignored) and never into a git-tracked
+file, and it comes back out masked rather than rendered. Two things are specific to it
+being a *billing* credential. It is promoted into the environment **only when nothing else
+resolves**, so it can never shadow a key you exported or a working OAuth profile — the
+console is a fallback, not an override. And `llm.reset_client()` drops the memoized SDK
+client on every write, so a key set at runtime takes effect without a restart; without
+that, a process that started with no credential would keep failing at a key visibly
+present on screen.
+
+**This console has no authentication** — no login, no CORS policy, no auth check anywhere.
+Its entire trust model is uvicorn's default bind to `127.0.0.1`. That is tolerable for a
+device password, which still needs to reach the LAN to be worth anything; it is not
+tolerable for an API key, which is spendable by anyone who reads it. Serve it on localhost
+only, and never `--host 0.0.0.0`.
+
+**Token counts.** `llm.py` keeps a per-run total in thread-local state — thread-local
+because the console and the Slack gateway each give a session its own worker thread, and a
+module-level counter would bill one operator's session for another's. It exists alongside
+the per-agent numbers in the transcript because it catches what the transcript
+structurally cannot: `ask_json()`'s routing and synthesis calls return only a tool input
+and produce no transcript entry, so their tokens were previously spent and never counted.
+The total is written into each trace line; the Run tab shows this session and a lifetime
+figure summed across `traces/`. Traces written before this existed still count — the
+rollup falls back to summing their transcripts, just without that routing overhead.
 
 **The filename is derived, not typed.** Write the name however you like — "Radar
 WebSocket keeps flapping!" — and the server slugifies it to `radar-websocket-keeps-flapping.md`,

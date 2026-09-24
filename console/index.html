@@ -157,6 +157,11 @@ svg.dep path.hit{stroke:transparent;stroke-width:16;fill:none;cursor:pointer}
 .alert{border:1px solid var(--bad);background:color-mix(in srgb,var(--bad) 8%,transparent);
   border-radius:var(--r-sm);padding:9px 12px;margin-top:10px;font-size:12.5px}
 .alert b{color:var(--bad)}
+/* A required field has to look different from an optional one BEFORE the save is
+   refused, which is the whole reason the hardware type kept getting missed. */
+.fd .req{font:9.5px/1 var(--mono);color:var(--warn);border:1px solid var(--warn);
+  border-radius:4px;padding:2px 4px;margin-left:6px;font-weight:400;letter-spacing:.02em}
+.fd input.missing{border-color:var(--warn)}
 button.sm:disabled{opacity:.45;cursor:not-allowed}
 button.sm:disabled:hover{background:var(--bg);border-color:var(--line)}
 
@@ -274,8 +279,16 @@ tr.click:hover{background:var(--tint)}
       <button class="go" id="go">Run</button>
     </div>
     <p class="note">Runs against recorded fixtures. Live mode stays a deliberate command-line act.</p>
+    <!-- Run is disabled without credentials, and the key field is now at the foot of the
+         page. Without this the button is simply dead with the explanation off-screen. -->
+    <p class="note bad" id="credhint" hidden></p>
+    <p class="note" id="usage"></p>
   </div>
   <div id="live"></div>
+  <!-- Last on the page: a key is set once and then never touched again, so it does not
+       belong above the thing you came here to do. It stays on the Run tab rather than
+       moving to Inventory because it is what gates the Run button. -->
+  <div id="creds"></div>
 </section>
 
 <section id="chat" hidden></section>
@@ -301,22 +314,89 @@ api('/meta').then(m=>{
   META=m;
   $('#mode').textContent='mode: '+m.mode;
   $('#model').textContent=m.model;
-  const c=m.credentials||{ready:false};
+  renderCreds(m.credentials||{ready:false});
+  loadUsage();
+  loadApprovals();
+});
+
+// ---- credentials -----------------------------------------------------------
+// The key is never echoed back: the server sends a mask, and the input is only ever
+// written to, never populated from the response.
+function renderCreds(c){
+  META.credentials=c;
   const k=$('#keystate');
   k.textContent=c.ready?('auth: '+c.source):'no credentials';
   k.className='pill'+(c.ready?'':' bad');
   k.title=c.warning||'';
   $('#go').disabled=!c.ready;
-  if(!c.ready)$('#live').innerHTML=`<div class="card"><h3>Not ready</h3>
-    <p class="note">No Anthropic credentials resolve in the console's environment. The SDK
-      looks for <code>ANTHROPIC_API_KEY</code>, then <code>ANTHROPIC_AUTH_TOKEN</code>, then
-      an OAuth profile from <code>ant auth login</code>, then workload identity federation —
-      any one of them is enough. Set one, then restart the console.</p>
-    ${c.warning?`<p class="note bad">${esc(c.warning)}</p>`:''}</div>`;
-  else if(c.warning) $('#live').innerHTML=`<div class="card"><h3>Check your credentials</h3>
-    <p class="note bad">${esc(c.warning)}</p></div>`;
-  loadApprovals();
-});
+  const hint=$('#credhint');
+  if(hint){
+    hint.hidden=c.ready;
+    hint.innerHTML=c.ready?'':
+      'Run needs Anthropic credentials. <a href="#" onclick="jumpToCreds();return false">Set a key &darr;</a>';
+  }
+  $('#creds').innerHTML=`<div class="card">
+    <h3>${c.ready?'Anthropic credentials':'Not ready — no Anthropic credentials'}</h3>
+    ${c.ready
+      ? `<p class="note">Resolving from <b>${esc(c.source)}</b>.${
+           c.masked?` Stored key <span class="mono">${esc(c.masked)}</span>.`:''}</p>`
+      : `<p class="note">The SDK looks for <code>ANTHROPIC_API_KEY</code>, then
+           <code>ANTHROPIC_AUTH_TOKEN</code>, then an OAuth profile from
+           <code>ant auth login</code>, then workload identity federation — any one is
+           enough. Put one in <code>.env</code>, export it, or paste a key below.</p>`}
+    ${c.warning?`<p class="note bad">${esc(c.warning)}</p>`:''}
+    <div class="row" style="margin-top:8px">
+      <input type="password" id="apikey" placeholder="sk-ant-api03-…" autocomplete="off">
+      <button class="go" id="savekey">${c.stored?'Replace key':'Save key'}</button>
+      ${c.stored?'<button id="clearkey">Clear</button>':''}
+    </div>
+    <p class="note">Stored in <code>secrets.local.env</code> (mode 0600, gitignored), never
+      in the registry. Takes effect immediately — no restart.</p>
+    <p class="note warn">${esc(c.localhost_only||'')}</p>
+  </div>`;
+  $('#savekey').onclick=saveKey;
+  if($('#clearkey'))$('#clearkey').onclick=clearKey;
+  $('#apikey').onkeydown=e=>{if(e.key==='Enter')saveKey();};
+}
+
+function jumpToCreds(){
+  const box=$('#creds'); if(box)box.scrollIntoView({block:'center'});
+  const f=$('#apikey'); if(f)f.focus();
+}
+
+async function saveKey(){
+  const el=$('#apikey'), key=el.value.trim();
+  if(!key)return;
+  $('#savekey').disabled=true;
+  try{ renderCreds(await api('/credentials',{method:'PUT',
+         headers:{'content-type':'application/json'},body:JSON.stringify({key})})); }
+  catch(e){ $('#savekey').disabled=false;
+            alert('Could not store that key: '+e.message); return; }
+  el.value='';
+}
+
+async function clearKey(){
+  if(!confirm('Remove the stored Anthropic key from secrets.local.env?'))return;
+  try{ renderCreds(await api('/credentials',{method:'DELETE'})); }
+  catch(e){ alert('Could not clear the key: '+e.message); }
+}
+
+// ---- token usage -----------------------------------------------------------
+const nTok=n=>n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?Math.round(n/1e3)+'K':String(n??0);
+const tokLine=u=>`in ${nTok(u?.input)} · out ${nTok(u?.output)} · cache read ${nTok(u?.cache_read)}`;
+var LIFETIME=null;
+
+async function loadUsage(){
+  LIFETIME=await api('/usage').catch(()=>null);
+  paintUsage(null);
+}
+
+function paintUsage(sessionUsage){
+  const bits=[];
+  if(sessionUsage)bits.push('this session &nbsp;'+tokLine(sessionUsage));
+  if(LIFETIME)bits.push(`lifetime &nbsp;${tokLine(LIFETIME.lifetime)} &nbsp;(${LIFETIME.sessions} sessions)`);
+  $('#usage').innerHTML=bits.join(' &nbsp;·&nbsp; ');
+}
 
 $('#go').onclick=async()=>{
   const q=$('#q').value.trim(); if(!q)return;
@@ -332,7 +412,11 @@ async function refresh(){
   if(!CUR)return;
   const s=await api('/session/'+CUR).catch(()=>null); if(!s)return;
   const st=s.state||{}, done=['done','error','awaiting_approval'].includes(s.status);
-  if(done){clearInterval(TIMER);$('#go').disabled=!(META.credentials||{}).ready;}
+  // s.usage is the finished total (it counts routing and synthesis too); st.usage is
+  // what the checkpoint can see mid-run, summed from the agents that have reported.
+  paintUsage(s.usage||st.usage);
+  if(done){clearInterval(TIMER);$('#go').disabled=!(META.credentials||{}).ready;
+           loadUsage().then(()=>paintUsage(s.usage||st.usage));}
   const steps=(META.order||[]).map(a=>{
     const v=(st.visited||[]).includes(a), act=(st.next||[]).includes(a);
     return `<span class="step ${act?'active':v?'done':''}">${v?'✓ ':''}${esc(a)}</span>`}).join('');
@@ -1294,10 +1378,14 @@ function closeView(){ if(!discardOk())return; VIEW=null; EDIT=null; renderInv();
 // stored model is unchanged, so routing and the agent-facing inventory are untouched.
 // `other` is last and catches everything, so nothing a system holds can be hidden by a
 // category nobody thought of.
+// `type` is REQUIRED by the server and is prefilled here for the sections that have an
+// obvious answer — adding an acoustic sensor and then being told it "needs a hardware
+// type" is a question the section already answered. Computers and Other genuinely have
+// no default, so they start blank and the field is marked required.
 const SECTIONS=[
-  {key:'radar',    label:'Radar',     add:{role:'sensor', domain:'radar',    scheme:'tcp'}},
-  {key:'camera',   label:'Camera',    add:{role:'sensor', domain:'camera',   scheme:'http'}},
-  {key:'acoustic', label:'Acoustic',  add:{role:'sensor', domain:'acoustic', scheme:'http'}},
+  {key:'radar',    label:'Radar',     add:{role:'sensor', domain:'radar',    scheme:'tcp',  type:'radar'}},
+  {key:'camera',   label:'Camera',    add:{role:'sensor', domain:'camera',   scheme:'http', type:'camera'}},
+  {key:'acoustic', label:'Acoustic',  add:{role:'sensor', domain:'acoustic', scheme:'http', type:'acoustic'}},
   {key:'computers',label:'Computers', add:{role:'compute',                   scheme:'tcp'}},
   {key:'other',    label:'Other',     add:{role:'other',                     scheme:'tcp'}},
 ];
@@ -1425,9 +1513,11 @@ function renderEdit(){
         <button class="sm no" onclick="rmComp(${i})">Remove</button></header>
       <div class="fg">
         ${fld(3,'Name',txt(i,'name'))}
-        ${fld(4,'Hardware type',`<input type="text" list="types-${esc(role)}"
-          value="${esc(c.type??'')}" placeholder="-"
-          oninput="setS(${i},'type',this.value)">`)}
+        ${fld(4,'Hardware type <b class="req">required</b>',
+          `<input type="text" list="types-${esc(role)}" id="type-${i}"
+          class="${(c.type||'').trim()?'':'missing'}"
+          value="${esc(c.type??'')}" placeholder="what it is, e.g. magos / axis"
+          oninput="setS(${i},'type',this.value);this.classList.toggle('missing',!this.value.trim())">`)}
         ${fld(3,'IP address',txt(i,'address'))}
         ${fld(2,'Port',num(i,'port'))}
 
@@ -1475,7 +1565,7 @@ function renderEdit(){
          placeholder="model-visible; no secrets" oninput="EDIT.description=this.value">`)}
      </div>
      ${body}
-     ${EDIT.error?`<div class="alert"><b>Not saved.</b> ${esc(EDIT.error)}</div>`:''}
+     ${EDIT.error?`<div class="alert" id="syserr"><b>Not saved.</b> ${esc(EDIT.error)}</div>`:''}
      <div class="row" style="margin-top:10px">
        <button class="sm yes" onclick="saveSys()">Save system</button>
        <button class="sm" onclick="${EDIT.isNew?'cancelEdit()':`viewSys('${esc(EDIT.orig)}')`}">Cancel</button>
@@ -1491,7 +1581,28 @@ function togglePw(i){
 }
 function clearPw(i){ setSsh(i,'password',''); setSsh(i,'clear_password',true); renderEdit(); }
 
+// Catch the one required field the form can check itself. The server enforces it too —
+// this is not the guarantee, it is the difference between "Not saved: component '1'
+// needs a hardware type" appearing under a form you have scrolled past, and the field
+// itself being marked before anything is sent.
+function missingTypes(){
+  return (EDIT.components||[])
+    .map((c,i)=>({name:c.name,i,sec:sectionOf(c)}))
+    .filter(x=>!((EDIT.components[x.i].type||'').trim()));
+}
+
 async function saveSys(){
+  const bad=missingTypes();
+  if(bad.length){
+    bad.forEach(x=>SEC_OPEN.add(x.sec));          // do not hide the field being complained about
+    EDIT.error=`${bad.length>1?'These components need':'Component '+JSON.stringify(bad[0].name)+' needs'}`
+      +` a hardware type${bad.length>1?': '+bad.map(x=>x.name).join(', '):''} — it is what a tool `
+      +`resolves against, so the registry will not load without it.`;
+    renderEdit();
+    const f=$('#type-'+bad[0].i);
+    if(f){ f.scrollIntoView({block:'center'}); f.focus(); }
+    return;
+  }
   const payload={new_name:(EDIT.name||'').trim(),
     site:EDIT.site||null,description:EDIT.description||null,
     components:EDIT.components.map(c=>({
@@ -1515,7 +1626,11 @@ async function saveSys(){
   }catch(e){
     // Sticky and next to the button, not a flash in a header that may be scrolled
     // out of view — a save that failed silently reads exactly like one that worked.
+    // Scrolled to as well: "sticky next to the button" is no use under a long form the
+    // operator is looking at the top of, which is what made this read as "it just
+    // does not save".
     EDIT.error=e.message; renderEdit();
+    const box=$('#syserr'); if(box) box.scrollIntoView({block:'center'});
   }
 }
 

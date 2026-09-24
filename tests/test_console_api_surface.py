@@ -273,7 +273,13 @@ def clean_env(monkeypatch, tmp_path):
 
 def test_no_credentials_is_reported_as_not_ready(clean_env):
     import console.server as srv
-    assert srv._credentials() == {"ready": False, "source": None, "warning": ""}
+    got = srv._credentials()
+    assert got["ready"] is False and got["source"] is None and got["warning"] == ""
+    # Nothing typed into the console either, so there is nothing to mask.
+    assert got["stored"] is False and got["masked"] is None
+    # Still pinned exactly: a key leaking into this payload would put it in the browser.
+    assert set(got) == {"ready", "source", "warning", "stored", "masked",
+                        "localhost_only"}
 
 
 def test_an_api_key_is_recognised(clean_env, monkeypatch):

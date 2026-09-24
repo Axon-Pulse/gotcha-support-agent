@@ -47,13 +47,20 @@ import uuid
 from collections import OrderedDict
 from pathlib import Path
 
-from langgraph.checkpoint.sqlite import SqliteSaver
-from langgraph.types import Command
+import env_file
 
-import config_store
-import transport
-from graph import build
-from registry import load_tools
+# Before the SLACK_* constants below and before transport fixes MODE at import — this
+# file reads its whole configuration once, at import, so a later load would be too late.
+env_file.load()
+
+from langgraph.checkpoint.sqlite import SqliteSaver  # noqa: E402
+from langgraph.types import Command  # noqa: E402
+
+import config_store  # noqa: E402
+import llm  # noqa: E402
+import transport  # noqa: E402
+from graph import build  # noqa: E402
+from registry import load_tools  # noqa: E402
 
 log = logging.getLogger("slack_gateway")
 ROOT = Path(__file__).resolve().parent
@@ -215,6 +222,9 @@ def _write_trace(session_id: str, out: dict, origin: dict) -> None:
             "report": out.get("report"),
             "customer_message": out.get("customer_message"),
             "blocked": out.get("blocked", []),
+            # Session total, including the routing and synthesis calls that produce no
+            # transcript entry. Thread-local, so it is this session's and no other's.
+            "usage": llm.totals(),
             "saved": bool(out.get("saved")),
         }, default=str) + "\n")
 
@@ -240,6 +250,8 @@ def _diagnose(session_id: str, question: str, channel: str, thread_ts: str,
         return
     try:
         cfg = {"configurable": {"thread_id": session_id}}
+        # This thread is this session, and llm's totals are thread-local.
+        llm.reset_usage()
         with SqliteSaver.from_conn_string(DB) as cp:
             out = graph().compile(checkpointer=cp).invoke(
                 {"question": question, "session_id": session_id,

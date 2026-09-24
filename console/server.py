@@ -16,7 +16,17 @@ import traceback
 import uuid
 from pathlib import Path
 
-# Console never runs live. Set before importing transport, which reads it at import.
+import env_file
+
+# .env first, so a key written where the README says to put it is actually present.
+env_file.load()
+
+# Console never runs live. This must stay ABOVE `import transport`, which reads MODE
+# once at import and never again — below it, an AGENT_MODE=live from the environment or
+# from .env would already have been read and the browser console would be issuing real
+# commands at hardware. (.env cannot set it anyway, since env_file never overrides, but
+# an exported one could; this line is what makes that unconditional.) Live runs stay a
+# deliberate command-line act.
 os.environ["AGENT_MODE"] = "mock"
 
 import json  # noqa: E402
@@ -33,6 +43,7 @@ import agents as agents_mod  # noqa: E402
 import bridge  # noqa: E402
 import config_store  # noqa: E402
 import inventory  # noqa: E402
+import llm  # noqa: E402
 import secrets_store  # noqa: E402
 import transport  # noqa: E402
 import graph as graph_mod  # noqa: E402
@@ -82,18 +93,24 @@ def _set(sid: str, **kw) -> None:
 def _run(sid: str, payload) -> None:
     """Drive the graph in a worker thread. Fresh sqlite connection per thread."""
     try:
+        # llm's totals are thread-local, and this thread is this session — so resetting
+        # here scopes the count to one run without a session id ever reaching llm.py.
+        llm.reset_usage()
         with SqliteSaver.from_conn_string(DB) as cp:
             out = graph().compile(checkpointer=cp).invoke(
                 payload, {"configurable": {"thread_id": sid}})
         if "__interrupt__" in out:
-            _set(sid, status="awaiting_approval",
+            _set(sid, status="awaiting_approval", usage=llm.totals(),
                  pending=out["__interrupt__"][0].value)
         else:
             _set(sid, status="done", pending=None, report=out.get("report"),
-                 saved=bool(out.get("saved")))
+                 usage=llm.totals(), saved=bool(out.get("saved")))
             _write_trace(sid, out)
     except Exception as e:  # noqa: BLE001 - surfaced in the UI, not swallowed
-        _set(sid, status="error", error=f"{type(e).__name__}: {e}",
+        # A run that failed at the fourth agent still spent the first three agents'
+        # tokens. Reporting nothing there would understate the bill exactly when
+        # somebody is retrying and spending it again.
+        _set(sid, status="error", error=f"{type(e).__name__}: {e}", usage=llm.totals(),
              detail=traceback.format_exc()[-2000:])
 
 
@@ -103,6 +120,9 @@ def _write_trace(sid: str, out: dict) -> None:
         f.write(json.dumps({"findings": out.get("findings", []),
                             "transcript": out.get("transcript", []),
                             "report": out.get("report"),
+                            # Session total, including the routing and synthesis calls
+                            # that produce no transcript entry of their own.
+                            "usage": llm.totals(),
                             "saved": bool(out.get("saved"))}, default=str) + "\n")
 
 
@@ -115,12 +135,22 @@ def _live_state(sid: str) -> dict:
     except Exception:  # noqa: BLE001
         return {}
     v = snap.values or {}
+    transcript = v.get("transcript", [])
+    # A running session has no final total yet — llm.totals() belongs to the worker
+    # thread, not to this request. The checkpoint is what both threads can see, so the
+    # live figure is summed from the agents that have reported so far and lands on the
+    # final number once the run writes its own.
+    running = dict.fromkeys(("input", "output", "cache_read"), 0)
+    for t in transcript:
+        for k in running:
+            running[k] += int((t.get("usage") or {}).get(k) or 0)
     return {
         "visited": v.get("visited", []),
         "next": list(snap.next or []),
         "findings": [{"agent": f.get("agent"), "tool": f.get("tool"), "ok": f.get("ok")}
                      for f in v.get("findings", [])],
-        "transcript": v.get("transcript", []),
+        "transcript": transcript,
+        "usage": running,
         "report": v.get("report"),
     }
 
@@ -156,7 +186,10 @@ def _oauth_profile() -> str | None:
     return found[0] if found else None
 
 
-def _credentials() -> dict:
+KEY_NAME = "ANTHROPIC_API_KEY"
+
+
+def _resolve() -> dict:
     """Which credential source the SDK would use, without making a request."""
     warning = ""
     if os.environ.get("ANTHROPIC_API_KEY") and os.environ.get("ANTHROPIC_AUTH_TOKEN"):
@@ -178,6 +211,56 @@ def _credentials() -> dict:
             or os.environ.get("ANTHROPIC_IDENTITY_TOKEN")):
         return {"ready": True, "source": "workload identity federation", "warning": warning}
     return {"ready": False, "source": None, "warning": warning}
+
+
+# Whether the value in os.environ[KEY_NAME] is one this console put there. Clearing the
+# stored key must not unset a credential the console does not own — an exported key is
+# the operator's, and a .env key belongs to the file, which is still there afterwards.
+_promoted = False
+
+
+def _promote_stored_key() -> bool:
+    """Put a console-entered key into os.environ, but only as a LAST resort.
+
+    The SDK reads os.environ and knows nothing about secrets.local.env, so a stored key
+    has to be promoted to work at all. It is promoted only when nothing else resolves,
+    because an unconditional assignment would take precedence over the operator's own
+    exported key and over an OAuth profile — silently authenticating as somebody else
+    with a value they set once, months ago, through a web form.
+    """
+    global _promoted
+    if _resolve()["ready"]:
+        return False
+    stored = secrets_store.load().get(KEY_NAME)
+    if not stored:
+        return False
+    os.environ[KEY_NAME] = stored
+    _promoted = True
+    llm.reset_client()
+    return True
+
+
+def _mask(value: str) -> str:
+    """Enough to recognise which key this is, not enough to use it."""
+    return f"{value[:12]}{'•' * 8}{value[-4:]}" if len(value) > 20 else "•" * 12
+
+
+def _credentials() -> dict:
+    """Resolution status for the UI, after giving a stored key its chance."""
+    _promote_stored_key()
+    out = _resolve()
+    stored = secrets_store.load().get(KEY_NAME)
+    if stored and out["source"] == KEY_NAME and os.environ.get(KEY_NAME) == stored:
+        # The value in the environment is the one this console put there.
+        out["source"] = "secrets.local.env"
+    out["stored"] = bool(stored)
+    out["masked"] = _mask(stored) if stored else None
+    # There is no login on this server, no CORS policy and no auth check anywhere. The
+    # entire trust model is uvicorn's default bind, and an API key is spendable by anyone
+    # who reads it — unlike a device password, which at least needs to reach the LAN.
+    out["localhost_only"] = ("This console has no authentication. Serve it on 127.0.0.1 "
+                             "only — never --host 0.0.0.0.")
+    return out
 
 
 def _effective_desc(name: str, entry: dict) -> str:
@@ -778,6 +861,102 @@ def trace(tid: str) -> JSONResponse:
         raise HTTPException(404, "no such trace")
     return JSONResponse({"id": tid, "entries": [json.loads(l)
                                                 for l in p.read_text().splitlines() if l]})
+
+
+# ---------------------------------------------------------------------------
+# Credentials
+#
+# Same split the device passwords use: the value lives in secrets.local.env (0600,
+# gitignored) and never in a git-tracked file. Two things differ, because this key is a
+# billing credential rather than a way onto a customer's LAN — it is masked on the way
+# back out rather than rendered, and it is promoted into os.environ only when nothing
+# else resolves, so it can never shadow the operator's own credential.
+# ---------------------------------------------------------------------------
+
+class KeyReq(BaseModel):
+    key: str
+
+
+@app.get("/api/credentials")
+def credentials() -> dict:
+    return _credentials()
+
+
+@app.put("/api/credentials")
+def set_key(req: KeyReq) -> dict:
+    key = req.key.strip()
+    if not key:
+        raise HTTPException(400, "empty key; use Clear to remove the stored one")
+    if any(c.isspace() for c in key):
+        raise HTTPException(400, "key contains whitespace — it was probably truncated or "
+                                 "pasted with a line break")
+    try:
+        secrets_store.put(KEY_NAME, key)
+    except secrets_store.SecretError as e:
+        raise HTTPException(400, str(e)) from e
+    # An exported variable outranks the file everywhere else in this codebase, and a
+    # stale one here would mean the key just typed appears stored but is never sent. The
+    # console is the writer, so it takes the value it was given.
+    global _promoted
+    os.environ[KEY_NAME] = key
+    _promoted = True
+    llm.reset_client()
+    log.info("anthropic key stored (%s)", _mask(key))
+    return _credentials()
+
+
+@app.delete("/api/credentials")
+def clear_key() -> dict:
+    """Remove the stored key and fall back to whatever else was there.
+
+    Only un-export what this console put there: a key the operator exported is not the
+    console's to remove. And after un-exporting, reload .env — a key in the file is a
+    legitimate source that was merely being outranked, and it is still on disk. Without
+    that reload, clearing a console key left a console with a perfectly good .env
+    reporting "no credentials" until someone restarted it.
+    """
+    global _promoted
+    removed = secrets_store.delete(KEY_NAME)
+    if removed and _promoted:
+        os.environ.pop(KEY_NAME, None)
+        _promoted = False
+        env_file.load()
+    llm.reset_client()
+    return _credentials()
+
+
+@app.get("/api/usage")
+def usage() -> dict:
+    """Lifetime token totals, summed from the traces on disk.
+
+    Traces written before usage was recorded carry no "usage" key, so fall back to
+    summing the per-agent numbers in the transcript. Those older sessions therefore
+    count, just without the routing and synthesis calls nothing was recording yet.
+    """
+    TRACES.mkdir(exist_ok=True)
+    total = dict.fromkeys(("input", "output", "cache_read"), 0)
+    sessions = 0
+    for p in TRACES.glob("*.jsonl"):
+        for line in p.read_text().splitlines():
+            if not line.strip():
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            rows = ([entry["usage"]] if isinstance(entry.get("usage"), dict)
+                    else [t["usage"] for t in entry.get("transcript", [])
+                          if isinstance(t, dict) and isinstance(t.get("usage"), dict)])
+            if not rows:
+                # Traces older than the transcript format carry no token data at all.
+                # Counting them would label a real zero as "0 tokens over 3 sessions",
+                # which reads as a broken counter rather than as missing history.
+                continue
+            sessions += 1
+            for row in rows:
+                for k in total:
+                    total[k] += int(row.get(k) or 0)
+    return {"lifetime": total, "sessions": sessions}
 
 
 # ---------------------------------------------------------------------------

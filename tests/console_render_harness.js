@@ -382,6 +382,83 @@ check('newSys refuses an empty name',()=>{
 check('closeView clears both modes',()=>{sandbox.closeView();
   if(sandbox.VIEW||sandbox.EDIT)throw new Error('not cleared')});
 
+// --- credentials & usage ---
+sandbox.META={credentials:{},order:[]};
+check('no credentials renders the key form',()=>{
+  sandbox.renderCreds({ready:false,source:null,warning:'',stored:false,masked:null,
+                       localhost_only:'no authentication'});
+  const h=el('#creds').innerHTML;
+  if(!/id="apikey"/.test(h))throw new Error('no way to enter a key');
+  if(!/no authentication/.test(h))throw new Error('the localhost warning is not shown');
+  if(el('#go').disabled!==true)throw new Error('Run is enabled without credentials');});
+check('a stored key renders masked, with Clear',()=>{
+  sandbox.renderCreds({ready:true,source:'secrets.local.env',warning:'',stored:true,
+                       masked:'sk-ant-api03-••••••••ZQ4A',localhost_only:'x'});
+  const h=el('#creds').innerHTML;
+  if(!/ZQ4A/.test(h))throw new Error('the mask is not shown');
+  if(!/id="clearkey"/.test(h))throw new Error('no way to clear a stored key');
+  if(el('#go').disabled!==false)throw new Error('Run stayed disabled with a key');});
+check('the key itself is never rendered back',()=>{
+  // The server sends a mask, never the value — but assert the UI would not print one
+  // even if a future change started returning it.
+  sandbox.renderCreds({ready:true,source:'ANTHROPIC_API_KEY',warning:'',stored:true,
+                       masked:'sk-ant-api03-••••••••ZQ4A',localhost_only:'x',
+                       key:'sk-ant-api03-SECRETVALUE'});
+  if(/SECRETVALUE/.test(el('#creds').innerHTML))throw new Error('leaked the key into the DOM');});
+check('a credential warning is surfaced',()=>{
+  sandbox.renderCreds({ready:true,source:'ANTHROPIC_API_KEY',stored:false,masked:null,
+                       warning:'Both a key and a token are set.',localhost_only:'x'});
+  if(!/Both a key and a token/.test(el('#creds').innerHTML))throw new Error('warning dropped');});
+check('usage renders lifetime alone',()=>{
+  sandbox.LIFETIME={lifetime:{input:1234567,output:96000,cache_read:0},sessions:47};
+  sandbox.paintUsage(null);
+  const h=el('#usage').innerHTML;
+  if(!/1\.2M/.test(h)||!/96K/.test(h))throw new Error('not abbreviated: '+h);
+  if(!/47 sessions/.test(h))throw new Error('session count missing');
+  if(/this session/.test(h))throw new Error('claimed a session total with none given');});
+check('usage renders session and lifetime together',()=>{
+  sandbox.paintUsage({input:42118,output:3204,cache_read:38900});
+  const h=el('#usage').innerHTML;
+  if(!/this session/.test(h)||!/lifetime/.test(h))throw new Error('missing a half: '+h);});
+check('usage survives missing numbers',()=>{
+  sandbox.LIFETIME=null; sandbox.paintUsage({});
+  if(/NaN|undefined/.test(el('#usage').innerHTML))throw new Error('printed NaN/undefined');});
+check('no credentials points at the key field further down the page',()=>{
+  sandbox.renderCreds({ready:false,source:null,warning:'',stored:false,masked:null,
+                       localhost_only:'x'});
+  const h=el('#credhint');
+  if(h.hidden!==false)throw new Error('the hint is hidden while Run is disabled');
+  if(!/Set a key/.test(h.innerHTML))throw new Error('no pointer to the key field');});
+check('the hint disappears once a key resolves',()=>{
+  sandbox.renderCreds({ready:true,source:'ANTHROPIC_API_KEY',warning:'',stored:false,
+                       masked:null,localhost_only:'x'});
+  if(el('#credhint').hidden!==true)throw new Error('still nagging with a working key');});
+
+// --- inventory: the required hardware type ---
+check('adding a sensor prefills the hardware type its section implies',()=>{
+  sandbox.INV={systems:[],domains:[],type_catalog:{}};
+  sandbox.EDIT={name:'tower1',orig:'tower1',components:[],isNew:true};
+  sandbox.addComp('acoustic');
+  const c=sandbox.EDIT.components[0];
+  if(c.type!=='acoustic')throw new Error('type left blank: '+JSON.stringify(c.type));
+  if(sandbox.missingTypes().length)throw new Error('reported as missing despite a default');});
+check('a section with no obvious type is reported before any request',()=>{
+  sandbox.EDIT={name:'tower1',orig:'tower1',components:[],isNew:true};
+  sandbox.addComp('computers');
+  const bad=sandbox.missingTypes();
+  if(bad.length!==1)throw new Error('should be exactly one missing: '+JSON.stringify(bad));
+  let sent=false;
+  const realFetch=sandbox.fetch;
+  sandbox.fetch=()=>{sent=true;return Promise.resolve({ok:true,json:async()=>({})})};
+  sandbox.saveSys();
+  sandbox.fetch=realFetch;
+  if(sent)throw new Error('sent a request that could only be refused');
+  if(!/hardware type/.test(sandbox.EDIT.error||''))
+    throw new Error('no explanation recorded: '+sandbox.EDIT.error);});
+check('filling the type in clears the complaint',()=>{
+  sandbox.EDIT.components[0].type='dell-optiplex';
+  if(sandbox.missingTypes().length)throw new Error('still reported after being filled');});
+
 let bad=0;
 for(const c of cases){ if(c[0]!=='ok')bad++; console.log(c[0].padEnd(5),c[1],c[2]?'→ '+c[2]:''); }
 console.log(bad?`\n${bad} FAILED`:`\nall ${cases.length} render paths ok`);

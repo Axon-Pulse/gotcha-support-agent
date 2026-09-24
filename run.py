@@ -15,12 +15,18 @@ import tempfile
 import uuid
 from pathlib import Path
 
-from langgraph.checkpoint.sqlite import SqliteSaver
-from langgraph.types import Command
+import env_file
 
-import transport
-from graph import build
-from registry import load_tools
+# Before transport, which fixes MODE at import — and before the SDK client is built.
+env_file.load()
+
+from langgraph.checkpoint.sqlite import SqliteSaver  # noqa: E402
+from langgraph.types import Command  # noqa: E402
+
+import llm  # noqa: E402
+import transport  # noqa: E402
+from graph import build  # noqa: E402
+from registry import load_tools  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent
 TRACES = ROOT / "traces"
@@ -39,7 +45,10 @@ def _trace(session: str, out: dict) -> None:
     with (TRACES / f"{session}.jsonl").open("a") as f:
         f.write(json.dumps({"findings": out.get("findings", []),
                             "transcript": out.get("transcript", []),
-                            "report": out.get("report")}, default=str) + "\n")
+                            "report": out.get("report"),
+                            # Whole-process total, so it includes the routing and
+                            # synthesis calls that never reach a transcript entry.
+                            "usage": llm.totals()}, default=str) + "\n")
 
 
 def main() -> int:
@@ -52,6 +61,7 @@ def main() -> int:
                         format="%(levelname)s %(name)s: %(message)s")
 
     load_tools()                     # refuses to register any write tool
+    llm.reset_usage()                # totals cover this process, not this module's life
     session = a.resume or uuid.uuid4().hex[:12]
     print(f"session {session}  mode={transport.MODE}\n")
 
