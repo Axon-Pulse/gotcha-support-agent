@@ -11,7 +11,9 @@ import logging
 import os
 import re
 import unicodedata
+import subprocess
 import threading
+import time
 import traceback
 import uuid
 from pathlib import Path
@@ -40,11 +42,15 @@ from pydantic import BaseModel  # noqa: E402
 import yaml  # noqa: E402
 
 import agents as agents_mod  # noqa: E402
+import attachments as attachments_mod  # noqa: E402
 import bridge  # noqa: E402
 import config_store  # noqa: E402
+import conversation as convo  # noqa: E402
 import inventory  # noqa: E402
 import llm  # noqa: E402
 import secrets_store  # noqa: E402
+import trace_summary  # noqa: E402
+import trace_tag  # noqa: E402
 import transport  # noqa: E402
 import graph as graph_mod  # noqa: E402
 from graph import build  # noqa: E402
@@ -82,6 +88,10 @@ def rebuild_graph() -> None:
 
 # session id -> {status, question, error}
 SESSIONS: dict[str, dict] = {}
+# conversation id -> {id, created_at, turns: [...], status, error}. A conversation is a
+# list of turns, NOT a long-lived graph thread — see conversation.py for why reusing a
+# thread would silently re-summarise old evidence against a new question.
+CONVERSATIONS: dict[str, dict] = {}
 _lock = threading.Lock()
 
 
@@ -92,9 +102,23 @@ def _set(sid: str, **kw) -> None:
 
 def _run(sid: str, payload) -> None:
     """Drive the graph in a worker thread. Fresh sqlite connection per thread."""
+    if isinstance(payload, dict):
+        # Written before any work, so a run the server never finished — a crash, a
+        # restart mid-run — still leaves a trace, as "running" with nothing after it.
+        # The attachments' description tokens were spent on upload; this line is where
+        # they join the session's total.
+        s = SESSIONS.get(sid) or {}
+        extra = ({"attachments": s["attachments"],
+                  "usage": attachments_mod.usage_of(s["attachments"])}
+                 if s.get("attachments") else {})
+        _trace_line(sid, status="running", question=s.get("question",
+                    payload.get("question")), system=payload.get("system"),
+                    started_at=time.time(), **extra)
     try:
         # llm's totals are thread-local, and this thread is this session — so resetting
         # here scopes the count to one run without a session id ever reaching llm.py.
+        # The trace line each segment writes therefore holds only that segment's
+        # tokens, and the lines of one session add up to its total.
         llm.reset_usage()
         with SqliteSaver.from_conn_string(DB) as cp:
             out = graph().compile(checkpointer=cp).invoke(
@@ -102,6 +126,7 @@ def _run(sid: str, payload) -> None:
         if "__interrupt__" in out:
             _set(sid, status="awaiting_approval", usage=llm.totals(),
                  pending=out["__interrupt__"][0].value)
+            _write_trace(sid, out, status="awaiting_approval")
         else:
             _set(sid, status="done", pending=None, report=out.get("report"),
                  usage=llm.totals(), saved=bool(out.get("saved")))
@@ -112,18 +137,140 @@ def _run(sid: str, payload) -> None:
         # somebody is retrying and spending it again.
         _set(sid, status="error", error=f"{type(e).__name__}: {e}", usage=llm.totals(),
              detail=traceback.format_exc()[-2000:])
+        _trace_line(sid, status="error", error=f"{type(e).__name__}: {e}",
+                    usage=llm.totals())
 
 
-def _write_trace(sid: str, out: dict) -> None:
+def _add_usage(a: dict, b: dict) -> dict:
+    return {k: int(a.get(k) or 0) + int(b.get(k) or 0)
+            for k in ("input", "output", "cache_read")}
+
+
+def _trace_line(sid: str, **fields) -> None:
     TRACES.mkdir(exist_ok=True)
     with (TRACES / f"{sid}.jsonl").open("a") as f:
-        f.write(json.dumps({"findings": out.get("findings", []),
-                            "transcript": out.get("transcript", []),
-                            "report": out.get("report"),
-                            # Session total, including the routing and synthesis calls
-                            # that produce no transcript entry of their own.
-                            "usage": llm.totals(),
-                            "saved": bool(out.get("saved"))}, default=str) + "\n")
+        f.write(json.dumps(fields, default=str) + "\n")
+
+
+def _write_trace(sid: str, out: dict, status: str = "done") -> None:
+    # What was typed, not the text with attachment descriptions folded in: those are in
+    # the start line's `attachments`, and the summary shows them there.
+    _trace_line(sid, status=status,
+                question=(SESSIONS.get(sid) or {}).get("question") or out.get("question"),
+                findings=out.get("findings", []), transcript=out.get("transcript", []),
+                report=out.get("report"),
+                # This segment's total, including the routing and synthesis calls that
+                # produce no transcript entry of their own.
+                usage=llm.totals(), saved=bool(out.get("saved")))
+
+
+# ---------------------------------------------------------------------------
+# Conversations
+#
+# One file per conversation under traces/, one JSON line per turn, appended as the turn
+# finishes. A conversation that is still going is therefore already durable: the trace
+# is not written at the end, because there is no end until somebody stops typing.
+# ---------------------------------------------------------------------------
+
+def _cset(cid: str, **kw) -> None:
+    with _lock:
+        CONVERSATIONS.setdefault(cid, {"id": cid, "turns": []}).update(kw)
+
+
+def _cturns(cid: str) -> list[dict]:
+    with _lock:
+        return list((CONVERSATIONS.get(cid) or {}).get("turns") or [])
+
+
+def _append_turn(cid: str, turn: dict) -> None:
+    with _lock:
+        c = CONVERSATIONS.setdefault(cid, {"id": cid, "turns": []})
+        c["turns"].append(turn)
+        c["totals"] = convo.totals(c["turns"])
+    _write_turn_trace(cid, turn, (CONVERSATIONS.get(cid) or {}).get("totals") or {})
+
+
+def _write_turn_trace(cid: str, turn: dict, totals: dict) -> None:
+    TRACES.mkdir(exist_ok=True)
+    with (TRACES / f"{cid}.jsonl").open("a") as f:
+        f.write(json.dumps({"conversation": cid, **turn, "totals": totals},
+                           default=str) + "\n")
+
+
+def _converse(cid: str, message: str, recs: list[dict] | None = None,
+              system: str | None = None) -> None:
+    """One turn, in its own thread. Routes, does the work, records it.
+
+    `message` is what the operator typed; `asked` is what the agents read — the same
+    text with each attachment's description after it. The turn keeps them apart so the
+    conversation reads as typed, and digest() puts the attachments back for later turns.
+    """
+    recs = recs or []
+    asked = attachments_mod.compose(message, recs)
+    turn = convo.start_turn()
+    if recs:
+        turn["attachments"] = attachments_mod.public(recs)
+    if system:
+        turn["system"] = system
+    # Thread-local, and this thread is this turn — so the token count covers the
+    # routing call as well as whatever the routing decided to do. The descriptions were
+    # made on upload, in another thread, so their tokens are added here by hand.
+    llm.reset_usage()
+
+    def spent() -> dict:
+        return _add_usage(llm.totals(), attachments_mod.usage_of(recs))
+
+    try:
+        decision = convo.route(_cturns(cid), asked)
+        kind = decision["kind"]
+        _cset(cid, status=f"working:{kind}", current={"question": message, **decision,
+                                                        "attachments": turn.get("attachments", [])})
+
+        if kind == "follow_up":
+            text, _ = convo.answer_follow_up(_cturns(cid), asked)
+            _append_turn(cid, convo.finish_turn(
+                turn, kind=kind, why=decision["why"], question=message, answer=text,
+                usage=spent()))
+            _cset(cid, status="idle", current=None)
+            return
+
+        # A run gets its OWN graph session. Registered in SESSIONS as well so the
+        # Approvals tab keeps working exactly as it does for a one-shot run.
+        sid = uuid.uuid4().hex[:12]
+        _set(sid, status="running", question=message, conversation=cid,
+             pending=None, report=None, system=system)
+        with SqliteSaver.from_conn_string(DB) as cp:
+            out = graph().compile(checkpointer=cp).invoke(
+                {"question": asked, "session_id": sid, "system": system, "findings": [], "visited": [],
+                 "transcript": []}, {"configurable": {"thread_id": sid}})
+
+        if "__interrupt__" in out:
+            # The scenario proposal is waiting on a human. The DIAGNOSIS is finished
+            # and is what the operator asked for, so the turn closes with it rather
+            # than leaving the conversation hanging on an admin decision.
+            _set(sid, status="awaiting_approval", usage=spent(),
+                 pending=out["__interrupt__"][0].value)
+            state = _live_state(sid)
+            out = {**state, "report": state.get("report")}
+        else:
+            _set(sid, status="done", pending=None, report=out.get("report"),
+                 usage=spent(), saved=bool(out.get("saved")))
+
+        _append_turn(cid, convo.finish_turn(
+            turn, kind=kind, why=decision["why"], question=message, session_id=sid,
+            report=out.get("report"), findings=out.get("findings", []),
+            transcript=out.get("transcript", []), blocked=out.get("blocked", []),
+            agents=[t.get("agent") for t in out.get("transcript", [])],
+            usage=spent()))
+        _cset(cid, status="idle", current=None)
+    except Exception as e:  # noqa: BLE001 - surfaced in the UI, not swallowed
+        # The failed turn is still recorded: it spent tokens and took time, and a
+        # conversation that drops a turn on the floor cannot be read back afterwards.
+        _append_turn(cid, convo.finish_turn(
+            turn, kind="error", question=message, usage=spent(),
+            error=f"{type(e).__name__}: {e}"))
+        _cset(cid, status="error", current=None,
+              error=f"{type(e).__name__}: {e}", detail=traceback.format_exc()[-2000:])
 
 
 def _live_state(sid: str) -> dict:
@@ -157,6 +304,19 @@ def _live_state(sid: str) -> dict:
 
 class RunReq(BaseModel):
     question: str
+    attachments: list[str] = []   # ids from POST /api/attachments
+    system: str | None = None     # else: named in the question, or the only one there is
+
+
+def _pick_system(text: str, explicit: str | None, remembered: str | None = None) -> str | None:
+    """The session's system, or a 400 saying exactly what to add."""
+    try:
+        chosen, why = inventory.pick_system(text, explicit or None, remembered)
+    except inventory.InventoryError as e:
+        raise HTTPException(400, f"the inventory does not load: {e}") from e
+    if why:
+        raise HTTPException(400, why)
+    return chosen
 
 
 class DecideReq(BaseModel):
@@ -270,9 +430,14 @@ def _effective_desc(name: str, entry: dict) -> str:
 
 @app.get("/api/meta")
 def meta() -> dict:
+    try:
+        systems = sorted(inventory.systems())
+    except inventory.InventoryError:
+        systems = []
     return {
         "mode": transport.MODE,
-        "model": os.environ.get("AGENT_MODEL", "claude-opus-5"),
+        "model": llm.model(),
+        "systems": systems,
         "credentials": _credentials(),
         "agents": [{"name": n, "prompt": a["prompt"], "tools": a.get("tools", [])}
                    for n, a in agents_mod.agents().items()],
@@ -482,12 +647,179 @@ def run(req: RunReq) -> dict:
         raise HTTPException(400, "No Anthropic credentials resolve in this environment. "
                                  "Export ANTHROPIC_API_KEY, or run `ant auth login` to "
                                  "store an OAuth profile the SDK picks up automatically.")
+    recs = _attachments(req.attachments)
+    if not req.question.strip() and not recs:
+        raise HTTPException(400, "describe the problem, or attach a screenshot of it")
+    system = _pick_system(req.question, req.system)
     sid = uuid.uuid4().hex[:12]
-    _set(sid, status="running", question=req.question, pending=None, report=None)
+    _set(sid, status="running", question=req.question, pending=None, report=None,
+         attachments=attachments_mod.public(recs), system=system)
     threading.Thread(target=_run, args=(sid, {
-        "question": req.question, "session_id": sid,
+        "question": attachments_mod.compose(req.question, recs), "session_id": sid,
+        "system": system,
         "findings": [], "visited": [], "transcript": []}), daemon=True).start()
     return {"session_id": sid}
+
+
+class MessageReq(BaseModel):
+    message: str
+    attachments: list[str] = []   # ids from POST /api/attachments
+    system: str | None = None
+
+
+def _attachments(ids: list[str]) -> list[dict]:
+    try:
+        return attachments_mod.load_many(ids)
+    except attachments_mod.AttachmentError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+class AttachmentReq(BaseModel):
+    name: str
+    media_type: str = ""
+    data: str                     # base64; JSON keeps this free of a multipart dependency
+
+
+@app.post("/api/attachments")
+def attachment_add(req: AttachmentReq) -> dict:
+    """Store an upload and describe it now, so the operator reads what the agents will
+    read before sending — and can drop it if the description missed the point."""
+    try:
+        return attachments_mod.save(req.name, req.media_type, req.data,
+                                    describe=_describe)
+    except attachments_mod.AttachmentError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+def _describe(data: bytes, media_type: str, name: str) -> tuple[str, dict]:
+    if not _credentials()["ready"]:
+        raise attachments_mod.AttachmentError(
+            "describing an image needs Anthropic credentials, and none resolve here")
+    # Its own thread-local count, so these tokens never leak into a turn's total; the
+    # record carries them to whichever session the attachment is sent with.
+    llm.reset_usage()
+    return llm.describe_attachment(data, media_type, name)
+
+
+@app.get("/api/attachments/{aid}/file")
+def attachment_file(aid: str) -> FileResponse:
+    try:
+        rec = attachments_mod.load(aid)
+    except attachments_mod.AttachmentError as e:
+        raise HTTPException(404, str(e)) from e
+    return FileResponse(attachments_mod.file_path(aid), media_type=rec["media_type"],
+                        filename=rec["file"],
+                        content_disposition_type="inline")
+
+
+def _require_credentials() -> None:
+    if not _credentials()["ready"]:
+        raise HTTPException(400, "No Anthropic credentials resolve in this environment. "
+                                 "Export ANTHROPIC_API_KEY, or run `ant auth login` to "
+                                 "store an OAuth profile the SDK picks up automatically.")
+
+
+@app.post("/api/conversation")
+def conversation_new() -> dict:
+    cid = uuid.uuid4().hex[:12]
+    _cset(cid, created_at=time.time(), status="idle", turns=[], totals=convo.totals([]))
+    return {"conversation_id": cid}
+
+
+@app.post("/api/conversation/{cid}/message")
+def conversation_send(cid: str, req: MessageReq) -> dict:
+    _require_credentials()
+    msg = (req.message or "").strip()
+    recs = _attachments(req.attachments)
+    if not msg and not recs:
+        raise HTTPException(400, "an empty message has nothing to diagnose")
+    # A conversation stays on the system it started with unless a message names another.
+    earlier = [t.get("system") for t in _cturns(cid) if t.get("system")]
+    system = _pick_system(msg, req.system, earlier[-1] if earlier else None)
+    with _lock:
+        c = CONVERSATIONS.get(cid)
+        if c is None:
+            raise HTTPException(404, "unknown conversation")
+        if str(c.get("status", "")).startswith("working"):
+            raise HTTPException(409, "this conversation is still working on the last "
+                                     "message")
+    _cset(cid, status="working", error=None,
+          current={"question": msg, "attachments": attachments_mod.public(recs)})
+    threading.Thread(target=_converse, args=(cid, msg, recs, system), daemon=True).start()
+    return {"ok": True}
+
+
+@app.get("/api/conversation/{cid}")
+def conversation_get(cid: str) -> dict:
+    with _lock:
+        c = CONVERSATIONS.get(cid)
+        if c is None:
+            raise HTTPException(404, "unknown conversation")
+        c = json.loads(json.dumps(c, default=str))
+    # A run turn in flight has no entry in `turns` yet; the checkpoint is the only
+    # place its progress is visible, and watching agents fire is half the point.
+    live = (c.get("current") or {}).get("session_id")
+    running = [s for s, v in SESSIONS.items()
+               if v.get("conversation") == cid and v.get("status") == "running"]
+    if not live and running:
+        live = running[-1]
+    c["live"] = _live_state(live) if live else {}
+    return c
+
+
+@app.get("/api/conversations")
+def conversations() -> dict:
+    with _lock:
+        return {"conversations": [
+            {"id": k, "created_at": v.get("created_at"), "status": v.get("status"),
+             "totals": v.get("totals") or {},
+             "opened_with": (v.get("turns") or [{}])[0].get("question")}
+            for k, v in sorted(CONVERSATIONS.items(),
+                               key=lambda kv: -(kv[1].get("created_at") or 0))]}
+
+
+class ModelReq(BaseModel):
+    model: str
+
+
+@app.get("/api/models")
+def models(refresh: bool = False) -> dict:
+    """What this account may use, plus which one is in force."""
+    return {**llm.models(refresh=refresh), "current": llm.model(),
+            "default": llm.DEFAULT_MODEL}
+
+
+@app.put("/api/model")
+def set_model(req: ModelReq) -> dict:
+    """Change the model for every later call. Persisted, and written to the audit log.
+
+    Validated against the catalogue rather than accepted as typed: a model id with a
+    date suffix or a typo is accepted silently by nothing and fails at the next run,
+    minutes later, as an opaque 404 in the middle of a diagnosis.
+    """
+    want = (req.model or "").strip()
+    cat = llm.models()
+    known = {m["id"] for m in cat["models"]}
+    if want not in known:
+        # When the list itself is the fallback we cannot be sure it is wrong, so say so
+        # rather than blocking an operator whose account has a model we could not list.
+        detail = (f"{want!r} is not in this account's model list: {sorted(known)}"
+                  if cat["source"] == "api" else
+                  f"{want!r} is not in the built-in list and the account's models could "
+                  f"not be fetched ({cat.get('why')}) — check credentials, or use one of "
+                  f"{sorted(known)}")
+        raise HTTPException(400, detail)
+    config_store.put("model", want, note=f"model -> {want}")
+    # Caches are model-scoped, so the next run rebuilds the cached prefix from scratch.
+    log.info("model set to %s; the prompt cache starts cold", want)
+    return {"ok": True, "current": llm.model()}
+
+
+@app.delete("/api/model")
+def clear_model() -> dict:
+    """Back to AGENT_MODEL, or the code default if that is unset."""
+    config_store.clear("model")
+    return {"ok": True, "current": llm.model()}
 
 
 @app.get("/api/sessions")
@@ -662,7 +994,7 @@ def _parse_doc(text: str) -> dict:
     `topics` is always a list. `domain:` and `domains:` are read as older spellings of
     the same field, so cases written before the rename keep opening.
     """
-    empty = {"topics": [], "symptoms": [], "body": text or ""}
+    empty = {"topics": [], "symptoms": [], "created": "", "body": text or ""}
     m = _FM.match(text or "")
     if not m:
         return empty
@@ -677,12 +1009,16 @@ def _parse_doc(text: str) -> dict:
         sym = [x.strip() for x in sym.splitlines() if x.strip()]
     topics = (_as_list(meta.get("topics")) or _as_list(meta.get("domains"))
               or _as_list(meta.get("domain")))
+    created = meta.get("created")
+    # YAML reads an unquoted timestamp as a datetime; either way it leaves as text.
+    created = created.isoformat() if hasattr(created, "isoformat") else str(created or "")
     return {"topics": topics,
             "symptoms": [str(x) for x in sym if str(x).strip()],
+            "created": created,
             "body": text[m.end():]}
 
 
-def _render_doc(topics, symptoms: list[str], body: str) -> str:
+def _render_doc(topics, symptoms: list[str], body: str, created: str = "") -> str:
     """Frontmatter + body. Emitted only when there is something to record.
 
     Always a list under `topics:`, however many there are — one shape to write and one
@@ -691,6 +1027,8 @@ def _render_doc(topics, symptoms: list[str], body: str) -> str:
     """
     tags = _as_list(topics)
     meta = {}
+    if created:
+        meta["created"] = str(created)
     if tags:
         meta["topics"] = tags
     clean = [s.strip() for s in symptoms if s and s.strip()]
@@ -792,14 +1130,77 @@ def system_model() -> dict:
 @app.get("/api/kb")
 def kb_list() -> dict:
     KB.mkdir(parents=True, exist_ok=True)
+    links = _case_links()
     docs = []
     for p in sorted(KB.glob("*.md")):
         d = _parse_doc(p.read_text())
+        created, source = _case_created(p, d["created"])
+        ln = links.get(p.stem, {})
         docs.append({"name": p.stem, "bytes": p.stat().st_size,
                      "topics": d["topics"],
                      "symptom_count": len(d["symptoms"]),
-                     "structured": bool(d["topics"] or d["symptoms"])})
+                     "structured": bool(d["topics"] or d["symptoms"]),
+                     "created": created, "created_source": source,
+                     "sessions": len(ln.get("diagnosed", ())),
+                     "search_hits": len(ln.get("searched", ()))})
     return {"docs": docs, **_topics_payload()}
+
+
+_GIT_ADDED: dict[str, str] = {}
+
+
+def _case_created(p: Path, recorded: str) -> tuple[str, str]:
+    """When the case was created, and how sure that is.
+
+    "recorded" is the frontmatter, written when the case is created. Cases older than
+    that field get an estimate: the commit that added the file, else its mtime — which
+    an edit moves, so it is the least trustworthy and labelled as such.
+    """
+    if recorded:
+        return recorded, "recorded"
+    if p.name not in _GIT_ADDED:
+        try:
+            out = subprocess.run(
+                ["git", "log", "--diff-filter=A", "--format=%aI", "-1", "--", str(p)],
+                cwd=ROOT, capture_output=True, text=True, timeout=5).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            out = ""
+        _GIT_ADDED[p.name] = out[:19]
+    if _GIT_ADDED[p.name]:
+        return _GIT_ADDED[p.name], "git"
+    return time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(p.stat().st_mtime)), "file"
+
+
+def _case_links() -> dict[str, dict[str, set]]:
+    """Per case: sessions DIAGNOSED as it, and sessions whose runbook search found it.
+
+    Diagnosed means the final report named it in matched_case, or the session is the
+    one that created it. A search hit is only lexical — the same words — so it is
+    counted apart and never promoted to "this was that fault".
+    """
+    out: dict[str, dict[str, set]] = {}
+    add = lambda case, kind, sid: out.setdefault(  # noqa: E731
+        str(case), {"diagnosed": set(), "searched": set()})[kind].add(sid)
+    TRACES.mkdir(exist_ok=True)
+    for p in TRACES.glob("*.jsonl"):
+        for line in p.read_text().splitlines():
+            try:
+                e = json.loads(line) if line.strip() else {}
+            except json.JSONDecodeError:
+                continue
+            r = e.get("report") if isinstance(e.get("report"), dict) else {}
+            if r.get("matched_case"):
+                add(r["matched_case"], "diagnosed", p.stem)
+            sc = r.get("propose_scenario") or {}
+            if e.get("saved") and isinstance(sc, dict) and sc.get("id"):
+                slug = re.sub(r"[^a-z0-9-]+", "-", str(sc["id"]).lower()).strip("-")
+                add(slug, "diagnosed", p.stem)
+            for f in e.get("findings") or []:
+                if isinstance(f, dict) and f.get("tool") == "search_runbook":
+                    for h in (f.get("data") or {}).get("hits") or []:
+                        if isinstance(h, dict) and h.get("doc"):
+                            add(h["doc"], "searched", p.stem)
+    return out
 
 
 @app.get("/api/kb/{name}")
@@ -815,7 +1216,10 @@ def kb_doc(name: str) -> dict:
 def kb_save(name: str, req: KbReq) -> dict:
     """Edit a runbook document. It is re-read into the cached prompt on the next session."""
     p = _kb_path(name)
-    text = _render_doc(req.tags(), req.symptoms, req.markdown())
+    # The form never sends `created`, so it is carried over from the file — an edit is
+    # not a new case.
+    created = _parse_doc(p.read_text())["created"]
+    text = _render_doc(req.tags(), req.symptoms, req.markdown(), created)
     p.write_text(text)
     log.info("kb edited: %s (%d bytes)", p.name, len(text))
     return {"ok": True, "name": name, "bytes": len(text)}
@@ -832,7 +1236,8 @@ def kb_create(req: KbNewReq) -> dict:
     if p.exists():
         raise HTTPException(409, f"{name}.md already exists")
     body = req.markdown().strip() or _join_body({"title": name.replace("-", " ").title()})
-    p.write_text(_render_doc(req.tags(), req.symptoms, body))
+    p.write_text(_render_doc(req.tags(), req.symptoms, body,
+                             time.strftime("%Y-%m-%dT%H:%M:%S")))
     log.info("kb created: %s", p.name)
     return {"ok": True, "name": name}
 
@@ -848,10 +1253,14 @@ def kb_delete(name: str) -> dict:
 @app.get("/api/traces")
 def traces() -> dict:
     TRACES.mkdir(exist_ok=True)
-    return {"traces": [{"id": p.stem, "bytes": p.stat().st_size,
-                        "mtime": p.stat().st_mtime}
-                       for p in sorted(TRACES.glob("*.jsonl"),
-                                       key=lambda p: -p.stat().st_mtime)]}
+    # Read from the file on every call, so a system added or removed in the inventory
+    # (here or by hand) is in the Trace filter on the next load, with no restart.
+    try:
+        systems = sorted(str(k) for k in _inv_doc()["systems"])
+    except Exception:  # noqa: BLE001 - a broken inventory must not hide the traces
+        log.exception("traces: inventory unreadable, system filter left empty")
+        systems = []
+    return {"traces": trace_tag.describe(TRACES), "systems": systems}
 
 
 @app.get("/api/traces/{tid}")
@@ -859,8 +1268,12 @@ def trace(tid: str) -> JSONResponse:
     p = (TRACES / f"{tid}.jsonl").resolve()
     if p.parent != TRACES.resolve() or not p.exists():
         raise HTTPException(404, "no such trace")
-    return JSONResponse({"id": tid, "entries": [json.loads(l)
-                                                for l in p.read_text().splitlines() if l]})
+    meta = next((r for r in trace_tag.describe(TRACES) if r["id"] == tid), {})
+    entries = [json.loads(l) for l in p.read_text().splitlines() if l]
+    return JSONResponse({"id": tid, "tag": meta.get("tag"), "meta": meta,
+                         "summary": trace_summary.summarize(entries),
+                         "sections": trace_summary.sections(entries),
+                         "entries": entries})
 
 
 # ---------------------------------------------------------------------------
@@ -937,6 +1350,9 @@ def usage() -> dict:
     total = dict.fromkeys(("input", "output", "cache_read"), 0)
     sessions = 0
     for p in TRACES.glob("*.jsonl"):
+        # One file is one session, however many lines it has: a run that paused for
+        # approval, or failed, writes a line per segment, each with its own tokens.
+        counted = False
         for line in p.read_text().splitlines():
             if not line.strip():
                 continue
@@ -952,7 +1368,8 @@ def usage() -> dict:
                 # Counting them would label a real zero as "0 tokens over 3 sessions",
                 # which reads as a broken counter rather than as missing history.
                 continue
-            sessions += 1
+            if not counted:
+                sessions, counted = sessions + 1, True
             for row in rows:
                 for k in total:
                     total[k] += int(row.get(k) or 0)
@@ -973,6 +1390,202 @@ def usage() -> dict:
 # numeric-looking key so it loads back as a string.
 _INV_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
+# ---------------------------------------------------------------------------
+# Component types
+#
+# What a kind of component IS: which section it lands in, the defaults it starts with,
+# and the extra fields it carries. Operator-editable, because a radar gaining an
+# azimuth should not be a code change — but the extras land in the namespaced `fields`
+# dict, never as loose keys, so inventory.py's allowlist guarantee still holds.
+# ---------------------------------------------------------------------------
+
+# The field names are the SYSTEM'S OWN, taken from kb/system-model.md, not invented:
+# alignment is written "into each sensor's own yaw-role key — `azimuth_offset` for radar,
+# `yaw` for the ASU", and the generic mount key is `mount.yaw_deg`. A registry field
+# called `azimuth` where the config says `azimuth_offset` is the same two-vocabularies
+# trap graph.DOMAINS warns about: it reads as a match and is not one.
+# The fields every component has, whatever its type. A type says which of them it
+# SHOWS — a camera with no shell has no use for a username, and the ASU is a local
+# Docker service with no address on the sensor LAN. Hiding is presentational only: a
+# value already stored is still loaded, still saved and still reaches the model, so
+# turning a field off cannot lose data somebody typed.
+BUILTIN_FIELDS = [
+    {"key": "address", "label": "IP address"},
+    {"key": "port", "label": "Port"},
+    {"key": "hardware", "label": "Hardware model"},
+    {"key": "software_version", "label": "Version"},
+    {"key": "web", "label": "Web address"},
+    {"key": "location", "label": "Latitude / longitude"},
+    {"key": "ssh", "label": "Username & password"},
+]
+# Not optional: the logical name is what a tool argument resolves against, and the
+# server refuses a component with no hardware type.
+ALWAYS_SHOWN = ("name", "type")
+
+
+def _default_builtin(**off) -> dict:
+    return {f["key"]: not off.get(f["key"], False) for f in BUILTIN_FIELDS}
+
+
+DEFAULT_TYPES: dict[str, dict] = {
+    "radar":    {"label": "Radar", "role": "sensor", "domain": "radar", "scheme": "tcp",
+                 "builtin": _default_builtin(),
+                 "fields": [{"key": "azimuth_offset", "label": "Azimuth offset °",
+                             "default": ""},
+                            {"key": "elevation", "label": "Elevation °", "default": ""}]},
+    "camera":   {"label": "Camera", "role": "sensor", "domain": "camera", "scheme": "http",
+                 # Optics are reached over their own HTTP API, not a shell.
+                 "builtin": _default_builtin(ssh=True),
+                 "fields": [{"key": "mount_yaw_deg", "label": "Mount yaw °",
+                             "default": ""}]},
+    # `yaw` is the ASU's own alignment key. `container` because the ASU is a local Docker
+    # service, not a device on the sensor LAN — so `asu_connected: false` is a statement
+    # about a container, and which one is what get_asu_service_status goes and reads.
+    "acoustic": {"label": "Acoustic", "role": "sensor", "domain": "acoustic",
+                 "scheme": "http",
+                 # A local Docker service: no address on the sensor LAN to record,
+                 # which is exactly the confusion that makes `asu_connected: false`
+                 # look like a network fault.
+                 "builtin": _default_builtin(address=True, ssh=True),
+                 "fields": [{"key": "yaw", "label": "Yaw °", "default": ""},
+                            {"key": "container", "label": "Docker container",
+                             "default": "dumbo-backend"}]},
+    # The config a box is SUPPOSED to run. The launcher reports the one it actually
+    # started from, and the mismatch between the two is the fault that is otherwise
+    # unknowable — you are looking at a node started from a different config.
+    "computers": {"label": "Computers", "role": "compute", "domain": "", "scheme": "tcp",
+                  "builtin": _default_builtin(),
+                  "fields": [{"key": "os", "label": "OS", "default": ""},
+                             {"key": "expected_config", "label": "Expected config",
+                              "default": ""}]},
+    # Deliberately empty. It is the catch-all: fields invented for it would be noise on
+    # every component that did not fit anywhere else, and noise reaches the prompt.
+    "other":    {"label": "Other", "role": "other", "domain": "", "scheme": "tcp",
+                 "builtin": _default_builtin(),
+                 "fields": []},
+}
+
+
+def component_types() -> dict:
+    return config_store.get("component_types", DEFAULT_TYPES)
+
+
+def _check_types(types: dict) -> dict:
+    """Hold an edited catalogue to what the rest of the console can actually render."""
+    if not isinstance(types, dict) or not types:
+        raise HTTPException(400, "a catalogue needs at least one type")
+    out: dict[str, dict] = {}
+    for key, spec in types.items():
+        k = str(key).strip().lower()
+        if not _INV_NAME.match(k):
+            raise HTTPException(400, f"type name {key!r} must be lowercase letters, "
+                                     f"digits, - or _")
+        if not isinstance(spec, dict):
+            raise HTTPException(400, f"type {k!r} must be an object")
+        role = str(spec.get("role") or inventory.DEFAULT_ROLE)
+        if role not in inventory.ROLES:
+            raise HTTPException(400, f"type {k!r} has role {role!r}; allowed: "
+                                     f"{list(inventory.ROLES)}")
+        fields, seen = [], set()
+        for f in spec.get("fields") or []:
+            if not isinstance(f, dict):
+                raise HTTPException(400, f"type {k!r}: each field must be an object")
+            fk = str(f.get("key") or "").strip().lower()
+            if not _FIELD_KEY.match(fk):
+                raise HTTPException(400, f"type {k!r}: field name {f.get('key')!r} must "
+                                         f"be lowercase letters, digits or underscore")
+            if fk in inventory.FORBIDDEN or fk in inventory._INLINE_SECRET_KEYS:
+                raise HTTPException(400, f"type {k!r}: {fk!r} is a credential name; "
+                                         f"secrets live in secrets.local.env")
+            if fk in seen:
+                raise HTTPException(400, f"type {k!r}: field {fk!r} is defined twice")
+            seen.add(fk)
+            default = f.get("default")
+            if isinstance(default, (dict, list)):
+                raise HTTPException(400, f"type {k!r}: the default for {fk!r} must be a "
+                                         f"single value")
+            fields.append({"key": fk, "label": str(f.get("label") or fk),
+                           "default": "" if default is None else default})
+        # Unknown keys are dropped rather than rejected: a catalogue saved before a
+        # built-in existed should keep loading, and one saved after it was removed
+        # should not wedge the editor.
+        known = {f["key"] for f in BUILTIN_FIELDS}
+        sent = spec.get("builtin")
+        builtin = ({b: bool(sent.get(b, True)) for b in known}
+                   if isinstance(sent, dict) else _default_builtin())
+        out[k] = {"label": str(spec.get("label") or k).strip() or k,
+                  "role": role,
+                  "domain": str(spec.get("domain") or "").strip().lower(),
+                  "scheme": str(spec.get("scheme") or "").strip().lower(),
+                  "builtin": builtin,
+                  "fields": fields}
+    return out
+
+
+@app.get("/api/inventory/types")
+def inventory_types() -> dict:
+    return {"types": component_types(), "defaults": DEFAULT_TYPES,
+            "roles": list(inventory.ROLES),
+            "builtin_fields": BUILTIN_FIELDS, "always_shown": list(ALWAYS_SHOWN),
+            "overridden": "component_types" in config_store.load()}
+
+
+@app.put("/api/inventory/types")
+def inventory_types_put(req: dict) -> dict:
+    checked = _check_types(req.get("types") or {})
+    config_store.put("component_types", checked, note="component types")
+    return {"ok": True, **inventory_types()}
+
+
+# No type-only reset endpoint. "Revert everything to code defaults" on the Agents &
+# permissions page already clears every override, component_types included, so a second
+# way back was surface without a purpose.
+_FIELD_KEY = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
+
+
+def _check_coords(lat, lon, what: str) -> dict:
+    """Both or neither, and on the planet. Half a coordinate points at the Atlantic."""
+    if lat is None and lon is None:
+        return {}
+    if lat is None or lon is None:
+        raise HTTPException(400, f"{what} needs both lat and lon, or neither")
+    if not (-90 <= lat <= 90):
+        raise HTTPException(400, f"{what}: latitude {lat} is outside -90..90")
+    if not (-180 <= lon <= 180):
+        raise HTTPException(400, f"{what}: longitude {lon} is outside -180..180")
+    return {"lat": float(lat), "lon": float(lon)}
+
+
+def _check_fields(fields, what: str) -> dict:
+    """Operator-defined values, held to what can safely reach a prompt.
+
+    Scalars only: a nested structure here would be rendered into the system prompt by
+    as_prompt() as whatever str() makes of it, and a list of dicts becomes noise the
+    model reads as fact. And the key is checked against the same forbidden names the
+    registry refuses elsewhere — `fields` is allowlisted as a whole, so without this it
+    would be the one place a password could legitimately be typed.
+    """
+    if not fields:
+        return {}
+    if not isinstance(fields, dict):
+        raise HTTPException(400, f"{what}: fields must be a mapping")
+    out = {}
+    for k, v in fields.items():
+        key = str(k).strip().lower()
+        if not _FIELD_KEY.match(key):
+            raise HTTPException(400, f"{what}: field name {k!r} must be lowercase "
+                                     f"letters, digits or underscore")
+        if key in inventory.FORBIDDEN or key in inventory._INLINE_SECRET_KEYS:
+            raise HTTPException(400, f"{what}: {key!r} is a credential name; secrets "
+                                     f"live in secrets.local.env, never in the registry")
+        if isinstance(v, (dict, list)):
+            raise HTTPException(400, f"{what}: field {key!r} must be a single value, "
+                                     f"not a {type(v).__name__}")
+        if v in (None, ""):
+            continue
+        out[key] = v
+    return out
+
 
 class SshReq(BaseModel):
     user: str | None = None
@@ -986,6 +1599,12 @@ class SshReq(BaseModel):
 class ComponentReq(BaseModel):
     name: str
     type: str
+    lat: float | None = None
+    lon: float | None = None
+    # Operator-defined per-type values (az, elevation, …). Free-form by design, so the
+    # registry can grow without a code change — but see _check_fields: it is still held
+    # to scalars and to names that cannot be mistaken for a credential.
+    fields: dict | None = None
     role: str = inventory.DEFAULT_ROLE
     domain: str | None = None
     address: str | None = None
@@ -1001,7 +1620,13 @@ class ComponentReq(BaseModel):
 class SystemReq(BaseModel):
     new_name: str | None = None   # rename: the URL carries the CURRENT name
     site: str | None = None
+    lat: float | None = None
+    lon: float | None = None
     description: str | None = None
+    # The component gotcha runs on, and that system's gotcha config as a path ON it.
+    # None = not sent, keep what the file has; "" = cleared.
+    host: str | None = None
+    config: str | None = None
     components: list[ComponentReq] = []
     sensors: list[ComponentReq] = []      # accepted as an alias for older callers
 
@@ -1102,6 +1727,8 @@ def _component_out(name: str, spec: dict, inherited: dict) -> dict:
         "software_version": spec.get("software_version"),
         "web": spec.get("web"),
         "description": spec.get("description"),
+        "lat": spec.get("lat"), "lon": spec.get("lon"),
+        "fields": spec.get("fields") or {},
         "ssh": {
             "user": ssh.get("user"), "port": ssh.get("port"),
             "key_file": ssh.get("key_file"), "password_env": env,
@@ -1129,7 +1756,9 @@ def inventory_get() -> dict:
         else:
             rows = [_component_out(sys_name, spec, {})] if "type" in spec else []
         systems.append({"name": sys_name, "site": spec.get("site"),
+                        "lat": spec.get("lat"), "lon": spec.get("lon"),
                         "description": spec.get("description"),
+                        "host": spec.get("host"), "config": spec.get("config"),
                         "flat": not isinstance(members, dict),
                         "components": rows, "sensors": rows})
     return {
@@ -1194,6 +1823,9 @@ def inventory_put(name: str, req: SystemReq) -> dict:
                   "software_version", "web", "description"):
             if (v := getattr(s_, k)) not in (None, ""):
                 spec[k] = v
+        spec.update(_check_coords(s_.lat, s_.lon, f"component {s_.name!r}"))
+        if (extra := _check_fields(s_.fields, f"component {s_.name!r}")):
+            spec["fields"] = extra
         if s_.ssh:
             ssh = {k: v for k in ("user", "port", "key_file")
                    if (v := getattr(s_.ssh, k)) not in (None, "")}
@@ -1229,8 +1861,14 @@ def inventory_put(name: str, req: SystemReq) -> dict:
     entry: dict = {}
     if req.site:
         entry["site"] = req.site
+    entry.update(_check_coords(req.lat, req.lon, f"system {target!r}"))
     if req.description:
         entry["description"] = req.description
+    for k in ("host", "config"):
+        v = getattr(req, k)
+        v = _cur.get(k) if v is None else v.strip()
+        if v:
+            entry[k] = v
     entry["components"] = components
 
     # Rebuild in order so a renamed system keeps its place in the file rather than
@@ -1290,12 +1928,15 @@ def inventory_delete_secret(env_name: str) -> dict:
 
 class TicketReq(BaseModel):
     question: str
+    attachments: list[str] = []
 
 
 @app.post("/api/bridge/ticket")
 def bridge_submit(req: TicketReq) -> dict:
+    recs = _attachments(req.attachments)
     try:
-        sid = bridge.submit(req.question)
+        sid = bridge.submit(attachments_mod.compose(req.question, recs),
+                            typed=req.question, attachments=attachments_mod.public(recs))
     except bridge.BridgeError as e:
         raise _bad(e) from e
     log.info("bridge ticket %s queued", sid)

@@ -142,6 +142,24 @@ MAX_AGENT_STEPS = 10
 # ---------------------------------------------------------------------------
 
 DEFAULT_POST_AGENTS: dict[str, dict] = {
+    # Answers a follow-up in a conversation from evidence already gathered. The empty
+    # tool list is the safety property, not an optimisation: with no tools it cannot
+    # reach transport.py, so no follow-up can touch a device however it is phrased.
+    "follow_up": {
+        "prompt": (
+            "You are answering an engineer's follow-up about a diagnosis already made in "
+            "this conversation. You have the reports and the raw tool output behind "
+            "them, and nothing else — you cannot run a check or look anything up.\n\n"
+            "Answer in two or three sentences. Be specific and technical: name the node, "
+            "the PID, the uptime, the verdict the tool actually returned. No preamble, "
+            "no restating the question, no offers to investigate further.\n\n"
+            "If the evidence does not answer the question, say so in one sentence and "
+            "name the check that would. Never fill the gap by reasoning about what is "
+            "probably true — an answer invented from adjacent evidence is exactly the "
+            "failure this whole pipeline exists to prevent, and it reads as confident."
+        ),
+        "tools": [],
+    },
     "customer_communicator": {
         "prompt": (
             "You are a customer support representative writing to the client who reported "

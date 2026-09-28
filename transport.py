@@ -16,6 +16,7 @@ ENVIRONMENT, never onto an argv where `ps` would show it to every local user.
 import ipaddress
 import os
 import re
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -100,10 +101,7 @@ def run(key: str, timeout: int | None = None) -> str:
         if not path.exists():
             raise FileNotFoundError(f"no fixture for {key!r} at {path}")
         return path.read_text()
-    return subprocess.run(
-        ["timeout", str(timeout), *table[key]],
-        capture_output=True, text=True, timeout=timeout + 5,
-    ).stdout
+    return _here_or_there(list(table[key]), timeout)
 
 
 def run_argv(argv: list[str], timeout: int = 10) -> str:
@@ -113,10 +111,118 @@ def run_argv(argv: list[str], timeout: int = 10) -> str:
     """
     if not isinstance(argv, list) or not all(isinstance(a, str) for a in argv):
         raise TypeError("argv must be a list of str")
+    return _here_or_there(argv, timeout)
+
+
+# ---------------------------------------------------------------------------
+# Where a command runs.
+#
+# Every check that reads "the system" — health, topology, the launcher, docker, the ASU
+# API on localhost, ping and route — describes the machine it runs ON. On a central
+# server that machine is the wrong one: the system is at a site, running gotcha on its
+# own box. So while a session has a system active and that system names a host, these
+# commands run on that host over SSH. With no host anywhere, nothing changes: they run
+# here, which is right when this IS the gotcha machine.
+# ---------------------------------------------------------------------------
+
+def where() -> str | None:
+    """The component commands run on, or None for this machine."""
+    sysname = inventory.active()
+    if not sysname:
+        if inventory.system_required():
+            raise RuntimeError("no system is selected for this session, and systems are "
+                               "reached over SSH — refusing to diagnose this server instead")
+        return None
+    host = inventory.systems()[sysname]["host"]
+    if not host and inventory.system_required():
+        raise RuntimeError(f"system {sysname!r} has no host set in the inventory, so "
+                           f"there is no machine to run its checks on")
+    return host
+
+
+def _here_or_there(argv: list[str], timeout: int) -> str:
+    host = where()
+    if not host:
+        return subprocess.run(
+            ["timeout", str(timeout), *argv],
+            capture_output=True, text=True, timeout=timeout + 5,
+        ).stdout
+    return _remote(host, argv, timeout)
+
+
+# One connection per host, reused for a minute: a run makes a dozen calls, and a fresh
+# handshake to a remote site for each one is most of the run's wall-clock.
+_CM_DIR = Path(__file__).resolve().parent / ".ssh-cm"
+
+
+def _multiplex() -> list[str]:
+    _CM_DIR.mkdir(mode=0o700, exist_ok=True)
+    return ["-o", "ControlMaster=auto", "-o", f"ControlPath={_CM_DIR}/%C",
+            "-o", "ControlPersist=60"]
+
+
+def _login(node: str) -> tuple[list[str], dict, list[str], dict]:
+    """(prefix, env, ssh argv through the destination, creds) for logging in to a node."""
+    rec = inventory.require(node)
+    host = str((rec.get("endpoint") or {}).get("host") or "")
+    if not host:
+        raise KeyError(f"{node!r} has no address in the inventory; nothing to probe")
+    if host != "localhost":
+        ipaddress.ip_address(host)               # an address, never a shell-shaped string
+    creds = inventory.credentials(node)
+    env, prefix = dict(os.environ), []
+    opts = [*_SSH_HARDENING, *_multiplex()]
+    if creds.get("password"):
+        env["SSHPASS"] = creds["password"].reveal()
+        prefix = ["sshpass", "-e"]
+        opts += ["-o", "BatchMode=no", "-o", "PubkeyAuthentication=no"]
+    else:
+        opts += ["-o", "BatchMode=yes"]
+        if creds.get("key_file"):
+            opts += ["-i", creds["key_file"]]
+    return prefix, env, ["ssh", *opts, "-p", str(creds["port"]),
+                         f"{creds['user']}@{host}"], creds
+
+
+def login_info(node: str) -> dict:
+    """How this server would log in to a node, with no secret in it — for preflight.
+    Kept here so credentials() still has exactly one caller."""
+    creds = inventory.credentials(node)
+    return {"user": creds["user"], "port": creds["port"], "key_file": creds["key_file"],
+            "password_env": creds["password_env"],
+            "has_password": creds["password"] is not None}
+
+
+def _remote(host: str, argv: list[str], timeout: int) -> str:
+    """Run argv on a system's host. The remote side gets ONE shell-quoted string that
+    parses back into exactly argv — a tab in docker's --format, or a %{...} in curl's
+    -w, would otherwise be re-split or reinterpreted by the remote shell."""
+    prefix, env, ssh, _ = _login(host)
+    remote = shlex.join(["timeout", str(timeout), *argv])
     return subprocess.run(
-        ["timeout", str(timeout), *argv],
-        capture_output=True, text=True, timeout=timeout + 5,
+        ["timeout", str(timeout + 10), *prefix, *ssh, "--", remote],
+        capture_output=True, text=True, timeout=timeout + 15, env=env,
     ).stdout
+
+
+_MAX_CONFIG_BYTES = 1_000_000
+
+
+def read_config(system: str) -> str:
+    """The system's gotcha config, read from its host. The path comes from the inventory,
+    which validated it; `~/` is expanded by the remote shell, and only that part."""
+    spec = inventory.systems()[system]
+    if not spec.get("host") or not spec.get("config"):
+        raise KeyError(f"system {system!r} needs both host and config set to read it")
+    path = spec["config"]
+    target = ('"$HOME"/' + shlex.quote(path[2:])) if path.startswith("~/") \
+        else shlex.quote(path)
+    prefix, env, ssh, _ = _login(spec["host"])
+    r = subprocess.run(["timeout", "25", *prefix, *ssh, "--", f"head -c {_MAX_CONFIG_BYTES} -- {target}"],
+                       capture_output=True, text=True, timeout=30, env=env)
+    if r.returncode != 0:
+        raise OSError((r.stderr or f"exit {r.returncode}").strip()[-300:])
+    return r.stdout
 
 
 # ---------------------------------------------------------------------------
@@ -158,6 +264,16 @@ def run_on(key: str, node: str, timeout: int = 15) -> str:
         return path.read_text()
 
     rec = inventory.require(node)                # refuses a name not in the inventory
+    via = where()
+    if via and node != via and os.path.basename(table[key][0]) != "ssh":
+        # An HTTP probe of a camera has to leave from the site, where the camera's LAN
+        # is. Fill it against the unit, then run it on the host.
+        host = str((rec.get("endpoint") or {}).get("host") or "")
+        if not host:
+            raise KeyError(f"{node!r} has no address in the inventory; nothing to probe")
+        if host != "localhost":
+            ipaddress.ip_address(host)
+        return _remote(via, _fill(list(table[key]), {"host": host}), timeout)
     host = str((rec.get("endpoint") or {}).get("host") or "")
     if not host:
         raise KeyError(f"{node!r} has no address in the inventory; nothing to probe")
@@ -178,7 +294,18 @@ def run_on(key: str, node: str, timeout: int = 15) -> str:
     argv = _fill(template, values)
     env, prefix = dict(os.environ), []
     if creds and argv and os.path.basename(argv[0]) == "ssh":
-        opts = list(_SSH_HARDENING)
+        opts = [*_SSH_HARDENING, *_multiplex()]
+        if via and node != via:
+            # The unit sits on the site's LAN, which this server usually cannot route
+            # to. Tunnel through the host — as ProxyCommand rather than -J, because -J
+            # does not carry these options to the first hop, and the first hop would
+            # then prompt for a host key where nobody can answer.
+            jp, _, jssh, jcreds = _login(via)
+            if jcreds.get("password"):
+                raise RuntimeError(f"reaching {node!r} goes through {via!r}, which needs "
+                                   f"key-based SSH — a password cannot be supplied to the "
+                                   f"hop and the unit at once")
+            opts += ["-o", "ProxyCommand=" + shlex.join([*jssh[:-1], "-W", "%h:%p", jssh[-1]])]
         if creds.get("password"):
             # sshpass reads SSHPASS from the environment. The password never becomes an
             # argv element, so it never appears in `ps`, in a crash dump, or in a log.

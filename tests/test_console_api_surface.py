@@ -118,8 +118,27 @@ def test_the_page_no_longer_references_removed_surfaces():
     assert "kbtext" not in HTML, "the free-text KB editor is gone"
 
 
+def test_the_graph_lives_on_the_permissions_page():
+    """It is the shape the settings above it produce, so it is read beside them.
+
+    A separate tab meant the diagram was only ever seen by somebody who remembered to
+    go and look — and it went stale against an edit until they did.
+    """
+    nav = HTML[HTML.index('<nav id="tabs">'):HTML.index("</nav>")]
+    assert 'data-t="graph"' not in nav, "the Graph tab is back in the bar"
+    assert '<section id="graph"' not in HTML, "the orphaned Graph section is still there"
+    # The pane is inside the markup renderPerms writes, after the agents and tools.
+    perms = HTML[HTML.index("$('#perms').innerHTML"):]
+    assert 'id="graphpane"' in perms, "the diagram has nowhere to render on the perms page"
+    assert perms.index("Execution graph") > perms.index("Allowed commands"), \
+        "the diagram should come after the settings it describes, not before"
+    # Rebuilding #perms drops the pane out of the DOM; it has to be put back.
+    assert "paintGraph()" in HTML, "nothing repaints the diagram after a re-render"
+
+
 def test_the_page_wires_the_new_surfaces():
     for hook in ("loadInv", "renderFlow", "laneDrop", "addSym", "togglePw", "supCard",
+                 "paintGraph", "loadGraph",
                  'data-t="inv"', "renderView", "viewSys", "addComp",
                  "roleTag", "ins-before", "flowProblems", "togglePerm", "renderPerms",
                  "firstSentence", "toggleTopic", "addTopic", "renderTopics",
@@ -133,9 +152,13 @@ def test_inventory_is_the_last_tab():
     order = re.findall(r'data-t="(\w+)"', nav)
     assert order[-1] == "inv", f"tab order is {order}"
     assert order[:2] == ["run", "chat"], "the two ways to ask a question come first"
-    # The section list drives which panel is shown; it must agree with the nav.
-    js = re.search(r"\['run',([^\]]+)\]\.forEach\(t=>\$\('#'\+t\)", HTML).group(0)
-    assert js.index("'inv'") > js.index("'perms'")
+    # The section list drives which panel is shown; it must agree with the nav. Pinned
+    # as a set rather than by position: selectTab() looks names up, so the ORDER of the
+    # constant is not what decides anything — a drifted MEMBER is.
+    m = re.search(r"const TABS=\[([^\]]+)\]", HTML)
+    assert m, "TABS is gone; selectTab() has nothing to hide the other panels by"
+    tabs = re.findall(r"'(\w+)'", m.group(1))
+    assert tabs == order, f"nav is {order} but the section list is {tabs}"
 
 
 def test_diagrams_never_scale_past_one_to_one():
@@ -238,9 +261,13 @@ def test_the_row_carries_edit_delete_and_close():
 def test_a_system_is_grouped_into_categories():
     """Radar, camera, acoustic, computers — a view over role and domain, not a schema
     change: the stored model and the agent-facing inventory are untouched."""
-    assert "const SECTIONS=[" in HTML
-    for key in ("'radar'", "'camera'", "'acoustic'", "'computers'", "'other'"):
-        assert key in HTML
+    # SECTIONS is no longer a literal: it is rebuilt from the operator-editable type
+    # catalogue, so a new kind of hardware becomes a section without a code change.
+    assert "function rebuildSections()" in HTML
+    assert "api('/inventory/types')" in HTML, "the catalogue is never fetched"
+    # The five built-ins are the SERVER's defaults now, not literals in the page.
+    import console.server as srv
+    assert {"radar", "camera", "acoustic", "computers", "other"} <= set(srv.DEFAULT_TYPES)
     assert "function sectionOf(c)" in HTML and "function bucket(comps)" in HTML
     assert "addComp('${sec.key}')" in HTML, "each section adds into itself"
 

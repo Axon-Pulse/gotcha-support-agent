@@ -26,8 +26,16 @@ connection. Everything else the HTTP version got right still applies:
    and `visited` are append-only, so a reused thread has every agent already visited, the
    supervisor finds nothing eligible, and it re-summarises OLD evidence against the NEW
    question. Silently.
+   A Slack THREAD is still one conversation: each message is routed the way the console
+   routes a turn (conversation.py) — answered from what the thread already found, or a
+   fresh run — with the thread's earlier turns rebuilt from their traces. The graph never
+   sees the thread; it gets one question, as before.
 4. APPROVAL IS NOT A TIER 1 DECISION. Writing to the knowledge base is admin business and
    defaults to the console. It is available in Slack only if SLACK_APPROVERS names people.
+
+Slack app scopes (bot token): app_mentions:read, chat:write, commands, im:history for
+DMs, files:read for attachments, and channels:history + groups:history so a mention can
+read what was posted in its thread since the bot last answered. Reinstall after adding.
 
 Run:
     pip install slack-bolt
@@ -37,12 +45,16 @@ Run:
     export SLACK_ADMIN_CHANNEL=C0...
     python slack_app.py
 """
+import base64
 import json
 import logging
 import os
+import re
 import sqlite3
+import urllib.request
 import threading
 import time
+import traceback
 import uuid
 from collections import OrderedDict
 from pathlib import Path
@@ -56,7 +68,10 @@ env_file.load()
 from langgraph.checkpoint.sqlite import SqliteSaver  # noqa: E402
 from langgraph.types import Command  # noqa: E402
 
+import attachments as att  # noqa: E402
 import config_store  # noqa: E402
+import conversation as convo  # noqa: E402
+import inventory  # noqa: E402
 import llm  # noqa: E402
 import transport  # noqa: E402
 from graph import build  # noqa: E402
@@ -207,7 +222,7 @@ def post(channel: str, text: str, thread_ts: str | None = None) -> None:
 # Running a diagnosis
 # --------------------------------------------------------------------------
 
-def _write_trace(session_id: str, out: dict, origin: dict) -> None:
+def _write_trace(session_id: str, out: dict, origin: dict, **extra) -> None:
     """Same shape the CLI and console write, plus who asked and from where.
 
     Slack is about to become the primary interface; an interface with no audit trail is
@@ -216,6 +231,7 @@ def _write_trace(session_id: str, out: dict, origin: dict) -> None:
     TRACES.mkdir(exist_ok=True)
     with (TRACES / f"{session_id}.jsonl").open("a") as f:
         f.write(json.dumps({
+            "status": "done",
             "origin": {"via": "slack", **origin, "mode": transport.MODE, "ts": time.time()},
             "findings": out.get("findings", []),
             "transcript": out.get("transcript", []),
@@ -226,48 +242,275 @@ def _write_trace(session_id: str, out: dict, origin: dict) -> None:
             # transcript entry. Thread-local, so it is this session's and no other's.
             "usage": llm.totals(),
             "saved": bool(out.get("saved")),
+            **extra,
         }, default=str) + "\n")
 
 
-def start_session(user: str, channel: str, thread_ts: str, text: str) -> str:
+def _trace_status(session_id: str, status: str, **fields) -> None:
+    """A status line on its own: a start, a failure, a run that never began."""
+    TRACES.mkdir(exist_ok=True)
+    if "origin" in fields:
+        fields["origin"] = {"via": "slack", **fields["origin"], "mode": transport.MODE}
+    with (TRACES / f"{session_id}.jsonl").open("a") as f:
+        f.write(json.dumps({"status": status, **fields}, default=str) + "\n")
+
+
+def start_session(user: str, channel: str, thread_ts: str, text: str,
+                  files: list[dict] | None = None, ts: str | None = None) -> str:
     """One message, one fresh session id. Never a reused checkpoint."""
     session_id = uuid.uuid4().hex[:12]
     _remember(session_id, channel=channel, thread_ts=thread_ts, user=user, question=text,
               status="running")
     threading.Thread(target=_diagnose, daemon=True,
-                     args=(session_id, text, channel, thread_ts, user)).start()
+                     args=(session_id, text, channel, thread_ts, user, files or [], ts)
+                     ).start()
     return session_id
 
 
+# --------------------------------------------------------------------------
+# A thread is a conversation
+# --------------------------------------------------------------------------
+
+_thread_locks: dict[tuple[str, str], threading.Lock] = {}
+
+
+def _thread_lock(channel: str, thread_ts: str) -> threading.Lock:
+    """Turns in one thread run one at a time, so the second is routed knowing the first."""
+    with _lock:
+        return _thread_locks.setdefault((channel, thread_ts), threading.Lock())
+
+
+def thread_turns(channel: str, thread_ts: str, exclude: str = "") -> list[dict]:
+    """The thread's finished turns, oldest first, in conversation.py's shape.
+
+    Rebuilt from the traces rather than held in memory, so a restarted gateway still
+    knows what the thread already found.
+    """
+    if not TRACES.exists():
+        return []
+    needle = json.dumps(thread_ts)
+    turns = []
+    for p in TRACES.glob("*.jsonl"):
+        if p.stem == exclude:
+            continue
+        text = p.read_text()
+        if needle not in text:                       # cheap reject before parsing
+            continue
+        lines = [json.loads(l) for l in text.splitlines() if l.strip()]
+        o = next((l.get("origin") for l in lines if l.get("origin")), None) or {}
+        if o.get("via") != "slack" or o.get("channel") != channel \
+                or o.get("thread_ts") != thread_ts:
+            continue
+        done = [l for l in lines if l.get("status") == "done"]
+        if not done:
+            continue                                 # failed or never finished
+        last = done[-1]
+        # The finished line's origin, not the first one: the system is chosen after the
+        # start line is written, so only the end of the turn knows it.
+        o = last.get("origin") or o
+        extra = "\n".join(last.get("thread_context") or [])
+        turns.append({
+            "started_at": next((l["started_at"] for l in lines if l.get("started_at")), 0),
+            "kind": last.get("kind") or "run",
+            "system": o.get("system"),
+            "question": (o.get("question") or "") + (f"\n\n{extra}" if extra else ""),
+            "attachments": last.get("attachments") or [],
+            "report": last.get("report"), "findings": last.get("findings") or [],
+            "answer": last.get("answer")})
+    return sorted(turns, key=lambda t: t["started_at"])
+
+
+# --------------------------------------------------------------------------
+# Files
+# --------------------------------------------------------------------------
+
+BOT_USER_ID = ""        # filled by build_app() from auth.test
+BOT_ID = ""
+
+
+def _download(f: dict) -> bytes:
+    """A Slack file's bytes. Needs files:read; the URL is private to the workspace."""
+    url = f.get("url_private_download") or f.get("url_private")
+    if not url:
+        raise att.AttachmentError(f"{f.get('name', 'file')}: Slack gave no download link")
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {BOT_TOKEN}"})
+    with urllib.request.urlopen(req, timeout=60) as r:          # noqa: S310 - Slack URL
+        if "text/html" in (r.headers.get("Content-Type") or ""):
+            # Slack answers a missing scope with its login page, not an error status.
+            raise att.AttachmentError(f"{f.get('name', 'file')}: Slack refused the "
+                                      f"download — does the bot have files:read?")
+        return r.read(att.MAX_BYTES + 1)
+
+
+def _files_to_attachments(files: list[dict]) -> tuple[list[dict], list[str]]:
+    """(stored attachments, one line per file that was skipped and why)."""
+    recs, skipped = [], []
+    for f in files:
+        name = f.get("name") or f.get("title") or "file"
+        if f.get("mode") in ("hidden_by_limit", "tombstone"):
+            skipped.append(f"{name}: not available — hidden by the workspace's file "
+                           f"limit, or deleted")
+            continue
+        if int(f.get("size") or 0) > att.MAX_BYTES:
+            skipped.append(f"{name}: {int(f['size']) / 1048576:.1f} MB is over the "
+                           f"{att.MAX_BYTES // 1048576} MB limit")
+            continue
+        try:
+            data = _download(f)
+            recs.append(att.save(name, f.get("mimetype") or "",
+                                 base64.b64encode(data).decode("ascii"),
+                                 describe=llm.describe_attachment))
+        except att.AttachmentError as e:
+            skipped.append(str(e))
+        except Exception as e:                       # noqa: BLE001 - one bad file only
+            log.warning("could not read Slack file %s: %s", name, e)
+            skipped.append(f"{name}: could not be downloaded ({type(e).__name__})")
+    return recs, skipped
+
+
+def att_system(text: str, remembered: str | None) -> tuple[str | None, str]:
+    """The message's system, or why the bot has to ask. Never raises on a bad inventory:
+    the thread gets the reason instead of a silent failure."""
+    try:
+        return inventory.pick_system(text, None, remembered)
+    except inventory.InventoryError as e:
+        return None, f":warning: The inventory does not load, so no system can be chosen: {e}"
+
+
+def _mentions_bot(text: str) -> bool:
+    return bool(BOT_USER_ID) and f"<@{BOT_USER_ID}>" in (text or "")
+
+
+def thread_since_last_answer(channel: str, thread_ts: str, before_ts: str
+                             ) -> tuple[list[dict], list[str], list[str]]:
+    """What was posted in the thread since the bot last spoke, without mentioning it.
+
+    Returns (files, "<@user>: text" lines, notes). Messages that DID mention the bot are
+    left out — each of those was its own request. Authors outside the allowlist are left
+    out too: being in the thread is not being allowed to ask. DMs are skipped, since
+    every DM message reaches the bot on its own.
+    """
+    if _client is None or channel.startswith("D") or not thread_ts \
+            or thread_ts == before_ts:
+        return [], [], []
+    msgs, cursor = [], None
+    try:
+        while True:
+            r = _client.conversations_replies(channel=channel, ts=thread_ts, limit=200,
+                                              **({"cursor": cursor} if cursor else {}))
+            msgs += r.get("messages") or []
+            cursor = (r.get("response_metadata") or {}).get("next_cursor")
+            if not cursor:
+                break
+    except Exception as e:                           # noqa: BLE001 - still answer the mention
+        resp = getattr(e, "response", None)          # SlackApiError carries Slack's code
+        err = (resp.get("error") if hasattr(resp, "get") else None) or type(e).__name__
+        log.warning("conversations.replies failed in %s: %s", channel, err)
+        return [], [], [f"I could not read the earlier messages in this thread ({err}) — "
+                        f"the bot needs channels:history (groups:history in a private "
+                        f"channel). Only this message was used."]
+    mine = lambda m: bool(m.get("bot_id")) and (  # noqa: E731
+        m.get("user") == BOT_USER_ID or m.get("bot_id") == BOT_ID)
+    last = max((float(m["ts"]) for m in msgs if mine(m) and float(m["ts"]) < float(before_ts)),
+               default=0.0)
+    files, lines = [], []
+    for m in msgs:
+        t = float(m.get("ts") or 0)
+        if not (last < t < float(before_ts)) or m.get("bot_id") or _mentions_bot(m.get("text")):
+            continue
+        if not authorise(m.get("user", ""), channel)[0]:
+            continue
+        files += m.get("files") or []
+        if (m.get("text") or "").strip():
+            lines.append(f"<@{m.get('user', '?')}>: {m['text'].strip()}")
+    return files, lines, []
+
+
+# --------------------------------------------------------------------------
+# One turn
+# --------------------------------------------------------------------------
+
 def _diagnose(session_id: str, question: str, channel: str, thread_ts: str,
-              user: str) -> None:
+              user: str, files: list[dict] | None = None, ts: str | None = None) -> None:
     origin = {"user": user, "channel": channel, "thread_ts": thread_ts,
               "question": question}
+    # Before any work, so a diagnosis the gateway never finishes still shows in Traces.
+    _trace_status(session_id, "running", origin=origin, started_at=time.time())
     acquired = _running.acquire(timeout=900)
     if not acquired:
         post(channel, "Still working through a queue of diagnoses — try again shortly.",
              thread_ts)
+        _trace_status(session_id, "cancelled", reason="queue full, never started")
         return
     try:
-        cfg = {"configurable": {"thread_id": session_id}}
-        # This thread is this session, and llm's totals are thread-local.
+        # This thread is this session, and llm's totals are thread-local — so the count
+        # covers describing the attachments and routing the turn, not just the run.
         llm.reset_usage()
-        with SqliteSaver.from_conn_string(DB) as cp:
-            out = graph().compile(checkpointer=cp).invoke(
-                {"question": question, "session_id": session_id,
-                 "findings": [], "visited": [], "transcript": [],
-                 "context": {}, "blocked": []}, cfg)
-        _write_trace(session_id, out, origin)
-        _remember(session_id, status="done", report=out.get("report"),
-                  customer_message=out.get("customer_message"))
-        _deliver(session_id, out, channel, thread_ts)
+        with _thread_lock(channel, thread_ts):
+            _turn(session_id, question, channel, thread_ts, ts, files or [], origin)
     except Exception:                              # noqa: BLE001
         log.exception("session %s failed", session_id)
         _remember(session_id, status="error")
+        _trace_status(session_id, "error", error=traceback.format_exc(limit=1)[-500:],
+                      usage=llm.totals())
         post(channel, f"That run failed — session `{session_id}`. The error is in the "
                       f"gateway log; nothing was changed on the system.", thread_ts)
     finally:
         _running.release()
+
+
+def _turn(session_id: str, question: str, channel: str, thread_ts: str,
+          ts: str | None, files: list[dict], origin: dict) -> None:
+    more_files, context, notes = thread_since_last_answer(channel, thread_ts, ts or thread_ts)
+    recs, skipped = _files_to_attachments(files + more_files)
+    notes += [f"Skipped {x}" for x in skipped]
+    if notes:
+        post(channel, "\n".join(f":warning: {n}" for n in notes), thread_ts)
+    if not question.strip() and not recs and not context:
+        post(channel, "Tell me what the system is doing and I'll look into it.", thread_ts)
+        _trace_status(session_id, "cancelled", reason="nothing to diagnose")
+        return
+
+    typed = question + ("\n\nAlso posted in this thread since the last answer:\n"
+                        + "\n".join(context) if context else "")
+    asked = att.compose(typed, recs)
+    extra = {"attachments": att.public(recs)} if recs else {}
+    if context:
+        extra["thread_context"] = context
+
+    turns = thread_turns(channel, thread_ts, exclude=session_id)
+    # One channel serves every system: the message names it, or the thread already
+    # settled it. When neither does and there is more than one, ask — a diagnosis run
+    # against the wrong site reads as confidently as one run against the right site.
+    earlier = [t["system"] for t in turns if t.get("system")]
+    system, why = att_system(typed, earlier[-1] if earlier else None)
+    if why:
+        post(channel, why, thread_ts)
+        _trace_status(session_id, "cancelled", reason="system not named")
+        return
+    if system:
+        origin["system"] = system
+    decision = convo.route(turns, asked)
+    if decision["kind"] == "follow_up":
+        answer, _ = convo.answer_follow_up(turns, asked)
+        _trace_status(session_id, "done", kind="follow_up", why=decision["why"],
+                      origin={**origin, "ts": time.time()}, answer=answer,
+                      usage=llm.totals(), **extra)
+        _remember(session_id, status="done")
+        post(channel, f"{answer}\n\n_answered from what this thread already found · "
+                      f"session `{session_id}`_", thread_ts)
+        return
+
+    cfg = {"configurable": {"thread_id": session_id}}
+    with SqliteSaver.from_conn_string(DB) as cp:
+        out = graph().compile(checkpointer=cp).invoke(
+            {"question": asked, "session_id": session_id, "system": system,
+             "findings": [], "visited": [], "transcript": [],
+             "context": {}, "blocked": []}, cfg)
+    _write_trace(session_id, out, origin, kind="run", why=decision["why"], **extra)
+    _remember(session_id, status="done", report=out.get("report"),
+              customer_message=out.get("customer_message"))
+    _deliver(session_id, out, channel, thread_ts)
 
 
 def format_report(session_id: str, out: dict) -> str:
@@ -375,22 +618,28 @@ def resume_approval(session_id: str, user: str, channel: str, approved: bool) ->
 # Admission gate, shared by every entry point
 # --------------------------------------------------------------------------
 
-def accept(event_id: str, user: str, channel: str, thread_ts: str, text: str) -> dict:
+def accept(event_id: str, user: str, channel: str, thread_ts: str, text: str,
+           files: list[dict] | None = None, ts: str | None = None) -> dict:
     """Decide whether to run, and start it if so. Pure enough to test without Slack."""
     if already_handled(event_id):
         return {"status": "duplicate"}
     ok, why = authorise(user, channel)
     if not ok:
         return {"status": "denied", "reply": why}
-    if not text.strip():
+    in_thread = bool(ts) and ts != thread_ts
+    # A bare mention is a request when it brings files, or when it is in a thread that
+    # may hold something posted since the last answer — the worker checks which.
+    if not text.strip() and not files and not in_thread:
         return {"status": "empty",
                 "reply": "Tell me what the system is doing and I'll look into it."}
     if rate_limited(user):
         return {"status": "rate_limited",
                 "reply": f"One diagnosis per {USER_COOLDOWN_S}s per person — "
                          f"each run costs several model calls."}
-    session_id = start_session(user, channel, thread_ts, text)
+    session_id = start_session(user, channel, thread_ts, text, files, ts)
     ack = (f"Looking into it — session `{session_id}`. This usually takes a minute or two."
+           + (f"\nReading {len(files)} attached file{'s' * (len(files) > 1)} first."
+              if files else "")
            + ("\n:warning: running against recorded fixtures, not the live system."
               if transport.MODE == "mock" else ""))
     return {"status": "accepted", "session_id": session_id, "reply": ack}
@@ -400,20 +649,39 @@ def accept(event_id: str, user: str, channel: str, thread_ts: str, text: str) ->
 # Socket Mode wiring. Imported here so the module loads without slack_bolt.
 # --------------------------------------------------------------------------
 
+def parse_event(event: dict) -> dict | None:
+    """A Slack message event -> a request, or None if it is not one."""
+    # file_share is an ordinary message with files on it; every other subtype (edits,
+    # joins, bot posts) is not a request.
+    if event.get("bot_id") or event.get("subtype") not in (None, "file_share"):
+        return None
+    return {"channel": event.get("channel", ""), "user": event.get("user", ""),
+            "thread_ts": event.get("thread_ts") or event.get("ts"), "ts": event.get("ts"),
+            # Only the LEADING mention is removed. Splitting on the first ">" also cut a
+            # DM like "latency > 200ms" down to "200ms".
+            "text": re.sub(r"^\s*<@[A-Z0-9]+>\s*", "", event.get("text") or "").strip(),
+            "files": event.get("files") or []}
+
+
 def build_app():
     global _client
     from slack_bolt import App
 
+    global BOT_USER_ID, BOT_ID
     bolt = App(token=BOT_TOKEN)
     _client = bolt.client
+    # Who "the bot" is, to find its last answer in a thread and to tell a message that
+    # mentioned it from one that did not.
+    me = _client.auth_test()
+    BOT_USER_ID, BOT_ID = me.get("user_id", ""), me.get("bot_id", "")
 
     def _handle(event: dict, body: dict) -> None:
-        if event.get("bot_id") or event.get("subtype"):
+        req = parse_event(event)
+        if req is None:
             return
-        channel, user = event.get("channel", ""), event.get("user", "")
-        thread_ts = event.get("thread_ts") or event.get("ts")
-        text = (event.get("text") or "").split(">", 1)[-1].strip()
-        out = accept(body.get("event_id", ""), user, channel, thread_ts, text)
+        channel, thread_ts = req["channel"], req["thread_ts"]
+        out = accept(body.get("event_id", ""), req["user"], channel, thread_ts, req["text"],
+                     req["files"], req["ts"])
         if reply := out.get("reply"):
             post(channel, reply, thread_ts)
 
