@@ -139,6 +139,75 @@ def _account(r) -> dict[str, int]:
     return one
 
 
+def _caps(model_id: str) -> dict:
+    """What this model actually accepts, asked of the API and remembered.
+
+    The model is operator-selectable from whatever the account offers, and those differ
+    in ways that are a 400 rather than a degradation: adaptive thinking arrived with the
+    4.6 generation, so a dated snapshot gets "adaptive thinking is not supported on this
+    model" and the whole run dies. Reading the capability is the difference between the
+    picker offering a model and the model working.
+
+    A failed lookup returns {} and the caller falls back to the modern shape — the newer
+    models are the ones somebody is most likely to have picked, and an unreachable
+    Models API is usually an unreachable Messages API too.
+    """
+    if model_id in _CAPS:
+        return _CAPS[model_id]
+    try:
+        m = client().models.retrieve(model_id)
+        t = getattr(m.capabilities, "thinking", None)
+        types = getattr(t, "types", None)
+        got = {
+            "adaptive": bool(getattr(getattr(types, "adaptive", None), "supported", False)),
+            "enabled": bool(getattr(getattr(types, "enabled", None), "supported", False)),
+            "effort": bool(getattr(getattr(m.capabilities, "effort", None),
+                                   "supported", False)),
+        }
+    except Exception as e:  # noqa: BLE001 - a capability probe must not fail a run
+        log.warning("could not read capabilities for %s (%s); assuming a current model",
+                    model_id, e)
+        return {}
+    _CAPS[model_id] = got
+    return got
+
+
+_CAPS: dict[str, dict] = {}
+# Enough to reason with, well under any max_tokens this module asks for. Only used by
+# models too old for adaptive thinking, where a budget is required rather than optional.
+_FALLBACK_BUDGET = 2000
+
+
+def thinking_for(max_tokens: int) -> dict | None:
+    """The `thinking` argument this model will accept, or None to omit it."""
+    caps = _caps(model())
+    if caps.get("adaptive", True):
+        return {"type": "adaptive"}
+    if caps.get("enabled"):
+        # Must be BELOW max_tokens, and at least 1024. A budget that does not fit is
+        # its own 400, so a small max_tokens turns thinking off rather than failing.
+        budget = min(_FALLBACK_BUDGET, max_tokens - 1)
+        return {"type": "enabled", "budget_tokens": budget} if budget >= 1024 else None
+    return None
+
+
+def effort_for(level: str) -> dict:
+    """`output_config` for this model — empty where effort is not a thing."""
+    return {"effort": level} if _caps(model()).get("effort", True) else {}
+
+
+# Spread into the call so an unsupported parameter is ABSENT rather than None: the SDK
+# sends an explicit null, and a null `thinking` is itself a 400 on some models.
+def _thinking_kw(max_tokens: int) -> dict:
+    t = thinking_for(max_tokens)
+    return {"thinking": t} if t else {}
+
+
+def _effort_kw(level: str) -> dict:
+    e = effort_for(level)
+    return {"output_config": e} if e else {}
+
+
 def _kb() -> str:
     """The system model, and ONLY the system model.
 
@@ -182,8 +251,7 @@ def run_agent(name: str, agent: dict, question: str, context: str = "",
     for _ in range(max_turns):
         r = client().messages.create(
             model=model(), max_tokens=8000,
-            thinking={"type": "adaptive"},
-            output_config={"effort": "high"},
+            **_thinking_kw(8000), **_effort_kw("high"),
             system=system_blocks(agent["prompt"]),
             tools=schemas(agent["tools"]),
             messages=msgs,
@@ -218,7 +286,7 @@ def run_text_agent(agent: dict, user_content: str, max_tokens: int = 2000) -> tu
     """
     r = client().messages.create(
         model=model(), max_tokens=max_tokens,
-        thinking={"type": "adaptive"},
+        **_thinking_kw(max_tokens),
         system=[{"type": "text", "text": agent["prompt"]}],
         messages=[{"role": "user", "content": user_content}],
     )
@@ -249,7 +317,7 @@ def describe_attachment(data: bytes, media_type: str, name: str) -> tuple[str, d
                                           "data": b64}})
     r = client().messages.create(
         model=model(), max_tokens=4000,
-        thinking={"type": "adaptive"},
+        **_thinking_kw(4000),
         system=_DESCRIBE_SYSTEM,
         messages=[{"role": "user", "content": [
             block, {"type": "text", "text": f"The attached file is named {name!r}."}]}],
@@ -261,7 +329,16 @@ def describe_attachment(data: bytes, media_type: str, name: str) -> tuple[str, d
 
 
 def ask_json(prompt: str, schema: dict, system: str = "") -> dict:
-    """One-shot structured call via a forced tool, for routing and synthesis.
+    """One-shot structured call for routing and synthesis.
+
+    NOT a FORCED tool call. `tool_choice: {"type": "tool"}` returns a 400 on the newer
+    models — Claude Opus 5.5 and the Fable/Mythos 5.1 line removed forced tool use — and
+    the model here is operator-selectable from whatever the account actually offers, so
+    this has to work on every one of them rather than on the ones that happen to keep a
+    feature. `auto` plus an instruction naming the tool works everywhere.
+
+    `disable_parallel_tool_use` keeps it to a single call, and the text fallback below
+    covers the case `auto` opens up: a model that answers in prose instead of calling.
 
     Returns the tool input and nothing else. The usage goes to the thread-local total
     rather than the return value on purpose: this signature is substituted wholesale by
@@ -270,15 +347,40 @@ def ask_json(prompt: str, schema: dict, system: str = "") -> dict:
     """
     r = client().messages.create(
         model=model(), max_tokens=4000,
-        thinking={"type": "adaptive"},
-        system=system or "Answer using the provided tool only.",
+        **_thinking_kw(4000),
+        system=((system + "\n\n") if system else "")
+               + "Reply by calling the `emit` tool exactly once, with the whole answer "
+                 "in its arguments. Do not answer in prose.",
         tools=[{"name": "emit", "description": "Return the result.",
                 "input_schema": schema}],
-        tool_choice={"type": "tool", "name": "emit"},
+        tool_choice={"type": "auto", "disable_parallel_tool_use": True},
         messages=[{"role": "user", "content": prompt}],
     )
     _account(r)
     for b in r.content:
         if b.type == "tool_use":
             return b.input
+    return _json_from_text(r)
+
+
+def _json_from_text(r) -> dict:
+    """Last resort when the model wrote the answer instead of calling the tool.
+
+    Without this, `auto` turns a stray prose answer into an empty dict — which the
+    supervisor reads as "no route" and synthesize as "no report", both silently. A
+    parsed object is worth more than an empty one, and an unparseable answer is logged
+    rather than swallowed.
+    """
+    text = "".join(b.text for b in r.content if b.type == "text").strip()
+    if not text:
+        return {}
+    for candidate in (text, text[text.find("{"):text.rfind("}") + 1]):
+        try:
+            got = json.loads(candidate)
+        except (ValueError, TypeError):
+            continue
+        if isinstance(got, dict):
+            log.warning("model answered in text rather than calling emit; parsed it")
+            return got
+    log.error("model answered in text and it did not parse as JSON: %.200s", text)
     return {}

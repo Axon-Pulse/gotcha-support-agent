@@ -157,3 +157,142 @@ def test_the_model_can_be_reset(client):
 
 def test_a_blank_model_is_refused(client):
     assert client.put("/api/model", json={"model": "   "}).status_code == 400
+
+
+# ---------- forced tool use, removed on the newer models ----------
+
+class _Blk:
+    def __init__(self, **kw): self.__dict__.update(kw)
+
+
+def _reply(*blocks):
+    r = _Blk(content=list(blocks),
+             usage=_Blk(input_tokens=1, output_tokens=1, cache_read_input_tokens=0))
+    return r
+
+
+def _capture(monkeypatch, reply):
+    seen = {}
+    monkeypatch.setattr(llm, "client", lambda: _Blk(
+        messages=_Blk(create=lambda **kw: (seen.update(kw) or reply))))
+    return seen
+
+
+def test_the_tool_is_never_forced(monkeypatch):
+    """`tool_choice: {"type": "tool"}` is a 400 on Claude Opus 5.5 and the 5.1 line:
+
+        tool_choice: type "tool" and "any" are not supported for this model.
+
+    The model is operator-selectable from whatever the account offers, so this has to
+    work on every one of them — `auto` does, forcing does not.
+    """
+    seen = _capture(monkeypatch, _reply(_Blk(type="tool_use", input={"kind": "run"})))
+    assert llm.ask_json(prompt="p", schema={}) == {"kind": "run"}
+    assert seen["tool_choice"]["type"] == "auto", "forced tool use is back"
+    assert seen["tool_choice"].get("disable_parallel_tool_use") is True, \
+        "auto without this can emit twice and the second call is dropped"
+
+
+def test_the_prompt_names_the_tool(monkeypatch):
+    """`auto` means the model may decline to call it, so it has to be asked to."""
+    seen = _capture(monkeypatch, _reply(_Blk(type="tool_use", input={})))
+    llm.ask_json(prompt="p", schema={}, system="ROUTE RULES")
+    assert "emit" in seen["system"], "nothing tells the model which tool to call"
+    assert "ROUTE RULES" in seen["system"], "the caller's own system prompt was dropped"
+
+
+def test_a_prose_answer_is_parsed_rather_than_lost(monkeypatch):
+    """The risk `auto` opens up. An empty dict reads as 'no route' to the supervisor
+    and 'no report' to synthesize — both silently."""
+    _capture(monkeypatch, _reply(_Blk(type="text", text='{"kind": "follow_up"}')))
+    assert llm.ask_json(prompt="p", schema={}) == {"kind": "follow_up"}
+
+
+def test_prose_around_the_json_still_parses(monkeypatch):
+    _capture(monkeypatch, _reply(_Blk(
+        type="text", text='Here you go:\n{"kind": "run", "why": "new symptom"}\nHope that helps.')))
+    assert llm.ask_json(prompt="p", schema={})["kind"] == "run"
+
+
+def test_an_unparseable_answer_is_empty_not_a_crash(monkeypatch):
+    _capture(monkeypatch, _reply(_Blk(type="text", text="I can't help with that.")))
+    assert llm.ask_json(prompt="p", schema={}) == {}
+
+
+def test_a_json_list_is_not_passed_off_as_an_object(monkeypatch):
+    """Callers index the result by key; a list would AttributeError downstream."""
+    _capture(monkeypatch, _reply(_Blk(type="text", text='["run"]')))
+    assert llm.ask_json(prompt="p", schema={}) == {}
+
+
+# ---------- the request is shaped to the model, not assumed ----------
+
+def _caps(monkeypatch, **flags):
+    monkeypatch.setattr(llm, "_CAPS", {llm.model(): flags})
+
+
+def test_a_modern_model_gets_adaptive_thinking(monkeypatch):
+    _caps(monkeypatch, adaptive=True, enabled=False, effort=True)
+    assert llm.thinking_for(4000) == {"type": "adaptive"}
+    assert llm.effort_for("high") == {"effort": "high"}
+
+
+def test_a_model_without_adaptive_gets_a_budget(monkeypatch):
+    """Adaptive thinking arrived with the 4.6 generation. A dated snapshot answers
+    `adaptive thinking is not supported on this model` and the run dies — the picker
+    offering a model has to mean the model works."""
+    _caps(monkeypatch, adaptive=False, enabled=True, effort=False)
+    got = llm.thinking_for(4000)
+    assert got["type"] == "enabled"
+    assert 1024 <= got["budget_tokens"] < 4000, "a budget must fit under max_tokens"
+    assert llm.effort_for("high") == {}, "effort is a 400 where it is not supported"
+
+
+def test_a_budget_that_cannot_fit_turns_thinking_off(monkeypatch):
+    """Below the 1024 minimum there is no legal budget; omitting is not a failure."""
+    _caps(monkeypatch, adaptive=False, enabled=True, effort=False)
+    assert llm.thinking_for(900) is None
+
+
+def test_a_model_with_no_thinking_at_all_omits_it(monkeypatch):
+    _caps(monkeypatch, adaptive=False, enabled=False, effort=False)
+    assert llm.thinking_for(4000) is None
+
+
+def test_an_unreadable_capability_assumes_a_current_model(monkeypatch):
+    """A probe that fails must not decide the model is ancient — the newest models are
+    the likeliest pick, and an unreachable Models API means an unreachable API."""
+    monkeypatch.setattr(llm, "_CAPS", {})
+    monkeypatch.setattr(llm, "client", lambda: (_ for _ in ()).throw(RuntimeError("down")))
+    assert llm.thinking_for(4000) == {"type": "adaptive"}
+    assert llm.effort_for("high") == {"effort": "high"}
+
+
+def test_an_unsupported_parameter_is_absent_not_null(monkeypatch):
+    """The SDK sends an explicit null for a None argument, and a null `thinking` is
+    itself a 400 — so it has to be left out of the call entirely."""
+    _caps(monkeypatch, adaptive=False, enabled=False, effort=False)
+    seen = _capture(monkeypatch, _reply(_Blk(type="tool_use", input={"a": 1})))
+    monkeypatch.setattr(llm, "_CAPS", {llm.model(): {"adaptive": False, "enabled": False,
+                                                     "effort": False}})
+    llm.ask_json(prompt="p", schema={})
+    assert "thinking" not in seen, "sent thinking=None to a model that rejects it"
+
+
+def test_capabilities_are_read_once_per_model(monkeypatch):
+    """One probe per model, not one per request."""
+    calls = []
+    monkeypatch.setattr(llm, "_CAPS", {})
+
+    def fake_client():
+        calls.append(1)
+        return _Blk(models=_Blk(retrieve=lambda _id: _Blk(capabilities=_Blk(
+            thinking=_Blk(types=_Blk(adaptive=_Blk(supported=True),
+                                     enabled=_Blk(supported=False))),
+            effort=_Blk(supported=True)))))
+
+    monkeypatch.setattr(llm, "client", fake_client)
+    llm.thinking_for(4000)
+    llm.thinking_for(4000)
+    llm.effort_for("high")
+    assert len(calls) == 1, f"probed the Models API {len(calls)} times"
