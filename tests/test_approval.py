@@ -67,7 +67,10 @@ def test_edited_text_is_what_gets_saved(tmp_path, monkeypatch):
     edited = dict(SCENARIO, _md="# Edited by the operator\n")
     out, kb = _run(tmp_path, monkeypatch,
                    decision={"approved": True, "edited": edited})
-    assert (kb / "test-scenario.md").read_text() == "# Edited by the operator\n"
+    text = (kb / "test-scenario.md").read_text()
+    # The operator's text, verbatim, under the creation stamp the console reads back.
+    assert text.endswith("\n---\n\n# Edited by the operator\n")
+    assert text.startswith("---\ncreated: '")
 
 
 def test_no_proposal_means_no_interrupt(tmp_path, monkeypatch):

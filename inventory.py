@@ -22,6 +22,9 @@ it supplies a logical name that must resolve here, or the call is refused.
 import ipaddress
 import os
 import re
+import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlparse
@@ -48,7 +51,13 @@ _INLINE_SECRET_KEYS = {
 # Everything the model may see about a system. An allowlist, not a denylist: a key
 # nobody anticipated cannot ride along into a prompt by being added to the YAML.
 _PUBLIC_FIELDS = ("name", "type", "role", "domain", "group", "system", "description",
-                  "hardware", "software_version", "web", "endpoint")
+                  "hardware", "software_version", "web", "endpoint", "location",
+                  # Operator-defined per-type fields (az, elevation, …). Allowlisted as
+                  # ONE key rather than by widening the list per field: the guarantee is
+                  # that an unanticipated key cannot ride along, and a single namespaced
+                  # dict keeps that true while still letting the registry grow. Secret
+                  # detection still runs inside it — see _reject_inline_secrets.
+                  "fields")
 
 # A system holds more than sensors: the compute box that runs the stack, the switch the
 # sensors hang off, the laptop an engineer left on site. They are addressable and worth
@@ -147,7 +156,11 @@ def _gotcha30_nodes() -> dict[str, dict]:
     path = REPO / CONFIG
     if not path.exists():
         return {}
-    doc = _load(path)
+    return _nodes_from_config(_load(path))
+
+
+def _nodes_from_config(doc: dict) -> dict[str, dict]:
+    """A gotcha30 config's node list, secrets dropped — local file or one read over SSH."""
     out: dict[str, dict] = {}
     for group, members in (doc.get("nodes") or {}).items():
         if not isinstance(members, dict):
@@ -265,8 +278,28 @@ def _systems() -> dict[str, dict]:
             # A device's own web UI. Not a secret, and useful to say "the dashboard is
             # on :5173" — so it is on the allowlist deliberately, not by omission.
             "web": spec.get("web"),
+            # Where the thing physically is. Inherited from the system unless the
+            # component overrides it — sensors on one mast share a location, and
+            # repeating it on each is how the two drift apart.
+            "location": _location(spec) or _location(sys_spec),
+            "fields": {k: v for k, v in (spec.get("fields") or {}).items()
+                       if isinstance(spec.get("fields"), dict)},
             "endpoint": _system_endpoint(spec)}
     return out
+
+
+def _location(spec: dict) -> dict | None:
+    """lat/lon as a pair, or nothing. Half a coordinate is not a location."""
+    if not isinstance(spec, dict):
+        return None
+    lat, lon = spec.get("lat"), spec.get("lon")
+    try:
+        lat, lon = float(lat), float(lon)
+    except (TypeError, ValueError):
+        return None
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        return None
+    return {"lat": lat, "lon": lon}
 
 
 @lru_cache(maxsize=1)
@@ -305,6 +338,155 @@ def _access() -> dict[str, dict]:
 # public view
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# systems, and the one a session is about
+# ---------------------------------------------------------------------------
+#
+# In a central deployment every system runs gotcha on its OWN machine, and this server
+# reaches that machine over SSH. A system therefore names two things:
+#
+#     host:   the component gotcha runs on — where every "local" check actually runs
+#     config: that system's gotcha config, as a path ON THE HOST
+#
+# A session is about exactly one system. While it is active (using()), the view below
+# is that system and nothing else: its components, plus the nodes its own config
+# declares. A tool cannot address another site's hardware, because it is not there.
+
+# Letters, digits and _ . / - only, optionally from ~/. It is sent to a remote shell,
+# so nothing that shell would interpret is allowed in it.
+_CONFIG_PATH_RX = re.compile(r"^(~/)?[A-Za-z0-9_./-]+$")
+_active: ContextVar[str | None] = ContextVar("active_system", default=None)
+_CONFIG_TTL_S = 120
+_config_cache: dict[str, tuple[float, dict, str]] = {}
+
+
+def systems() -> dict[str, dict]:
+    """system name -> {name, site, description, host, config}. Validated on every read."""
+    doc = _systems_doc()
+    comps = _systems()
+    out: dict[str, dict] = {}
+    for sname, spec in (doc.get("systems") or {}).items():
+        if not isinstance(spec, dict):
+            continue
+        host = spec.get("host")
+        if host is not None:
+            host = str(host)
+            if (comps.get(host) or {}).get("system") != sname:
+                raise InventoryError(f"system {sname!r}: host {host!r} is not one of its "
+                                     f"components")
+            if not (comps[host].get("endpoint") or {}).get("host"):
+                raise InventoryError(f"system {sname!r}: host {host!r} has no address")
+        cfg = spec.get("config")
+        if cfg is not None:
+            cfg = str(cfg)
+            if not _CONFIG_PATH_RX.match(cfg) or ".." in cfg.split("/"):
+                raise InventoryError(
+                    f"system {sname!r}: config {cfg!r} must be a plain path — letters, "
+                    f"digits, _ . / - and an optional leading ~/")
+        out[str(sname)] = {"name": str(sname), "site": spec.get("site"),
+                           "description": spec.get("description"),
+                           "host": host, "config": cfg}
+    return out
+
+
+def active() -> str | None:
+    """The system the current session is about, if one was chosen."""
+    return _active.get()
+
+
+@contextmanager
+def using(system: str | None):
+    """Scope everything below to one system. None means unscoped, as before."""
+    if system is not None and system not in systems():
+        raise KeyError(f"unknown system {system!r}; known: {sorted(systems())}")
+    token = _active.set(system)
+    try:
+        yield
+    finally:
+        _active.reset(token)
+
+
+def system_required() -> bool:
+    """A session must name its system once any system is reached over SSH.
+
+    Before that — one machine, gotcha running locally — the old unscoped behaviour is
+    still correct, and asking "which system?" would only be friction.
+    """
+    return any(s["host"] for s in systems().values())
+
+
+def pick_system(text: str, explicit: str | None = None,
+                remembered: str | None = None) -> tuple[str | None, str]:
+    """Which system a request is about: (name, "") or (None, why-it-must-ask).
+
+    (None, "") means "no system needed" — unscoped, the single-machine case. Order:
+    an explicit choice, a system named in the text, one remembered from the same
+    thread or conversation, the only system there is. Never a guess between several.
+    """
+    known = systems()
+    if explicit:
+        if explicit not in known:
+            return None, f"There is no system called {explicit!r}. Known: {', '.join(sorted(known))}."
+        return explicit, ""
+    named = sorted(n for n in known
+                   if re.search(rf"(?<![\w-]){re.escape(n)}(?![\w-])", text or "", re.I))
+    if len(named) == 1:
+        return named[0], ""
+    if len(named) > 1:
+        return None, (f"That mentions {' and '.join(named)}. Ask about one system at a "
+                      f"time, so every check runs against the right machine.")
+    if remembered in known:
+        return remembered, ""
+    if len(known) == 1:
+        return next(iter(known)), ""
+    if not system_required():
+        return None, ""
+    return None, (f"Which system is this about? Name it in the message — "
+                  f"{', '.join(sorted(known))}.")
+
+
+def config_nodes(system: str) -> tuple[dict[str, dict], str]:
+    """(nodes the system's own gotcha config declares, error or "").
+
+    Mock mode reads the local config, so fixture runs keep the node names the fixtures
+    were recorded with. Live mode reads the file from the system's host over SSH, and
+    keeps it for a couple of minutes: a run asks for it on every step.
+    """
+    import transport                            # transport imports this module
+    spec = systems().get(system) or {}
+    if transport.MODE == "mock":
+        nodes = _gotcha30_nodes()
+        return {n: {**r, "system": system} for n, r in nodes.items()}, ""
+    if not spec.get("config"):
+        return {}, ""
+    hit = _config_cache.get(system)
+    if hit and time.time() - hit[0] < _CONFIG_TTL_S:
+        return hit[1], hit[2]
+    try:
+        doc = yaml.safe_load(transport.read_config(system)) or {}
+        nodes = {n: {**r, "system": system} for n, r in _nodes_from_config(doc).items()}
+        err = "" if nodes else f"{spec['config']} on {spec['host']} declares no nodes"
+    except Exception as e:                      # noqa: BLE001 - reported, not fatal
+        nodes, err = {}, f"could not read {spec['config']} on {spec['host']}: {e}"
+    _config_cache[system] = (time.time(), nodes, err)
+    return nodes, err
+
+
+def view() -> dict[str, dict]:
+    """What the current session may address: one system while one is active, else all."""
+    sysname = active()
+    if not sysname:
+        return load()
+    own = {n: r for n, r in load().items() if r.get("system") == sysname}
+    nodes, _ = config_nodes(sysname)
+    # The inventory overlays the config, as load() does: a node listed in both keeps
+    # the config's type and gains the inventory's site, address and access.
+    merged = {n: {k: r.get(k) for k in _PUBLIC_FIELDS} for n, r in nodes.items()}
+    for n, r in own.items():
+        merged[n] = {**merged.get(n, {}), **{k: v for k, v in r.items() if v is not None}}
+    return merged
+
+
 @lru_cache(maxsize=1)
 def load() -> dict[str, dict]:
     """logical name -> public record. Cached; one registry per process.
@@ -313,6 +495,7 @@ def load() -> dict[str, dict]:
     launcher runs can be enriched with a site and access details without being listed
     twice. Only _PUBLIC_FIELDS survive.
     """
+    systems()                                   # validate host/config with everything else
     out = _gotcha30_nodes()
     for name, rec in _systems().items():
         merged = {**out.get(name, {}), **{k: v for k, v in rec.items() if v is not None}}
@@ -321,30 +504,48 @@ def load() -> dict[str, dict]:
 
 
 def names() -> list[str]:
-    return sorted(load())
+    return sorted(view())
 
 
 def require(name: str) -> dict:
-    """Resolve a logical name or refuse. The model cannot reach anything not in here."""
-    inv = load()
+    """Resolve a logical name or refuse. The model cannot reach anything not in here —
+    and while a system is active, nothing outside that system."""
+    inv = view()
     if name not in inv:
-        raise KeyError(f"unknown node {name!r}; known nodes: {sorted(inv)}")
+        where = f" in system {active()!r}" if active() else ""
+        raise KeyError(f"unknown node {name!r}{where}; known nodes: {sorted(inv)}")
     return inv[name]
 
 
 def domain_of(name: str) -> str | None:
     """The hardware domain a system declares, if the central registry declares one."""
-    return (load().get(name) or {}).get("domain")
+    return (view().get(name) or {}).get("domain")
 
 
 def as_prompt() -> str:
     lines = []
-    for n in sorted(load().values(), key=lambda r: r["name"]):
+    if sysname := active():
+        spec = systems()[sysname]
+        lines.append(f"System under diagnosis: {sysname}"
+                     + (f" (site {spec['site']})" if spec.get("site") else "")
+                     + (f", gotcha running on {spec['host']}" if spec.get("host") else "")
+                     + ". Only its nodes are listed, and only they can be reached.")
+        if err := config_nodes(sysname)[1]:
+            lines.append(f"WARNING: {err} — nodes it declares are missing from this list.")
+    for n in sorted(view().values(), key=lambda r: r["name"]):
         ep = n["endpoint"]
         addr = (f" at {ep['scheme']}://{ep['host']}"
                 + (f":{ep['port']}" if ep.get("port") else "")) if ep else ""
+        loc = n.get("location")
+        # Operator-defined fields go in as `key=value`. They exist because somebody
+        # decided the agent needs them — an azimuth it cannot see is a field nobody
+        # bothered to fill in.
+        extra = [f"{k}={v}" for k, v in sorted((n.get("fields") or {}).items())
+                 if v not in (None, "")]
         bits = [x for x in (n.get("hardware"),
                             f"v{n['software_version']}" if n.get("software_version") else None,
+                            f"at {loc['lat']:.5f},{loc['lon']:.5f}" if loc else None,
+                            *extra,
                             n.get("description")) if x]
         tail = f" — {' · '.join(bits)}" if bits else ""
         lines.append(f"- {n['name']} ({n['type']}, {n['group']}){addr}{tail}")

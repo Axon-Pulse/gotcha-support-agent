@@ -39,6 +39,128 @@
       ]
     }
   },
+  "component_types": {
+    "acoustic": {
+      "builtin": {
+        "address": true,
+        "hardware": false,
+        "location": true,
+        "port": true,
+        "software_version": false,
+        "ssh": true,
+        "web": true
+      },
+      "domain": "acoustic",
+      "fields": [
+        {
+          "default": "",
+          "key": "yaw",
+          "label": "Yaw \u00b0"
+        },
+        {
+          "default": "dumbo-backend",
+          "key": "container",
+          "label": "Docker container"
+        }
+      ],
+      "label": "Acoustic",
+      "role": "sensor",
+      "scheme": "http"
+    },
+    "camera": {
+      "builtin": {
+        "address": true,
+        "hardware": false,
+        "location": true,
+        "port": false,
+        "software_version": true,
+        "ssh": false,
+        "web": true
+      },
+      "domain": "camera",
+      "fields": [
+        {
+          "default": "",
+          "key": "mount_yaw_deg",
+          "label": "Mount yaw \u00b0"
+        }
+      ],
+      "label": "Camera",
+      "role": "sensor",
+      "scheme": "http"
+    },
+    "computers": {
+      "builtin": {
+        "address": true,
+        "hardware": true,
+        "location": false,
+        "port": false,
+        "software_version": false,
+        "ssh": true,
+        "web": true
+      },
+      "domain": "",
+      "fields": [
+        {
+          "default": "",
+          "key": "os",
+          "label": "OS"
+        },
+        {
+          "default": "",
+          "key": "expected_config",
+          "label": "Expected config"
+        }
+      ],
+      "label": "Computers",
+      "role": "compute",
+      "scheme": "tcp"
+    },
+    "other": {
+      "builtin": {
+        "address": true,
+        "hardware": true,
+        "location": true,
+        "port": true,
+        "software_version": true,
+        "ssh": true,
+        "web": true
+      },
+      "domain": "",
+      "fields": [],
+      "label": "Other",
+      "role": "other",
+      "scheme": "tcp"
+    },
+    "radar": {
+      "builtin": {
+        "address": true,
+        "hardware": false,
+        "location": true,
+        "port": false,
+        "software_version": true,
+        "ssh": true,
+        "web": true
+      },
+      "domain": "radar",
+      "fields": [
+        {
+          "default": "",
+          "key": "azimuth_offset",
+          "label": "Azimuth offset \u00b0"
+        },
+        {
+          "default": "",
+          "key": "elevation",
+          "label": "Elevation \u00b0"
+        }
+      ],
+      "label": "Radar",
+      "role": "sensor",
+      "scheme": "tcp"
+    }
+  },
+  "model": "claude-opus-5-5",
   "order": [
     "triage",
     "knowledge",

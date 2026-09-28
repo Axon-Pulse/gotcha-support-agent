@@ -14,19 +14,29 @@ node inventory; never imports from it.
 | `transport.py` | **The only code that runs a command**, and the only one that reveals a secret. |
 | `inventory.py` | The system allowlist. **Public view** for the model, **private lookup** for transport. |
 | `systems_inventory.example.yaml` | Template for the central registry. Holds env var *names*, never secrets. |
-| `llm.py` | Anthropic calls: model, thinking, effort, prompt caching. |
+| `llm.py` | Anthropic calls: model, thinking, effort, prompt caching, token totals. |
+| `conversation.py` | Turn routing (run vs follow-up), per-turn timing and token totals. |
+| `env_file.py` | Loads `.env` into the environment. Never overrides an exported variable. |
 | `state.py` | Graph state; `Finding` and `Scenario` shapes. |
 | `tools/*.py` | **One file per diagnostic area.** Drop a new file here to add a tool. |
 | `kb/system-model.md` | **How the system works.** Code-derived, always in the cached prompt, read-only. |
 | `kb/cases/*.md` | **What has actually gone wrong.** One file per incident, retrieved by search. |
 | `tests/` | Fixtures from a real faulty run + the safety assertions. |
-| `traces/` | One JSONL per session: findings, transcript, report. |
+| `traces/` | One JSONL per session or conversation; one line per turn. |
 | `graph.db` | Checkpoints. Lets a pending approval survive a restart. |
 
 ## Operating it
 
     cp .env.example .env && $EDITOR .env      # ANTHROPIC_API_KEY, GOTCHA30_REPO
     .venv/bin/python run.py "the acoustic sensor shows no tracks"
+
+Get the key from [console.anthropic.com](https://console.anthropic.com) → Settings → API
+keys → Create key; it is shown once. `.env` is read at startup by `env_file.py` and
+**never overrides a variable you exported** — a shell export, a systemd unit or a
+container's environment always wins, so a stale `.env` cannot shadow the key you are
+testing with. If you would rather not keep it in a file at all, `export
+ANTHROPIC_API_KEY=sk-ant-…` or `ant auth login` both work, and so does typing it into the
+console's Run tab (see below).
 
     .venv/bin/python run.py --resume <session_id>   # finish a pending approval
     AGENT_MODE=live .venv/bin/python run.py "..."   # real commands, not fixtures
@@ -94,13 +104,169 @@ skipped when node is not installed.
     .venv/bin/python -m uvicorn console.server:app --port 8765
     # then open http://localhost:8765
 
-Seven tabs: **Run** (mock sessions; watch each agent fire, with per-agent cache and token
-counts), **Approvals** (the queue — edit the markdown in place, then approve or reject),
-**Traces**, **Knowledge** (a structured runbook editor), **Graph** (the diagram plus a
-drag-and-drop flow editor), **Agents & permissions**, and **Inventory & systems**.
+Tabs: **Run** *or* **Live with chat** depending on the answering mode (see below),
+then **Approvals** (the queue — edit the markdown in place, then approve or reject),
+**Traces**, **Knowledge** (a structured runbook editor), **Agents & permissions**
+(which now ends with the execution graph and the flow editor), and
+**Inventory & systems**.
 
 The console sets `AGENT_MODE=mock` before importing anything, so it cannot touch the real
 system. Live runs stay a deliberate command-line act.
+
+### Two answering modes, chosen from the pill in the header
+
+The pill that used to read `mode: mock` now selects **how a question is answered**:
+
+    token mode   the graph pipeline. Spends API tokens. Tools read tests/fixtures/ —
+                 the console forces AGENT_MODE=mock, so it cannot touch the bench.
+    chat mode    a ticket queued to disk (bridge.py), picked up when somebody types
+                 `go` in the Claude Code session. No API tokens, but its read-only
+                 checks run against the REAL hardware.
+
+**"mock" and "token" are not synonyms, and the pill no longer pretends otherwise.**
+`mock` is about what the tools can *reach*; the answering mode is about *who answers*.
+Collapsing them into one word would have dropped the safety-relevant half — chat mode
+genuinely touches the bench — so the fixtures-versus-hardware fact is stated on each
+option in the dropdown, where it is read at the moment of choosing, and the note under
+the input box is rewritten per mode. A reassurance that is false in the mode you are in
+is worse than no reassurance.
+
+The two modes keep **separate threads**. A bridge ticket is not a conversation turn:
+splicing them into one history would make the token counts and the routing read as if
+they applied to both.
+
+**The tab bar follows the mode.** Run and Live-with-chat are the same job done two ways,
+so only the one that matches is offered — hidden rather than disabled, because a tab you
+can click into and then cannot use is worse than one that is not there. Switching modes
+while you are on the tab being hidden moves you to its counterpart instead of leaving
+every tab deselected and the page blank; switching while you are on Traces, Approvals or
+anything else leaves you where you are. Those tabs are never mode-specific — hiding the
+queue or the history along with Run would strand them.
+
+### The execution graph sits under Agents & permissions
+
+It used to be its own tab, which meant the diagram was only ever seen by somebody who
+remembered to go and look — and it sat stale against an edit until they did. It is the
+shape those settings produce, so it is read beside them, at the foot of the page after
+the agents, tools and permissions that determine it. The drag-and-drop flow editor comes
+with it.
+
+`loadGraph()` fetches, `paintGraph()` draws. The split matters because `renderPerms()`
+rebuilds the whole panel — and so destroys the pane — on every card expand: a repaint
+comes from cache, and only a save (which goes through `loadPerms()`) refetches. The
+diagram now follows a reorder immediately instead of on the next tab switch.
+
+### The open tab is in the URL
+
+`#traces`, `#inv` and so on. A refresh reopens where you were instead of dropping you
+back on Run, the tab is linkable, and browser back/forward work without extra code.
+Kept in the hash rather than in storage deliberately: where you are stays visible and
+explainable rather than becoming a hidden preference.
+
+A hash naming a tab that does not exist, or one the current mode hides — `#run`
+bookmarked in token mode and reopened in chat mode — falls back to the tab that mode
+does offer, rather than stranding you on a section whose tab is not in the bar.
+
+### Choosing the model
+
+The model pill in the header expands to **the models this account can actually use**,
+asked of the Models API (`client.models.list()`) rather than hard-coded. A curated list
+goes stale the week a model ships, and an operator choosing from a stale list picks
+something that 404s — the live call here returned `claude-opus-5-5`, which no list
+written by hand would have had. `llm.FALLBACK_MODELS` is the fallback for no
+credentials or no network, and the menu **says when it is showing that** instead of
+looking authoritative.
+
+The choice is persisted in `overrides.json` and written to `config_audit.jsonl` like
+every other console edit — it changes what runs cost, so it should show up in a diff.
+`llm.model()` reads it **per call**: the earlier module constant meant an edit could
+leave the pill saying one thing while the process kept sending another. Precedence is
+the console override, then `AGENT_MODEL`, then the code default.
+
+An id is validated against the catalogue at the moment it is chosen. Accepting a typo
+or a date-suffixed id silently would surface minutes later as an opaque 404 in the
+middle of a diagnosis. **Switching invalidates the prompt cache** — caches are
+model-scoped, so the next run pays full price for the system prompt and the inventory
+once, and the menu says so.
+
+### The Run tab is a conversation
+
+A diagnosis is rarely one question. The Run tab keeps a thread, and **every message is
+routed first** (`conversation.py`):
+
+    run        a new or changed symptom. Full pipeline: supervisor, agents, tools, report.
+    follow_up  a question about what was already found. No graph, NO TOOLS, one text call
+               against evidence already in hand.
+
+The two mistakes are not symmetric, and the router's prompt says so: a follow-up
+misrouted as a run wastes a minute and a pipeline's tokens, while a new problem misrouted
+as a follow-up answers it out of evidence gathered about something else — and reads as
+confident. When the readings are close it routes to a run.
+
+**Routing never raises.** It is an optimisation — it decides whether the expensive path
+can be skipped — so a failure costs the three-second call, not the operator's turn. A
+dropped connection on that call used to surface as `APITimeoutError` and destroy a
+conversation the full pipeline would have answered; now it falls through to a run and
+says so in the turn's reason. `llm.client()` also retries more than the SDK default,
+because one dropped connection anywhere in a multi-minute run otherwise loses all of it.
+
+**A conversation is not one long graph run.** Graph state is append-only, so feeding a
+second question into the same LangGraph thread finds every agent already in `visited`,
+leaves the supervisor with nothing eligible, and silently re-summarises the old evidence
+against the new question — the same trap `slack_app.py` records as "ONE MESSAGE IS ONE
+SESSION". So each `run` turn gets its **own fresh session**; earlier turns reach it as
+context, never as state.
+
+**The follow-up agent has no tools, and that is the safety property**, not an
+optimisation. With no tools it cannot reach `transport.py`, so no follow-up can touch a
+device however the message is phrased. It answers from the findings it is handed or says
+it cannot.
+
+**Mixed Hebrew and English is isolated, not merged.** Tickets arrive in Hebrew about a
+system whose parts are named in English, and both get interpolated into one left-to-right
+template. Left alone, the Unicode bidi algorithm resolves the whole line as a single
+paragraph: a Hebrew sentence ending in `PID 291846.` puts the full stop at the wrong end,
+and an English node name inside a Hebrew clause drags its neighbouring punctuation across.
+
+The two cases need **opposite** treatment, and conflating them is how the bug comes back:
+
+    the value IS the element     dir="auto" on the element itself
+    (a question, an answer,      — resolves direction from the text AND aligns it
+     one evidence item)
+
+    the value is EMBEDDED        <bdi> around the value
+    beside other text            — stops it reordering its neighbours
+    (`what — why`)
+
+`dir="auto"` **skips isolated descendants** when it looks for the first strong character,
+so wrapping a whole paragraph in `<bdi>` makes it fall back to LTR — the Hebrew then
+renders left-aligned with a ragged gap down the right, which is exactly the symptom that
+looks like the isolation is missing. The chrome around the text (labels, badges, token
+counts, the meta line) is pinned LTR so a Hebrew answer cannot flip it.
+
+**A refused check asks for permission.** A tool that comes back "not allowlisted",
+"unknown node" or "has no access block" was not *broken* — it was *not allowed to look*,
+and that is a gap somebody can close. `graph.permission_gaps()` reads those refusals off
+what the tools actually returned, and they are merged into `needs_permission` in the
+report **whatever the model says**, because which permission would have helped is a fact
+about the run and a model asked to remember it across a long transcript sometimes will
+not. The model may add its own. The ask renders at the end of the feedback and is
+deliberately **not** collapsed: a request nobody expands is a request nobody answers.
+
+**What you read is the bottom line.** `bottom_line` is a required field of
+`REPORT_SCHEMA` — required, because it is the only part most readers open, and a model
+allowed to omit it will. Two or three sentences, still technical: node names, PIDs and
+uptimes belong there, because the reader is an engineer. Everything else — root cause,
+evidence, what could not be checked, next steps, the tool table, the per-agent prose —
+is one collapsed line until you ask for it.
+
+**Every turn is recorded as it finishes**, one JSON line per turn in
+`traces/<conversation>.jsonl`, carrying the question, the answer or report, the findings,
+which kind of turn it was and why it was routed that way, how long it took, what it spent,
+and the running conversation total. A conversation still in progress is therefore already
+durable — the trace is not written at the end, because there is no end until somebody
+stops typing. A turn that *failed* is recorded too: it spent tokens and took time, and a
+trace that drops it cannot be read back honestly.
 
 ### Inventory & systems
 
@@ -251,6 +417,32 @@ credential resolves — `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, an OAuth pr
 also calls out the two documented traps: an `ANTHROPIC_API_KEY` set to the empty string
 still wins its precedence slot and authenticates with nothing, and setting both a key and
 a token makes the SDK send both, which the API rejects.
+
+**A key can be typed into the Run tab**, which is the same split the device passwords use:
+the value goes to `secrets.local.env` (mode 0600, gitignored) and never into a git-tracked
+file, and it comes back out masked rather than rendered. Two things are specific to it
+being a *billing* credential. It is promoted into the environment **only when nothing else
+resolves**, so it can never shadow a key you exported or a working OAuth profile — the
+console is a fallback, not an override. And `llm.reset_client()` drops the memoized SDK
+client on every write, so a key set at runtime takes effect without a restart; without
+that, a process that started with no credential would keep failing at a key visibly
+present on screen.
+
+**This console has no authentication** — no login, no CORS policy, no auth check anywhere.
+Its entire trust model is uvicorn's default bind to `127.0.0.1`. That is tolerable for a
+device password, which still needs to reach the LAN to be worth anything; it is not
+tolerable for an API key, which is spendable by anyone who reads it. Serve it on localhost
+only, and never `--host 0.0.0.0`.
+
+**Token counts.** `llm.py` keeps a per-run total in thread-local state — thread-local
+because the console and the Slack gateway each give a session its own worker thread, and a
+module-level counter would bill one operator's session for another's. It exists alongside
+the per-agent numbers in the transcript because it catches what the transcript
+structurally cannot: `ask_json()`'s routing and synthesis calls return only a tool input
+and produce no transcript entry, so their tokens were previously spent and never counted.
+The total is written into each trace line; the Run tab shows this session and a lifetime
+figure summed across `traces/`. Traces written before this existed still count — the
+rollup falls back to summing their transcripts, just without that routing overhead.
 
 **The filename is derived, not typed.** Write the name however you like — "Radar
 WebSocket keeps flapping!" — and the server slugifies it to `radar-websocket-keeps-flapping.md`,

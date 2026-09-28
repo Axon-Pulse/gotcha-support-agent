@@ -7,11 +7,13 @@ process.on('unhandledRejection',()=>{});
 const fs=require('fs'), vm=require('vm'), path=require('path');
 const html=fs.readFileSync(path.join(__dirname,'..','console','index.html'),'utf8');
 const js=html.split('</div><script>')[1].split('</script>')[0];
-const mk=()=>({innerHTML:'',textContent:'',value:'',classList:{add(){},remove(){}},
-  style:{},dataset:{},setAttribute(){},querySelectorAll:()=>[]});
+const mk=()=>({innerHTML:'',textContent:'',value:'',hidden:false,
+  classList:{add(){},remove(){}},style:{},dataset:{},setAttribute(){},
+  contains:()=>false,focus(){},querySelectorAll:()=>[]});
 const sandbox={console,setTimeout,clearInterval,setInterval,Promise,JSON,Math,Number,Object,Date,
   alert:()=>{},confirm:()=>true,fetch:()=>Promise.resolve({ok:true,json:async()=>({})}),
-  document:{querySelector:()=>mk(),querySelectorAll:()=>[],getElementById:()=>mk()}};
+  document:{querySelector:()=>mk(),querySelectorAll:()=>[],getElementById:()=>mk(),
+            addEventListener(){}}};
 sandbox.window=sandbox;
 vm.createContext(sandbox);
 vm.runInContext(js,sandbox);

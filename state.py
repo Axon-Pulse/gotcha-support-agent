@@ -41,6 +41,9 @@ def merge_context(a: dict, b: dict) -> dict:
 class S(TypedDict, total=False):
     question: str
     session_id: str
+    # The one system this session is about, or None where there is only one machine.
+    # Every agent step runs with it active — see inventory.using().
+    system: str | None
     findings: Annotated[list[Finding], operator.add]
     visited: Annotated[list[str], operator.add]
     transcript: Annotated[list[dict], operator.add]

@@ -11,3 +11,5 @@ config_audit.jsonl
 /systems_inventory.yaml
 # transient console<->chat queue; traces/ keeps the durable record
 /bridge/
+/attachments/
+/.ssh-cm/

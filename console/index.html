@@ -67,6 +67,17 @@ th{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--dim)
 .step.done{border-color:var(--ok);color:var(--ok)}
 .step.active{border-color:var(--accent);color:var(--accent);font-weight:600}
 .note{font-size:12.5px;color:var(--dim);margin-top:6px}
+.tfilt{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-top:10px}
+.tfilt label{display:flex;flex-direction:column;gap:3px;font-size:11.5px;color:var(--dim)}
+.tfilt select,.tfilt input[type=date]{padding:5px 7px;font:inherit;font-size:13px;min-width:120px;
+  background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:var(--r-sm);
+  color-scheme:light dark}
+.tfilt button.sm[aria-pressed=true]{border-color:var(--accent);color:var(--accent);
+  background:color-mix(in srgb,var(--accent) 10%,transparent)}
+.tsum{padding:10px 4px 6px}
+.tblk{margin-top:12px}
+.tblk h4{margin:0 0 4px;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--dim)}
+.tblk p{margin:2px 0}.tblk ul{margin:2px 0;padding-left:18px}
 .scroll{overflow-x:auto}
 ul.tight{margin:6px 0;padding-left:20px}
 .sec{display:flex;align-items:baseline;gap:10px;margin:34px 0 12px;padding-top:16px;
@@ -157,6 +168,96 @@ svg.dep path.hit{stroke:transparent;stroke-width:16;fill:none;cursor:pointer}
 .alert{border:1px solid var(--bad);background:color-mix(in srgb,var(--bad) 8%,transparent);
   border-radius:var(--r-sm);padding:9px 12px;margin-top:10px;font-size:12.5px}
 .alert b{color:var(--bad)}
+/* Conversation thread. The bottom line is the only thing rendered at full size —
+   everything else is one line until somebody asks for it. */
+#thread{margin-bottom:12px}
+#thread:empty{display:none}
+.turn{border-top:1px solid var(--line);padding:12px 0}
+#thread .turn:first-child{border-top:0;padding-top:0}
+.ask{font-size:13.5px;color:var(--fg);margin:0 0 8px;display:flex;gap:8px;align-items:baseline}
+.ask b{font:10.5px/1.5 var(--mono);color:var(--dim);flex:none;text-transform:uppercase;
+  letter-spacing:.06em}
+.say{font-size:14px;line-height:1.55;margin:0}
+.tmeta{font:11px/1.5 var(--mono);color:var(--dim);margin-top:6px;display:flex;
+  gap:10px;flex-wrap:wrap;align-items:center}
+.kind{border:1px solid var(--line);border-radius:99px;padding:2px 7px;font-size:10px}
+.kind.run{color:var(--accent);border-color:var(--accent)}
+.kind.follow_up{color:var(--ok);border-color:var(--ok)}
+.kind.error{color:var(--bad);border-color:var(--bad)}
+.kind.chat{color:var(--warn);border-color:var(--warn)}
+.pill.warn{color:var(--warn);border-color:var(--warn)}
+details.more{margin-top:8px;border:1px solid var(--line);border-radius:var(--r-sm)}
+details.more+details.more{margin-top:5px}
+details.more>summary{cursor:pointer;padding:7px 10px;font-size:12.5px;color:var(--dim);
+  list-style:none;display:flex;gap:8px;align-items:center}
+details.more>summary::-webkit-details-marker{display:none}
+details.more>summary::before{content:'▶';font-size:8px;transition:transform .12s}
+details.more[open]>summary::before{transform:rotate(90deg)}
+details.more>summary:hover{color:var(--fg)}
+details.more .body{padding:0 12px 10px 12px;font-size:13px}
+details.more .body ul{margin:4px 0 0;padding-left:18px}
+.working{font:12px/1.5 var(--mono);color:var(--dim)}
+/* BiDi. <bdi> already isolates, but the CHROME around it must stay left-to-right or a
+   Hebrew answer flips the label, the badge and the token counts that sit beside it.
+   Pinning direction here rather than on <html> keeps the console LTR while each piece
+   of operator or model text picks its own. */
+.ask,.say,details.more .body{unicode-bidi:isolate}
+.ask b,.tmeta,.kind,#convmeta,.working,.mono,details.more>summary{direction:ltr;
+  unicode-bidi:isolate}
+/* An RTL question should sit against the right edge of its own line, not be dragged
+   back by the LTR "you" label beside it. No :dir() rules needed: text-align defaults to
+   `start`, which follows whatever dir="auto" resolved to. */
+.ask span{flex:1;min-width:0}
+#attbar{margin-top:6px}
+.attchip{border:1px solid var(--line);border-radius:var(--r-sm);padding:5px 8px;margin-top:5px;
+  font-size:12.5px;display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.attchip.error{border-color:var(--bad)}
+.attchip details.more{flex-basis:100%;margin-top:2px}
+.attsent{margin:-2px 0 8px}
+.attsent details.more{margin-top:4px}
+.attimg{max-width:100%;max-height:320px;border:1px solid var(--line);border-radius:var(--r-sm);margin:4px 0}
+/* The permission ask. Warn-coloured rather than bad: nothing is broken, something is
+   withheld — and it is an action for the reader, not a failure of the run. */
+.askperm{margin-top:10px;border:1px solid var(--warn);border-left-width:3px;
+  border-radius:var(--r-sm);padding:9px 12px;
+  background:color-mix(in srgb,var(--warn) 7%,transparent)}
+.askperm p{margin:0;font-size:13px}
+.askperm b{color:var(--warn)}
+.askperm ul{margin:6px 0 0;padding-left:18px;font-size:13px}
+.askperm li{margin:2px 0}
+.askperm .note{margin-top:7px}
+/* Credentials live in the header now: set once, then out of the way. The panel hangs
+   under the pill rather than sitting in the page, so it never competes with the thing
+   the tab is actually for. */
+header{position:relative}
+button.pill{cursor:pointer;background:transparent;font-family:var(--mono)}
+button.pill:hover{color:var(--fg);border-color:var(--fg)}
+button.pill[aria-expanded="true"]{color:var(--fg);border-color:var(--fg)}
+#creds,#modemenu,#modelmenu{position:absolute;top:calc(100% + 6px);z-index:30;
+  background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+  box-shadow:var(--sh2);padding:14px}
+#creds{right:0;width:min(520px,92vw)}
+#modemenu{left:0;width:min(440px,92vw);padding:6px}
+#modelmenu{left:0;width:min(420px,92vw);padding:6px;max-height:62vh;overflow:auto}
+#modelmenu .note{padding:6px 11px 2px;margin:0}
+#creds[hidden],#modemenu[hidden],#modelmenu[hidden]{display:none}
+#creds h3{margin:0 0 8px}
+/* Each option carries the consequence that distinguishes it — recorded fixtures versus
+   the real bench. That fact used to live in the pill as the word "mock"; it has to stay
+   somewhere the reader meets it at the moment of choosing, or the safer-sounding label
+   hides the less safe behaviour. */
+.modeopt{display:block;width:100%;text-align:left;background:transparent;border:0;
+  border-radius:var(--r-sm);padding:9px 11px;cursor:pointer;color:var(--fg);font:inherit}
+.modeopt:hover{background:var(--bg)}
+.modeopt b{display:block;font-size:13px;margin-bottom:2px}
+.modeopt.on b::after{content:' ✓';color:var(--ok)}
+.modeopt span{display:block;font-size:12px;color:var(--dim);line-height:1.45}
+.modeopt.on{background:var(--bg);box-shadow:inset 2px 0 0 var(--accent)}
+/* A required field has to look different from an optional one BEFORE the save is
+   refused, which is the whole reason the hardware type kept getting missed. */
+.fd .req{font:9.5px/1 var(--mono);color:var(--warn);border:1px solid var(--warn);
+  border-radius:4px;padding:2px 4px;margin-left:6px;font-weight:400;letter-spacing:.02em}
+.fd input.missing{border-color:var(--warn)}
 button.sm:disabled{opacity:.45;cursor:not-allowed}
 button.sm:disabled:hover{background:var(--bg);border-color:var(--line)}
 
@@ -218,6 +319,10 @@ details.sysmodel pre{max-height:340px;overflow:auto;font-size:11.5px;line-height
   border:1px solid var(--line);color:var(--dim);margin:0 5px 5px 0;white-space:nowrap}
 .tchip.on{border-color:var(--accent);color:var(--accent)}
 .tchip.none{border-style:dashed}
+.tchip.tadd{padding:0 4px;border-color:var(--accent)}
+.tchip.tadd input{font:11px var(--mono);border:0;background:none;color:var(--fg);
+  padding:3px 4px;width:12ch;min-width:0;outline:none;flex:none}
+.kbf-tags{margin-top:8px;font-size:12px;display:flex;flex-wrap:wrap;align-items:center;gap:4px}
 /* a system's detail, expanded in place under its own row */
 tr.detail>td{background:var(--sunk);padding:14px 16px;border-bottom:1px solid var(--line)}
 tr.click.open{background:var(--tint)}
@@ -250,9 +355,12 @@ tr.click:hover{background:var(--tint)}
 
 <header>
   <h1>support-agent console</h1>
-  <span class="pill mock" id="mode">…</span>
-  <span class="pill" id="model">…</span>
-  <span class="pill" id="keystate">…</span>
+  <button class="pill mock" id="mode" aria-expanded="false">…</button>
+  <div id="modemenu" hidden></div>
+  <button class="pill" id="model" aria-expanded="false">…</button>
+  <div id="modelmenu" hidden></div>
+  <button class="pill" id="keystate" aria-expanded="false">…</button>
+  <div id="creds" hidden></div>
 </header>
 
 <nav id="tabs">
@@ -261,102 +369,688 @@ tr.click:hover{background:var(--tint)}
   <button data-t="approvals" aria-selected="false">Approvals <span id="apcount"></span></button>
   <button data-t="traces" aria-selected="false">Traces</button>
   <button data-t="kb" aria-selected="false">Knowledge</button>
-  <button data-t="graph" aria-selected="false">Graph</button>
   <button data-t="perms" aria-selected="false">Agents &amp; permissions</button>
   <button data-t="inv" aria-selected="false">Inventory &amp; systems</button>
 </nav>
 
 <section id="run">
   <div class="card">
-    <h3>Diagnose</h3>
-    <div class="row">
-      <input type="text" id="q" placeholder="e.g. the acoustic sensor shows no tracks">
-      <button class="go" id="go">Run</button>
+    <div class="row" style="margin-bottom:6px">
+      <h3 style="margin:0">Diagnose</h3><span class="grow"></span>
+      <span class="note mono" id="convmeta"></span>
+      <button class="sm" id="newconv" hidden>New conversation</button>
     </div>
-    <p class="note">Runs against recorded fixtures. Live mode stays a deliberate command-line act.</p>
+    <div class="row">
+      <select id="qsys" title="the system this conversation is about — 'named in the message' picks it from what you write, and the conversation keeps it"
+        style="max-width:190px"><option value="">system: named in the message</option></select>
+      <input type="text" id="q" dir="auto" placeholder="e.g. the acoustic sensor shows no tracks">
+      <button class="sm" id="attach" type="button"
+        title="attach a screenshot, PDF or log — you can also paste a screenshot or drop files here">📎 Attach</button>
+      <input type="file" id="attfile" multiple hidden
+        accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,.txt,.log,.json,.yaml,.yml,.md,.csv,.xml,.ini,.conf,.cfg,.toml,.out,.err">
+      <button class="go" id="go">Send</button>
+    </div>
+    <div id="attbar"></div>
+    <!-- Rewritten by renderMode(): in chat mode "no device touched" is FALSE, and a
+         stale reassurance is worse than none. -->
+    <p class="note" id="modenote"></p>
+    <p class="note bad" id="credhint" hidden></p>
+    <p class="note" id="usage"></p>
+    <!-- Below the box, newest first: the input stays put as the conversation grows, so
+         it never walks down the page and the last answer is the one you are looking at. -->
+    <div id="thread"></div>
   </div>
-  <div id="live"></div>
 </section>
 
 <section id="chat" hidden></section>
 <section id="approvals" hidden></section>
 <section id="traces" hidden></section>
 <section id="kb" hidden></section>
-<section id="graph" hidden></section>
 <section id="perms" hidden></section>
 <section id="inv" hidden></section>
 
 </div><script>
 const $=s=>document.querySelector(s), esc=s=>String(s??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
-const api=(p,o)=>fetch('/api'+p,o).then(async r=>{if(!r.ok)throw new Error((await r.json().catch(()=>({}))).detail||r.status);return r.json()});
-var META=null, CUR=null, TIMER=null;
 
-document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{
-  document.querySelectorAll('#tabs button').forEach(x=>x.setAttribute('aria-selected',x===b));
-  ['run','chat','approvals','traces','kb','graph','perms','inv'].forEach(t=>$('#'+t).hidden=(t!==b.dataset.t));
-  ({chat:loadChat,approvals:loadApprovals,traces:loadTraces,kb:loadKb,graph:loadGraph,inv:loadInv,perms:loadPerms}[b.dataset.t]||(()=>{}))();
+// BIDI ISOLATION. Tickets arrive in Hebrew, the system they describe is named in
+// English, and the two get interpolated into one LTR template. Without isolation the
+// Unicode bidi algorithm resolves the whole line as one paragraph, so a Hebrew sentence
+// ending in "PID 291846." renders the full stop at the wrong end, an English node name
+// inside a Hebrew clause drags its neighbouring punctuation across, and a Hebrew answer
+// beside an English label reorders the label.
+//
+// `dir="auto"` gives each value its OWN paragraph direction from its first strong
+// character; `unicode-bidi: isolate` (see the stylesheet) stops it reordering anything
+// around it. Applied per VALUE rather than per block, because a block is exactly the
+// thing that holds both languages at once.
+// TWO CASES, and they need opposite treatment:
+//
+//  1. The value IS the whole element (a question, an answer, one evidence item).
+//     `dir="auto"` on that element resolves direction from the text AND aligns it, so
+//     a Hebrew paragraph sits against the right edge. Do NOT wrap it in <bdi>:
+//     dir="auto" skips isolated descendants when it looks for the first strong
+//     character, so a <bdi> wrapper makes the paragraph fall back to LTR and the
+//     Hebrew ends up left-aligned with a ragged gap down the right.
+//
+//  2. The value is EMBEDDED beside other text (`what — why`, `escalate — reason`).
+//     There <bdi> is exactly right: it stops the value reordering its neighbours.
+const ml=s=>esc(s).replace(/\n/g,'<br>');
+const bdi=s=>`<bdi>${esc(s)}</bdi>`;
+const api=(p,o)=>fetch('/api'+p,o).then(async r=>{if(!r.ok)throw new Error((await r.json().catch(()=>({}))).detail||r.status);return r.json()});
+var META=null, TIMER=null;
+
+const TABS=['run','chat','approvals','traces','kb','perms','inv'];
+
+// The open tab lives in the URL hash rather than in storage. Surviving a refresh is the
+// point, but the hash also makes a tab linkable and gives back/forward for free — and
+// it is visible, so where you are is never a hidden preference you cannot explain.
+var _hashLock=false;
+
+function selectTab(name,push){
+  document.querySelectorAll('#tabs button').forEach(x=>
+    x.setAttribute('aria-selected',x.dataset.t===name?'true':'false'));
+  TABS.forEach(t=>{const el=$('#'+t); if(el)el.hidden=(t!==name);});
+  if(push!==false&&typeof location!=='undefined'&&location.hash!=='#'+name){
+    _hashLock=true;                       // our own write must not re-enter via hashchange
+    location.hash=name;
+    setTimeout(()=>{_hashLock=false;},0);
+  }
+  ({chat:loadChat,approvals:loadApprovals,traces:loadTraces,kb:loadKb,
+    inv:loadInv,perms:loadPerms}[name]||(()=>{}))();
+}
+
+// Which tab a fresh load should open: the hash if it names one that exists and the
+// current mode actually offers, else that mode's own tab. A stale #run bookmarked in
+// token mode must not strand a chat-mode operator on a hidden section.
+function tabFromHash(){
+  const want=(typeof location!=='undefined'?location.hash:'').replace(/^#/,'');
+  const btn=[...document.querySelectorAll('#tabs button')].find(b=>b.dataset.t===want);
+  if(TABS.includes(want)&&(!btn||!btn.hidden))return want;
+  return MODE==='chat'?'chat':'run';
+}
+
+document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>selectTab(b.dataset.t));
+if(typeof window!=='undefined'&&window.addEventListener)
+  window.addEventListener('hashchange',()=>{ if(!_hashLock)selectTab(tabFromHash(),false); });
+
+$('#keystate').onclick=()=>toggleCreds();
+$('#mode').onclick=()=>toggleMode();
+$('#model').onclick=()=>toggleModel();
+// Clicking anywhere else closes it. Without this the panel covers the tab bar until
+// somebody thinks to click the pill a second time.
+document.addEventListener('click',e=>{
+  const box=$('#creds');
+  if(!box||box.hidden)return;
+  if(!box.contains(e.target)&&e.target!==$('#keystate'))toggleCreds(false);
+});
+document.addEventListener('click',e=>{
+  const box=$('#modemenu');
+  if(!box||box.hidden)return;
+  if(!box.contains(e.target)&&e.target!==$('#mode'))toggleMode(false);
+});
+document.addEventListener('click',e=>{
+  const box=$('#modelmenu');
+  if(!box||box.hidden)return;
+  if(!box.contains(e.target)&&e.target!==$('#model'))toggleModel(false);
 });
 
 api('/meta').then(m=>{
   META=m;
-  $('#mode').textContent='mode: '+m.mode;
+  fillSystemPicker(m.systems);
+  // m.mode is AGENT_MODE, a server-side safety property, not the answering mode this
+  // pill selects. It is stated inside the token option instead of on the pill face.
+  MODES.token.blurb='The graph pipeline answers. Spends API tokens. Tools read recorded '
+    +`fixtures (AGENT_MODE=${esc(m.mode)}) — never the real bench.`;
+  renderMode();
+  // After renderMode, because which tabs exist depends on the mode: reopening #traces
+  // is fine in either, reopening #run is not when chat mode has hidden it.
+  selectTab(tabFromHash());
+  MODELS.current=m.model;
   $('#model').textContent=m.model;
-  const c=m.credentials||{ready:false};
-  const k=$('#keystate');
-  k.textContent=c.ready?('auth: '+c.source):'no credentials';
-  k.className='pill'+(c.ready?'':' bad');
-  k.title=c.warning||'';
-  $('#go').disabled=!c.ready;
-  if(!c.ready)$('#live').innerHTML=`<div class="card"><h3>Not ready</h3>
-    <p class="note">No Anthropic credentials resolve in the console's environment. The SDK
-      looks for <code>ANTHROPIC_API_KEY</code>, then <code>ANTHROPIC_AUTH_TOKEN</code>, then
-      an OAuth profile from <code>ant auth login</code>, then workload identity federation —
-      any one of them is enough. Set one, then restart the console.</p>
-    ${c.warning?`<p class="note bad">${esc(c.warning)}</p>`:''}</div>`;
-  else if(c.warning) $('#live').innerHTML=`<div class="card"><h3>Check your credentials</h3>
-    <p class="note bad">${esc(c.warning)}</p></div>`;
+  loadModels();
+  renderCreds(m.credentials||{ready:false});
+  loadUsage();
   loadApprovals();
 });
 
-$('#go').onclick=async()=>{
-  const q=$('#q').value.trim(); if(!q)return;
-  $('#go').disabled=true;
-  try{ const r=await api('/run',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:q})});
-       CUR=r.session_id; poll(); }
-  catch(e){ $('#live').innerHTML='<div class="card bad">'+esc(e.message)+'</div>'; $('#go').disabled=false; }
+// ---- credentials -----------------------------------------------------------
+// The key is never echoed back: the server sends a mask, and the input is only ever
+// written to, never populated from the response.
+function renderCreds(c){
+  META.credentials=c;
+  const k=$('#keystate');
+  k.textContent=(c.ready?('auth: '+c.source):'no credentials')+(c.warning?' \u26a0':'');
+  k.className='pill'+(c.ready?'':' bad');
+  k.title=c.warning||'click to set a key';
+  $('#go').disabled=!c.ready;
+  const hint=$('#credhint');
+  if(hint){
+    hint.hidden=c.ready;
+    hint.innerHTML=c.ready?'':
+      'Run needs Anthropic credentials. <a href="#" onclick="jumpToCreds();return false">Set a key &uarr;</a>';
+  }
+  $('#creds').innerHTML=`
+    <h3>${c.ready?'Anthropic credentials':'Not ready — no Anthropic credentials'}</h3>
+    ${c.ready
+      ? `<p class="note">Resolving from <b>${esc(c.source)}</b>.${
+           c.masked?` Stored key <span class="mono">${esc(c.masked)}</span>.`:''}</p>`
+      : `<p class="note">The SDK looks for <code>ANTHROPIC_API_KEY</code>, then
+           <code>ANTHROPIC_AUTH_TOKEN</code>, then an OAuth profile from
+           <code>ant auth login</code>, then workload identity federation — any one is
+           enough. Put one in <code>.env</code>, export it, or paste a key below.</p>`}
+    ${c.warning?`<p class="note bad">${esc(c.warning)}</p>`:''}
+    <div class="row" style="margin-top:8px">
+      <input type="password" id="apikey" placeholder="sk-ant-api03-…" autocomplete="off">
+      <button class="go" id="savekey">${c.stored?'Replace key':'Save key'}</button>
+      ${c.stored?'<button id="clearkey">Clear</button>':''}
+    </div>
+    <p class="note">Stored in <code>secrets.local.env</code> (mode 0600, gitignored), never
+      in the registry. Takes effect immediately — no restart.</p>
+    <p class="note warn">${esc(c.localhost_only||'')}</p>
+    <hr style="border:0;border-top:1px solid var(--line);margin:11px 0">
+    <p class="note" id="lifetime"></p>`;
+  paintLifetime();
+  $('#savekey').onclick=saveKey;
+  if($('#clearkey'))$('#clearkey').onclick=clearKey;
+  $('#apikey').onkeydown=e=>{if(e.key==='Enter')saveKey();};
+}
+
+// The panel is closed by default — a key is set once and then never touched. It opens
+// from the pill, and from the hint beside a disabled Run button.
+function toggleCreds(open){
+  const box=$('#creds'), pill=$('#keystate');
+  const show=open===undefined?box.hidden:open;
+  box.hidden=!show;
+  pill.setAttribute('aria-expanded',show?'true':'false');
+  if(show){const f=$('#apikey'); if(f)f.focus();}
+}
+function jumpToCreds(){ toggleCreds(true); }
+
+async function saveKey(){
+  const el=$('#apikey'), key=el.value.trim();
+  if(!key)return;
+  $('#savekey').disabled=true;
+  try{ renderCreds(await api('/credentials',{method:'PUT',
+         headers:{'content-type':'application/json'},body:JSON.stringify({key})})); }
+  catch(e){ $('#savekey').disabled=false;
+            alert('Could not store that key: '+e.message); return; }
+  el.value='';
+}
+
+async function clearKey(){
+  if(!confirm('Remove the stored Anthropic key from secrets.local.env?'))return;
+  try{ renderCreds(await api('/credentials',{method:'DELETE'})); }
+  catch(e){ alert('Could not clear the key: '+e.message); }
+}
+
+// ---- token usage -----------------------------------------------------------
+const nTok=n=>n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?Math.round(n/1e3)+'K':String(n??0);
+const tokLine=u=>`in ${nTok(u?.input)} · out ${nTok(u?.output)} · cache read ${nTok(u?.cache_read)}`;
+var LIFETIME=null;
+
+async function loadUsage(){
+  LIFETIME=await api('/usage').catch(()=>null);
+  paintLifetime();
+}
+
+// The Run tab shows THIS conversation and nothing else. What the install has spent
+// since it was set up is install-level bookkeeping, not something you need in front of
+// you while diagnosing — it lives in the credentials panel with the other
+// set-once-and-forget facts.
+function paintUsage(sessionUsage){
+  $('#usage').innerHTML=sessionUsage?('this session &nbsp;'+tokLine(sessionUsage)):'';
+}
+
+function paintLifetime(){
+  const el=$('#lifetime');
+  if(!el)return;                       // the panel is only in the DOM once rendered
+  el.innerHTML=LIFETIME
+    ? `Recorded usage &nbsp;${tokLine(LIFETIME.lifetime)} &nbsp;across `
+      +`${LIFETIME.sessions} session${LIFETIME.sessions===1?'':'s'}. `
+      +`<span class="dim">Cache reads are part of the input above, billed at about a `
+      +`tenth. Summed from this machine's traces — not an account balance.</span>`
+    : '';
+}
+
+// ---- model ------------------------------------------------------------------
+// Which model answers is an install-level setting, so it is persisted server-side in
+// overrides.json and written to the audit log — unlike the answering mode, which is a
+// per-operator view preference and lives in the browser.
+var MODELS={models:[],source:'',current:'',default:''};
+
+async function loadModels(refresh){
+  MODELS=await api('/models'+(refresh?'?refresh=true':'')).catch(()=>MODELS);
+  renderModels();
+}
+
+function renderModels(){
+  const cur=MODELS.current||'…';
+  $('#model').textContent=cur;
+  $('#model').title='click to change the model';
+  const rows=(MODELS.models||[]).map(m=>{
+    const on=m.id===cur;
+    const ctx=m.max_input_tokens?`${nTok(m.max_input_tokens)} context`:'';
+    return `<button class="modeopt ${on?'on':''}" onclick="setModel('${esc(m.id)}')">
+      <b>${esc(m.display_name||m.id)}</b>
+      <span class="mono">${esc(m.id)}${ctx?' · '+ctx:''}</span></button>`;
+  }).join('');
+  // Say where the list came from. A fallback list can be missing a model the account
+  // actually has, and an operator hunting for one needs to know that is why.
+  const note=MODELS.source==='fallback'
+    ? '<p class="note warn">Could not read this account\'s models — showing the '
+     +`built-in list. ${esc(MODELS.why||'')}</p>`
+    : '<p class="note">Switching invalidates the prompt cache: the next run pays full '
+     +'price for the system prompt once.</p>';
+  $('#modelmenu').innerHTML=note+rows
+    +(MODELS.default&&MODELS.current!==MODELS.default
+      ? `<button class="modeopt" onclick="clearModel()"><b>Reset</b>
+           <span>Back to ${esc(MODELS.default)}.</span></button>` : '');
+}
+
+async function setModel(id){
+  if(id===MODELS.current){toggleModel(false);return;}
+  try{
+    await api('/model',{method:'PUT',headers:{'content-type':'application/json'},
+      body:JSON.stringify({model:id})});
+    MODELS.current=id;
+  }catch(e){ alert('Could not switch model: '+e.message); }
+  toggleModel(false); renderModels();
+}
+
+async function clearModel(){
+  try{ MODELS.current=(await api('/model',{method:'DELETE'})).current; }
+  catch(e){ alert(e.message); }
+  toggleModel(false); renderModels();
+}
+
+function toggleModel(open){
+  const box=$('#modelmenu'), pill=$('#model');
+  const show=open===undefined?box.hidden:open;
+  box.hidden=!show;
+  pill.setAttribute('aria-expanded',show?'true':'false');
+}
+
+// ---- answering mode --------------------------------------------------------
+// Two ways to answer the same question, and they differ in what they can REACH, which
+// is why each option states it rather than leaving it to a word on the pill:
+//
+//   token  the graph pipeline. Spends API tokens. Tools read tests/fixtures/ — the
+//          console forces AGENT_MODE=mock, so this can never touch the bench.
+//   chat   a ticket queued to disk, picked up in the Claude Code session. No API
+//          tokens, but the checks it runs are against the REAL hardware, read-only.
+//
+// A per-operator UI preference, so it lives in the browser. AGENT_MODE is a separate,
+// server-side safety property and is not what this switches.
+var MODE='token';
+try{ MODE=localStorage.getItem('answerMode')||'token'; }catch(e){}
+
+// `var`, not `const`: the meta handler rewrites the token blurb once AGENT_MODE is known,
+// and the render harness reaches it the same way it reaches FLOW and KBDOC.
+var MODES={
+  token:{label:'token mode',
+    title:'Token mode',
+    blurb:'The graph pipeline answers. Spends API tokens. Tools read recorded '
+         +'fixtures — never the real bench.'},
+  chat:{label:'chat mode',
+    title:'Chat mode',
+    blurb:'Queues a ticket to disk for the Claude Code session; type <code>go</code> '
+         +'there to pick it up. No API tokens, but its read-only checks run against '
+         +'the REAL hardware.'},
 };
+
+function renderMode(){
+  const m=MODES[MODE]||MODES.token;
+  const pill=$('#mode');
+  pill.textContent=m.label;
+  pill.className='pill'+(MODE==='chat'?' warn':' mock');
+  pill.title='click to change how questions are answered';
+  $('#modemenu').innerHTML=Object.entries(MODES).map(([k,v])=>
+    `<button class="modeopt ${k===MODE?'on':''}" onclick="setMode('${k}')">
+       <b>${esc(v.title)}</b><span>${v.blurb}</span></button>`).join('');
+  $('#q').placeholder=MODE==='chat'
+    ? 'describe the fault for the Claude Code session'
+    : 'e.g. the acoustic sensor shows no tracks';
+  // Run and Live-with-chat are the same job done two ways, so only the one that
+  // matches the mode is offered. The other is hidden rather than disabled: a tab you
+  // can click into and then cannot use is worse than one that is not there.
+  const owner={run:'token',chat:'chat'};
+  const tabs=[...document.querySelectorAll('#tabs button')];
+  tabs.forEach(b=>{const need=owner[b.dataset.t]; if(need)b.hidden=(need!==MODE);});
+  // If the switch just hid the tab you were looking at, move to its counterpart —
+  // otherwise the page goes blank with every tab deselected.
+  const cur=tabs.find(b=>b.getAttribute('aria-selected')==='true');
+  if(cur&&cur.hidden)selectTab(MODE==='chat'?'chat':'run');
+
+  const note=$('#modenote');
+  if(note)note.innerHTML=MODE==='chat'
+    ? 'Queued for the Claude Code session — nothing watches this queue, so type '
+     +'<code>go</code> there to pick it up. Its checks are read-only but they run '
+     +'against the <b>real hardware</b>, not fixtures.'
+    : 'Runs against recorded fixtures. Live mode stays a deliberate command-line act. '
+     +'Follow-up questions are answered from evidence already gathered — no tools, no '
+     +'device touched.';
+}
+
+function setMode(k){
+  if(!MODES[k])return;
+  MODE=k;
+  try{ localStorage.setItem('answerMode',k); }catch(e){}
+  toggleMode(false);
+  renderMode();
+  // The two modes keep separate threads: a bridge ticket is not a conversation turn,
+  // and splicing them into one history would make the token counts and the routing
+  // read as if they applied to both.
+  renderThread(threadFor());
+}
+
+function toggleMode(open){
+  const box=$('#modemenu'), pill=$('#mode');
+  const show=open===undefined?box.hidden:open;
+  box.hidden=!show;
+  pill.setAttribute('aria-expanded',show?'true':'false');
+}
+
+// ---- conversation ----------------------------------------------------------
+// A conversation is a list of turns, each its own fresh graph session. The transcript
+// lives on the server so a reload does not lose it; this only renders.
+var CONV=null, TURN_OPEN=new Set();   // keys are `${turnIndex}:${section}`
+// NOT `OPEN` — the permissions tab already owns that name, and a second
+// `var OPEN` at the same scope silently replaces this Set with its object.
+
+$('#go').onclick=send;
+$('#q').onkeydown=e=>{if(e.key==='Enter')send();};
+$('#attach').onclick=()=>$('#attfile').click();
+$('#attfile').onchange=e=>{addFiles(e.target.files); e.target.value='';};
+$('#q').onpaste=e=>{const fs=[...(e.clipboardData?.files||[])];
+  if(fs.length){e.preventDefault(); addFiles(fs);}};
+$('#run').ondragover=e=>e.preventDefault();
+$('#run').ondrop=e=>{e.preventDefault(); addFiles(e.dataTransfer?.files);};
+$('#newconv').onclick=()=>{CONV=null;TURN_OPEN=new Set();$('#thread').innerHTML='';
+  $('#convmeta').textContent='';$('#newconv').hidden=true;$('#q').focus();};
+
+// Chat-mode tickets, newest last. Held here rather than on the server because the
+// bridge already owns them — this is only which ones this tab has queued.
+var CHAT_IDS=[], CHAT_CACHE={};
+
+function threadFor(){
+  if(MODE!=='chat')return LAST_CONV||{turns:[],totals:{}};
+  const turns=CHAT_IDS.map(id=>CHAT_CACHE[id]).filter(Boolean);
+  return {turns,totals:{turns:turns.length,runs:turns.length,follow_ups:0,
+                        duration_s:0,input:0,output:0,cache_read:0},
+          status:'idle'};
+}
+var LAST_CONV=null;
+
+// The system picker. Empty means "whatever the message names" — the server asks when
+// that is ambiguous rather than guessing, so the empty choice is always safe.
+function fillSystemPicker(list){
+  const sel=$('#qsys'); if(!sel)return;
+  const keep=sel.value;
+  sel.innerHTML='<option value="">system: named in the message</option>'
+    +(list||[]).map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('');
+  if((list||[]).includes(keep)) sel.value=keep;
+}
+
+// ---- attachments in the Diagnose box
+// Each file is uploaded and turned into text AS SOON AS it is added, not on Send: the
+// description is what the agents will read, so it is shown here first — a screenshot
+// the model misread is dropped before it costs a run.
+var ATT=[];                 // {key, name, state: describing|ready|error, rec, error}
+var ATT_N=0;
+const ATT_KIND={image:'image',pdf:'PDF',text:'text'};
+const fileB64=f=>new Promise((res,rej)=>{const r=new FileReader();
+  r.onload=()=>res(String(r.result).split(',')[1]||''); r.onerror=()=>rej(r.error);
+  r.readAsDataURL(f);});
+function attName(f){
+  // A pasted screenshot arrives as "image.png"; several of those are unreadable apart.
+  if(/^image\.(png|jpe?g|gif|webp)$/i.test(f.name||'')){
+    const d=new Date(), p=n=>String(n).padStart(2,'0');
+    return `screenshot-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}.${f.name.split('.').pop()}`;
+  }
+  return f.name||'file';
+}
+async function addFiles(files){
+  for(const f of [...(files||[])]){
+    const a={key:++ATT_N,name:attName(f),state:'describing'};
+    ATT.push(a); renderAtt();
+    try{
+      a.rec=await api('/attachments',{method:'POST',headers:{'content-type':'application/json'},
+        body:JSON.stringify({name:a.name,media_type:f.type||'',data:await fileB64(f)})});
+      a.state='ready';
+    }catch(e){ a.state='error'; a.error=e.message; }
+    if(ATT.includes(a)) renderAtt();
+  }
+}
+function rmAtt(key){ ATT=ATT.filter(a=>a.key!==key); renderAtt(); }
+function clearAtt(){ ATT=[]; renderAtt(); }
+function renderAtt(){
+  const box=$('#attbar'); if(!box)return;
+  box.innerHTML=ATT.map(a=>{
+    const what=a.state==='describing'?`<span class="working">${/\.(png|jpe?g|gif|webp|pdf)$/i.test(a.name)?'describing':'reading'}…</span>`
+      :a.state==='error'?`<span class="bad">${esc(a.error)}</span>`
+      :`<span class="dim">${ATT_KIND[a.rec.kind]||''}${a.rec.truncated?' · cut to fit':''}</span>`;
+    const txt=a.state==='ready'?`<details class="more"><summary>what the agents will read</summary>
+        <div class="body"><pre dir="auto">${esc(a.rec.text)}</pre></div></details>`:'';
+    return `<div class="attchip ${a.state}"><span class="mono">📎 ${esc(a.name)}</span> ${what}
+      <button class="sm" onclick="rmAtt(${a.key})" title="remove">×</button>${txt}</div>`;}).join('');
+  $('#go').disabled=ATT.some(a=>a.state==='describing');
+}
+// In a turn that was sent: each attachment opens the original, with the text the
+// agents read beside it.
+function attList(list){
+  if(!list||!list.length)return '';
+  return `<div class="attsent">${list.map(a=>`<details class="more"><summary>📎
+      <a href="/api/attachments/${esc(a.id)}/file" target="_blank" rel="noopener"
+        onclick="event.stopPropagation()">${esc(a.name)}</a>
+      <span class="dim">— ${ATT_KIND[a.kind]||''}, what the agents read</span></summary>
+    <div class="body">${a.kind==='image'?`<img class="attimg" src="/api/attachments/${esc(a.id)}/file" alt="">`:''}
+      <pre dir="auto">${esc(a.text||'')}</pre></div></details>`).join('')}</div>`;
+}
+
+async function send(){
+  const q=$('#q').value.trim();
+  if(ATT.some(a=>a.state==='describing'))return;        // Send is disabled meanwhile
+  const ready=ATT.filter(a=>a.state==='ready').map(a=>a.rec);
+  if(!q&&!ready.length)return;
+  const ids=ready.map(a=>a.id);
+  $('#go').disabled=true;
+  try{
+    if(MODE==='chat'){
+      const r=await api('/bridge/ticket',{method:'POST',
+        headers:{'content-type':'application/json'},body:JSON.stringify({question:q,attachments:ids})});
+      CHAT_IDS.push(r.id);
+      CHAT_CACHE[r.id]={kind:'chat',question:q,attachments:ready,id:r.id,status:r.status||'pending',
+                        pending:true};
+      $('#q').value=''; clearAtt();
+      renderThread(threadFor());
+      pollChatTurns();
+      $('#go').disabled=false;
+      return;
+    }
+    if(!CONV) CONV=(await api('/conversation',{method:'POST'})).conversation_id;
+    await api('/conversation/'+CONV+'/message',{method:'POST',
+      headers:{'content-type':'application/json'},
+      body:JSON.stringify({message:q,attachments:ids,system:$('#qsys').value||null})});
+    $('#q').value=''; clearAtt();
+    poll();
+  }catch(e){
+    $('#thread').insertAdjacentHTML('afterbegin',
+      `<div class="turn"><p class="say bad" dir="auto">${esc(e.message)}</p></div>`);
+    $('#go').disabled=false;
+  }
+}
+
+// Nothing drains the bridge automatically — a human types `go` in the chat — so this
+// polls slowly and stops once every ticket has been answered.
+function pollChatTurns(){
+  clearInterval(TIMER);
+  const tick=async()=>{
+    const open=CHAT_IDS.filter(id=>CHAT_CACHE[id]?.pending);
+    if(!open.length){clearInterval(TIMER);return;}
+    for(const id of open){
+      const s=await api('/bridge/session/'+id).catch(()=>null);
+      if(!s)continue;
+      CHAT_CACHE[id]={kind:'chat',question:s.attachments?(s.typed??s.question):s.question,
+        attachments:s.attachments||[],id,status:s.status,
+        report:s.report,commands:s.commands||[],kb_gaps:s.kb_gaps||[],notes:s.notes,
+        pending:!['done','failed'].includes(s.status)};
+    }
+    renderThread(threadFor());
+  };
+  TIMER=setInterval(tick,4000); tick();
+}
 
 function poll(){ clearInterval(TIMER); TIMER=setInterval(refresh,1500); refresh(); }
 
 async function refresh(){
-  if(!CUR)return;
-  const s=await api('/session/'+CUR).catch(()=>null); if(!s)return;
-  const st=s.state||{}, done=['done','error','awaiting_approval'].includes(s.status);
-  if(done){clearInterval(TIMER);$('#go').disabled=!(META.credentials||{}).ready;}
-  const steps=(META.order||[]).map(a=>{
-    const v=(st.visited||[]).includes(a), act=(st.next||[]).includes(a);
-    return `<span class="step ${act?'active':v?'done':''}">${v?'✓ ':''}${esc(a)}</span>`}).join('');
-  const tools=(st.findings||[]).map(f=>
-    `<tr><td class="mono">${esc(f.agent)}</td><td class="mono">${esc(f.tool)}</td>
-     <td class="${f.ok?'ok':'bad'}">${f.ok?'ok':'failed'}</td></tr>`).join('');
-  const r=st.report||s.report;
-  $('#live').innerHTML=`
-   <div class="card"><h3>Session <span class="mono dim">${esc(CUR)}</span> — ${esc(s.status)}</h3>
-     <div>${steps}</div>
-     ${s.error?`<pre class="bad">${esc(s.error)}</pre>`:''}
-     ${tools?`<div class="scroll"><table><tr><th>agent</th><th>tool</th><th>result</th></tr>${tools}</table></div>`:''}
-   </div>
-   ${(st.transcript||[]).map(t=>`<div class="card"><h3>${esc(t.agent)}</h3>
-       <div>${esc(t.text).replace(/\n/g,'<br>')}</div>
-       <p class="note">cache read: ${t.usage?.cache_read ?? '?'} tok · in ${t.usage?.input ?? '?'} · out ${t.usage?.output ?? '?'}</p></div>`).join('')}
-   ${r?reportCard(r):''}
-   ${s.status==='awaiting_approval'?'<div class="card"><h3>Waiting on you</h3><p class="note">A new runbook scenario was proposed. Open the <b>Approvals</b> tab.</p></div>':''}`;
-  if(s.status==='awaiting_approval')loadApprovals();
+  if(!CONV)return;
+  const c=await api('/conversation/'+CONV).catch(()=>null); if(!c)return;
+  LAST_CONV=c;
+  const busy=String(c.status||'').startsWith('working');
+  renderThread(c);
+  paintUsage(c.totals);
+  if(!busy){
+    clearInterval(TIMER);
+    $('#go').disabled=!(META.credentials||{}).ready;
+    $('#q').focus();
+    loadUsage().then(()=>paintUsage(c.totals));
+    if((c.turns||[]).some(t=>t.session_id)) loadApprovals();
+  }
+}
+
+const secs=n=>n>=60?`${Math.floor(n/60)}m ${Math.round(n%60)}s`:`${(n??0).toFixed(1)}s`;
+
+// Open state is keyed by turn + section rather than left to <details>, because the
+// thread re-renders on every poll and a section would otherwise snap shut under
+// somebody who had just opened it.
+function toggleMore(key,el){ el.open?TURN_OPEN.add(key):TURN_OPEN.delete(key); }
+function more(key,label,n,body){
+  if(!n)return '';
+  return `<details class="more" ${TURN_OPEN.has(key)?'open':''}
+    ontoggle="toggleMore('${key}',this)">
+    <summary>${esc(label)} <span class="dim">(${n})</span></summary>
+    <div class="body">${body}</div></details>`;
+}
+
+// The ask, at the end of the feedback and NOT collapsed. A request for permission that
+// only appears when somebody expands a section is a request nobody answers — and unlike
+// the evidence, it is the one part of the report that needs the reader to do something.
+function permissionAsk(r){
+  const need=(r.needs_permission||[]).filter(x=>x&&x.what);
+  if(!need.length)return '';
+  return `<div class="askperm">
+    <p><b>Blocked on permissions.</b> These checks were refused, and would sharpen the
+      diagnosis if granted:</p>
+    <ul>${need.map(x=>`<li dir="auto">${bdi(x.what)}${
+      x.why?` <span class="dim">— ${bdi(x.why)}</span>`:''}</li>`).join('')}</ul>
+    <p class="note">Commands live in <code>transport.ALLOWED</code> (editable under
+      <b>Agents &amp; permissions</b>); nodes and credentials live in
+      <b>Inventory &amp; systems</b>.</p>
+  </div>`;
+}
+
+function turnCard(t,i){
+  const li=a=>(a||[]).map(x=>`<li dir="auto">${esc(x)}</li>`).join('');
+  const meta=[`<span class="kind ${esc(t.kind)}">${esc((t.kind||'').replace('_',' '))}</span>`];
+  if(t.kind==='run'){const n=(t.agents||[]).length; meta.push(`${n} agent${n===1?'':'s'}`);}
+  if(t.duration_s!=null) meta.push(secs(t.duration_s));
+  if(t.usage) meta.push(`${nTok((t.usage.input||0)+(t.usage.output||0))} tok`);
+  if(t.report?.confidence) meta.push(`confidence ${esc(t.report.confidence)}`);
+  if(t.why) meta.push(`<span class="dim">${bdi(t.why)}</span>`);
+
+  let body='', extras='';
+  if(t.kind==='chat'){
+    // A ticket nobody has picked up yet is not a failure and not an answer — say which
+    // it is, because the bridge is drained by a human typing `go`, not by a daemon.
+    const r=t.report;
+    meta.length=1;
+    meta.push(`<span class="mono dim">${esc(t.id||'')}</span>`,
+              esc(STATUS_LABEL[t.status]||t.status||'pending'));
+    body=r?`<p class="say" dir="auto">${esc(r.bottom_line||r.root_cause||'')}</p>`
+           +permissionAsk(r)
+         :`<p class="working">queued on disk — type <code>go</code> in the Claude Code
+            session to pick it up.</p>`;
+    if(r){
+      const li2=a=>(a||[]).map(x=>`<li dir="auto">${esc(x)}</li>`).join('');
+      const cmds=(t.commands||[]).map(c=>`<div style="margin-bottom:8px">
+        <div class="mono" style="font-size:12px">${c.readonly===false
+          ?'<span class="bad">CHANGES STATE</span> ':'<span class="ok">READ-ONLY</span> '}${esc(c.cmd)}</div>
+        ${c.output?`<pre style="max-height:220px">${esc(c.output)}</pre>`:''}</div>`).join('');
+      extras=more(`${i}:cause`,'Root cause',r.root_cause?1:0,`<p dir="auto">${esc(r.root_cause||'')}</p>`)
+            +more(`${i}:ev`,'Evidence',(r.evidence||[]).length,`<ul>${li2(r.evidence)}</ul>`)
+            +more(`${i}:unk`,'What could not be checked',(r.unknowns||[]).length,`<ul>${li2(r.unknowns)}</ul>`)
+            +more(`${i}:next`,'Next steps',(r.suggested_actions||[]).length,`<ul>${li2(r.suggested_actions)}</ul>`)
+            +more(`${i}:cmds`,'Commands run on the bench',(t.commands||[]).length,cmds)
+            +more(`${i}:gaps`,'Documentation gaps',(t.kb_gaps||[]).length,`<ul>${li2(t.kb_gaps)}</ul>`);
+    }
+  }else if(t.kind==='error'){
+    body=`<p class="say bad" dir="auto">${esc(t.error||'that turn failed')}</p>`;
+  }else if(t.kind==='follow_up'){
+    body=`<p class="say" dir="auto">${ml(t.answer||'')}</p>`;
+  }else{
+    const r=t.report||{};
+    body=`<p class="say" dir="auto">${esc(r.bottom_line||r.root_cause||'(not determined)')}</p>`
+        +permissionAsk(r);
+    if(r.escalate) body+=`<p class="tmeta bad" dir="auto">escalate — ${bdi(r.escalate_reason||'')}</p>`;
+    const tools=(t.findings||[]).map(f=>
+      `<tr><td class="mono">${esc(f.agent)}</td><td class="mono">${esc(f.tool)}</td>
+       <td class="${f.ok?'ok':'bad'}">${f.ok?'ok':'failed'}</td></tr>`).join('');
+    extras=
+      more(`${i}:cause`,'Root cause',r.root_cause?1:0,`<p dir="auto">${esc(r.root_cause||'')}</p>`)
+     +more(`${i}:ev`,'Evidence',(r.evidence||[]).length,`<ul>${li(r.evidence)}</ul>`)
+     +more(`${i}:unk`,'What could not be checked',(r.unknowns||[]).length,`<ul>${li(r.unknowns)}</ul>`)
+     +more(`${i}:next`,'Next steps',(r.suggested_actions||[]).length,`<ul>${li(r.suggested_actions)}</ul>`)
+     +more(`${i}:tools`,'Tools called',(t.findings||[]).length,
+           `<div class="scroll"><table><tr><th>agent</th><th>tool</th><th>result</th></tr>${tools}</table></div>`)
+     +more(`${i}:agents`,'Agent detail',(t.transcript||[]).length,
+           (t.transcript||[]).map(x=>`<p class="dim mono" style="font-size:11px">${esc(x.agent)}</p>
+             <p dir="auto">${ml(x.text||'')}</p>`).join(''));
+  }
+  return `<div class="turn">
+    <p class="ask"><b>you</b><span dir="auto">${esc(t.question||'')}</span></p>
+    ${attList(t.attachments)}
+    ${body}
+    <div class="tmeta">${meta.join('<span class="dim">·</span>')}</div>
+    ${extras}</div>`;
+}
+
+function renderThread(c){
+  const turns=c.turns||[];
+  // Newest first, and the turn in flight above all of them. With the input pinned at
+  // the top of the card, chronological order would push every new answer further from
+  // the box and make the operator chase it down the page. The index passed to turnCard
+  // stays the ORIGINAL one, because it keys which sections are open.
+  const done=turns.map((t,i)=>[i,t]).reverse().map(([i,t])=>turnCard(t,i)).join('');
+  let live='';
+  if(String(c.status||'').startsWith('working')){
+    const st=c.live||{}, cur=c.current||{};
+    const steps=(META.order||[]).map(a=>{
+      const v=(st.visited||[]).includes(a), act=(st.next||[]).includes(a);
+      return `<span class="step ${act?'active':v?'done':''}">${v?'✓ ':''}${esc(a)}</span>`}).join('');
+    const kind=(c.status||'').split(':')[1]||'';
+    live=`<div class="turn">
+      <p class="ask"><b>you</b><span dir="auto">${esc(cur.question||'')}</span></p>
+      ${attList(cur.attachments)}
+      <p class="working">${kind==='follow_up'
+        ? 'answering from what is already known\u2026'
+        : kind ? 'gathering evidence\u2026' : 'deciding how to answer\u2026'}</p>
+      ${steps?`<div style="margin-top:6px">${steps}</div>`:''}</div>`;
+  }
+  let html=live+done;
+  if(c.error&&!turns.length) html+=`<div class="turn"><p class="say bad">${esc(c.error)}</p></div>`;
+  $('#thread').innerHTML=html;
+  const t=c.totals||{};
+  $('#convmeta').textContent=t.turns
+    ? `${t.turns} turn${t.turns>1?'s':''} \u00b7 ${t.runs} run${t.runs===1?'':'s'} \u00b7 `
+      +`${nTok((t.input||0)+(t.output||0))} tok \u00b7 ${secs(t.duration_s)}`
+    : '';
+  $('#newconv').hidden=!turns.length;
 }
 
 function reportCard(r){
   const li=(a)=>(a||[]).map(x=>`<li>${esc(x)}</li>`).join('');
   return `<div class="card"><h3>Diagnosis</h3>
+    <p class="say">${esc(r.bottom_line||'')}</p>
     <p><b>${esc(r.root_cause||'(not determined)')}</b></p>
     <p class="note">confidence: <span class="${r.confidence==='high'?'ok':r.confidence==='low'?'bad':'warn'}">${esc(r.confidence)}</span>
       ${r.escalate?` · <span class="bad">escalate — ${esc(r.escalate_reason||'')}</span>`:''}</p>
@@ -388,21 +1082,176 @@ async function decide(id,approved){
   const md=$('#md-'+id)?.value;
   await api('/session/'+id+'/decide',{method:'POST',headers:{'content-type':'application/json'},
     body:JSON.stringify({approved,edited_md:approved?md:null})});
-  setTimeout(()=>{loadApprovals();if(CUR===id)poll();},400);
+  // The approval belongs to a run turn inside the open conversation, so refresh that
+  // too — the diagnosis is already in the thread and only `saved` changes here.
+  setTimeout(()=>{loadApprovals();if(CONV)refresh();},400);
 }
 
-async function loadTraces(){
-  const {traces}=await api('/traces');
-  $('#traces').innerHTML=`<div class="card"><h3>Sessions on disk</h3>
-   ${traces.length?`<div class="scroll"><table><tr><th>id</th><th>size</th><th></th></tr>
-   ${traces.map(t=>`<tr><td class="mono">${esc(t.id)}</td><td class="dim">${t.bytes} B</td>
-     <td><button class="sm" onclick="showTrace('${t.id}')">open</button></td></tr>`).join('')}
-   </table></div>`:'<p class="note">No traces yet.</p>'}</div><div id="tdetail"></div>`;
+var TRACES_ALL=[];                          // the list as last fetched
+var TRACE_OPEN={};                          // id -> true while its detail row is shown
+var TRACE_HTML={};                          // id -> rendered detail, kept across re-sorts
+var TRACE_SORT={by:'time',dir:'desc'};
+var TRACE_ALL_STATES=false;                 // off: finished sessions only
+const tdash=v=>v==null||v===''?'<span class="dim">-</span>':esc(String(v));
+// Filters on the fields that repeat across sessions. "-" is its own value, so the
+// sessions nobody could attribute to a system (or a person) can be pulled out too.
+const TFILTERS=[['system','system'],['location','location'],['asker','asked by']];
+const tval=v=>v==null||v===''?'-':String(v);
+var TRACE_SYSTEMS=[];                       // the inventory's systems, as last fetched
+function traceOptions(k){
+  // System follows the inventory, not the traces: a system added there is offered
+  // before it has any sessions, and one removed there is no longer offered.
+  const vals=k==='system'
+    ?[...TRACE_SYSTEMS].sort((x,y)=>x.localeCompare(y))
+      .concat(TRACES_ALL.some(t=>tval(t.system)==='-')?['-']:[])
+    :[...new Set(TRACES_ALL.map(t=>tval(t[k])))]
+      .sort((x,y)=>x==='-'?1:y==='-'?-1:x.localeCompare(y));
+  return `<option value="">all</option>`+vals.map(v=>
+    `<option value="${esc(v)}">${v==='-'?'- (unknown)':esc(v)}</option>`).join('');
 }
-async function showTrace(id){
-  const t=await api('/traces/'+id);
-  $('#tdetail').innerHTML=`<div class="card"><h3>${esc(id)}</h3>
-    <pre>${esc(JSON.stringify(t.entries,null,1))}</pre></div>`;
+function traceView(){
+  const f={from:$('#tfrom').value, to:$('#tto').value};
+  for(const [k] of TFILTERS) f[k]=$('#tf-'+k).value;
+  const rows=TRACES_ALL.filter(t=>(TRACE_ALL_STATES||t.finished)
+    &&(!f.from||t.date>=f.from)&&(!f.to||t.date<=f.to)
+    &&TFILTERS.every(([k])=>!f[k]||tval(t[k])===f[k]));
+  const key=TRACE_SORT.by==='tokens'?(t=>t.tokens):(t=>t.started);
+  const sign=TRACE_SORT.dir==='asc'?1:-1;
+  // No token count is not a small token count: it sorts last whichever way you sort.
+  return rows.sort((x,y)=>{
+    const a=key(x), b=key(y);
+    if(a==null||b==null) return (a==null)-(b==null);
+    return sign*(a-b)||sign*(x.session-y.session);});
+}
+function traceRow(t){
+  const open=!!TRACE_OPEN[t.id];
+  return `<tr id="tr-${t.id}"><td><div class="mono">${esc(t.tag)}${t.finished?''
+       :` <span class="pill ${t.status==='error'||t.status==='failed'?'bad':''}">${esc(t.status_label)}</span>`}</div>
+       <div class="dim mono" style="font-size:11px">${esc(t.id)} · ${t.bytes} B</div></td>
+     <td>${tdash(t.system)}</td>
+     <td>${t.system_serial?`#${t.system_serial} on ${esc(t.system)}`:tdash(null)}</td>
+     <td>${tdash(t.date)}</td><td>${tdash(t.location)}</td>
+     <td>${t.tokens==null?tdash(null):nTok(t.tokens)}</td><td>${tdash(t.asker)}</td>
+     <td><button class="sm" id="tb-${t.id}" aria-expanded="${open}"
+       onclick="toggleTrace('${t.id}')">${open?'close':'open'}</button></td></tr>
+     <tr id="tdr-${t.id}"${open?'':' hidden'}><td colspan="8" id="tdc-${t.id}">${
+       open?(TRACE_HTML[t.id]||'<p class="note">Loading…</p>'):''}</td></tr>`;
+}
+async function loadTraces(){
+  const {traces,systems}=await api('/traces');
+  TRACES_ALL=traces; TRACE_SYSTEMS=systems||[]; TRACE_OPEN={}; TRACE_HTML={};
+  const dates=traces.map(t=>t.date).filter(Boolean).sort();
+  $('#traces').innerHTML=`<div class="card"><h3>Sessions on disk</h3>
+   <p class="note">Tag: the overall session number, counted across every system. A field
+   the trace does not record is <code>-</code>. <i>Session on its system</i> counts only that
+   system's sessions, and is given once the system is known. Only finished sessions are
+   listed unless <i>show all sessions</i> is on.</p>
+   ${traces.length?`<div class="tfilt">
+     <label>from<input type="date" id="tfrom" onchange="filterTraces()"
+       min="${dates[0]}" max="${dates.at(-1)}"></label>
+     <label>to<input type="date" id="tto" onchange="filterTraces()"
+       min="${dates[0]}" max="${dates.at(-1)}"></label>
+     ${TFILTERS.map(([k,l])=>`<label>${l}<select id="tf-${k}" onchange="filterTraces()">
+       ${traceOptions(k)}</select></label>`).join('')}
+     <label>sort by<select id="tsort" onchange="sortTraces(this.value)">
+       <option value="time">time</option><option value="tokens">token usage</option></select></label>
+     <button class="sm" id="tdir" onclick="sortTraces(null,true)"
+       title="switch ascending / descending"></button>
+     <button class="sm" id="tall" aria-pressed="false" onclick="toggleAllTraces()"
+       title="also show sessions that failed, were cancelled, or never got to an answer"></button>
+     <button class="sm" onclick="clearTraceFilters()"
+       title="remove every filter and go back to newest first">clear</button>
+     <span class="dim" id="tcount" style="font-size:12.5px"></span>
+   </div>
+   <div class="scroll" style="margin-top:10px"><table><thead><tr><th>tag</th><th>system</th>
+     <th>session on its system</th><th>date</th><th>location</th>
+     <th>tokens</th><th>asked by</th><th></th></tr></thead><tbody id="tbody"></tbody>
+   </table></div>`:'<p class="note">No traces yet.</p>'}</div>`;
+  if(traces.length){ $('#tsort').value=TRACE_SORT.by; filterTraces(); }
+}
+function filterTraces(){
+  const rows=traceView();
+  $('#tbody').innerHTML=rows.map(traceRow).join('')
+    ||`<tr><td colspan="8" class="note">No ${TRACE_ALL_STATES?'':'finished '}session matches these filters.</td></tr>`;
+  $('#tdir').textContent=TRACE_SORT.dir==='asc'?'↑ ascending':'↓ descending';
+  const hidden=TRACES_ALL.filter(t=>!t.finished).length;
+  $('#tall').textContent=TRACE_ALL_STATES?'showing all sessions'
+    :`show all sessions${hidden?` (${hidden} unfinished)`:''}`;
+  $('#tall').setAttribute('aria-pressed',String(TRACE_ALL_STATES));
+  $('#tcount').textContent=rows.length===TRACES_ALL.length?`${rows.length} sessions`
+    :`${rows.length} of ${TRACES_ALL.length}`;
+}
+function sortTraces(by,flip){
+  if(by) TRACE_SORT.by=by;
+  if(flip) TRACE_SORT.dir=TRACE_SORT.dir==='asc'?'desc':'asc';
+  filterTraces();
+}
+function toggleAllTraces(){ TRACE_ALL_STATES=!TRACE_ALL_STATES; filterTraces(); }
+function clearTraceFilters(){
+  $('#tfrom').value=''; $('#tto').value='';
+  for(const [k] of TFILTERS) $('#tf-'+k).value='';
+  TRACE_SORT={by:'time',dir:'desc'}; $('#tsort').value='time';   // the default view
+  TRACE_ALL_STATES=false;
+  filterTraces();
+}
+async function toggleTrace(id){
+  const btn=$('#tb-'+id);
+  if(TRACE_OPEN[id]){
+    delete TRACE_OPEN[id];
+    $('#tdr-'+id).hidden=true; btn.textContent='open'; btn.setAttribute('aria-expanded','false');
+    return;
+  }
+  TRACE_OPEN[id]=true;
+  btn.textContent='close'; btn.setAttribute('aria-expanded','true');
+  $('#tdr-'+id).hidden=false;
+  if(!TRACE_HTML[id]){
+    $('#tdc-'+id).innerHTML='<p class="note">Loading…</p>';
+    TRACE_HTML[id]=traceDetail(await api('/traces/'+id));
+  }
+  // Looked up again: a sort while it loaded may have rebuilt the row.
+  if(TRACE_OPEN[id]) $('#tdc-'+id).innerHTML=TRACE_HTML[id];
+}
+function traceDetail(t){
+  const s=t.summary||{}, list=a=>a&&a.length
+    ?`<ul>${a.map(x=>`<li dir="auto">${esc(x)}</li>`).join('')}</ul>`:tdash(null);
+  const blk=(h,body)=>`<div class="tblk"><h4>${h}</h4>${body}</div>`;
+  const conf=s.confidence?`<span class="pill">confidence ${esc(s.confidence)}</span>`:'';
+  return `<div class="tsum">
+   <div class="row" style="gap:6px">
+     <b class="mono">${esc(t.tag||t.id)}</b>
+     <span class="pill">${esc(s.via||'run')}</span>
+     <span class="pill ${s.found?'mock':''}">${s.found?'root cause found':'root cause not established'}</span>
+     ${conf}${s.escalate?'<span class="pill bad">escalate</span>':''}
+     ${s.turns>1?`<span class="pill">${s.turns} turns</span>`:''}
+     ${s.finished===false?`<span class="pill ${s.status==='error'||s.status==='failed'?'bad':''}">${esc(s.status_label)}</span>`:''}
+   </div>
+   ${blk('Problem',(s.problem?`<p dir="auto">${esc(s.problem)}</p>`
+      :`${tdash(null)} <span class="note">— this trace did not record the question.</span>`)
+     +(s.follow_ups&&s.follow_ups.length?`<div class="note">Follow-ups:</div>${list(s.follow_ups)}`:''))}
+   ${s.attachments&&s.attachments.length?blk('Attachments',attList(s.attachments)):''}
+   ${blk('Symptoms <span class="note">— what the tools observed</span>',list(s.symptoms))}
+   ${blk('Diagnosis',(s.diagnosis?`<p dir="auto">${esc(s.diagnosis)}</p>`:tdash(null))
+     +(s.root_cause&&s.root_cause!==s.diagnosis
+       ?`<p dir="auto"><span class="dim">Root cause:</span> ${esc(s.root_cause)}</p>`:''))}
+   ${blk('Solution',(s.solution?`<p dir="auto">${esc(s.solution)}</p>`
+      :`<p class="note">No fix recorded — the agents suggest checks, not a repair.</p>`)
+     +(s.next_steps&&s.next_steps.length?`<div class="note">Next checks:</div>${list(s.next_steps)}`:''))}
+   ${s.error?blk('Error',`<pre>${esc(s.error)}</pre>`):''}
+   ${s.escalate?blk('Escalation',`<p dir="auto">${s.escalate_reason?esc(s.escalate_reason):tdash(null)}</p>`):''}
+   ${s.unknowns&&s.unknowns.length?blk('Still unknown',list(s.unknowns)):''}
+   ${s.needs_permission&&s.needs_permission.length?blk('Needs permission',
+      list(s.needs_permission.map(p=>`${p.what} — ${p.why}`))):''}
+   ${s.last_answer?blk('Latest answer',`<p dir="auto">${esc(s.last_answer)}</p>`):''}
+   <h4 style="margin-top:14px">Logs</h4>
+   <p class="note">The raw record the summary was drawn from, one section per kind of data.
+   Open one to check a claim above against what was actually observed.</p>
+   ${(t.sections||[]).map(x=>`<details class="more"><summary>${esc(x.title)}
+       <span class="dim">— ${esc(x.why)}</span></summary>
+     <div class="body"><pre>${esc(JSON.stringify(x.value,null,1))}</pre></div></details>`).join('')}
+   <details class="more"><summary>Raw trace file <span class="dim">— every line of
+     <code>traces/${esc(t.id)}.jsonl</code> exactly as written</span></summary>
+     <div class="body"><pre>${esc(JSON.stringify(t.entries,null,1))}</pre></div></details>
+  </div>`;
 }
 
 var KBDOC=null;  // {name, topics[], symptoms[], body} — the form's working copy
@@ -414,24 +1263,30 @@ var TOPICS_SEL={kbnew:[], kbdoc:[]};        // what each picker currently has se
 // A topic is free text and multi-select: a case can be both "network" and "radar",
 // which is how the hijack case is found from either direction. Adding one is just
 // using it — nothing else in the system has to be told about it.
-const topicPicker=which=>`
-  <div id="${which}-topics"></div>
-  <div class="row" style="margin-top:8px;gap:6px">
-    <input type="text" id="${which}-newtopic" style="max-width:240px"
-      placeholder="new topic, e.g. hydraulics"
-      onkeydown="if(event.key==='Enter'){event.preventDefault();addTopic('${which}')}">
-    <button class="sm" type="button" onclick="addTopic('${which}')">+ Add topic</button>
-  </div>`;
+var TOPIC_ADDING={};                        // which picker has its small input open
+const topicPicker=which=>`<div id="${which}-topics" class="tchips"></div>`;
 
 function renderTopics(which){
   const box=$('#'+which+'-topics'); if(!box)return;
   const sel=TOPICS_SEL[which]||[];
-  box.innerHTML=TOPICS_ALL.map(t=>{
+  const chips=TOPICS_ALL.map(t=>{
     const on=sel.includes(t);
     return `<button type="button" class="tchip ${on?'on':''}" onclick="toggleTopic('${which}','${esc(t)}')"
-      title="${on?'Remove':'Add'} ${esc(t)}">${on?'✓ ':''}${esc(t)}</button>`;}).join(' ')
-    || '<span class="dim">No topics yet — add the first one below.</span>';
+      title="${on?'Remove':'Add'} ${esc(t)}">${on?'✓ ':''}${esc(t)}</button>`;}).join(' ');
+  // Adding a topic is a chip at the end of the line, not a form of its own: it opens a
+  // chip-sized input in place, Enter adds, Esc or leaving it empty puts the chip back.
+  const add=TOPIC_ADDING[which]
+    ?`<span class="tchip tadd"><input type="text" id="${which}-newtopic" placeholder="new topic"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();addTopic('${which}')}
+                   else if(event.key==='Escape'){cancelAddTopic('${which}')}"
+        onblur="if(!this.value.trim())cancelAddTopic('${which}')"></span>`
+    :`<button type="button" class="tchip none" onclick="startAddTopic('${which}')"
+        title="create a new topic">+ topic</button>`;
+  box.innerHTML=(chips||'<span class="dim" style="font-size:12px;margin-right:6px">No topics yet</span>')+' '+add;
+  if(TOPIC_ADDING[which]) $('#'+which+'-newtopic').focus();
 }
+function startAddTopic(which){ TOPIC_ADDING[which]=true; renderTopics(which); }
+function cancelAddTopic(which){ TOPIC_ADDING[which]=false; renderTopics(which); }
 function toggleTopic(which,t){
   const sel=TOPICS_SEL[which]; const i=sel.indexOf(t);
   i<0?sel.push(t):sel.splice(i,1);
@@ -447,7 +1302,7 @@ async function addTopic(which){
       body:JSON.stringify({name:t})});
     TOPICS_ALL=r.all_topics; TOPICS_REMOVABLE=r.removable_topics;
     if(!TOPICS_SEL[which].includes(t)) TOPICS_SEL[which].push(t);
-    el.value='';
+    TOPIC_ADDING[which]=false;
     renderTopics('kbnew'); renderTopics('kbdoc'); renderRemovable();
   }catch(e){ alert(e.message); }
 }
@@ -494,18 +1349,83 @@ const topicChips=ts=>(ts&&ts.length)
   ? ts.map(t=>`<span class="tchip on">${esc(t)}</span>`).join(' ')
   : '<span class="dim">—</span>';
 
+var KB_DOCS=[];                             // the case list as last fetched
+var KB_FILTER={topics:[],from:'',to:''};    // kept across reloads: saving a case reloads
+var KB_SORT={by:'time',dir:'desc'};
+
+const kbDay=c=>(c||'').slice(0,10);
+const KB_EST={git:'estimated — when the file was first committed',
+              file:"estimated — the file's last change; the case predates the created field"};
+function kbCreated(d){
+  if(!d.created) return tdash(null);
+  const txt=esc(d.created.slice(0,16).replace('T',' '));
+  return d.created_source==='recorded'?txt
+    :`<span class="dim" title="${esc(KB_EST[d.created_source]||'estimated')}">~${txt}</span>`;
+}
+function kbSessions(d){
+  return `${d.sessions}${d.search_hits?` <span class="dim" title="sessions whose runbook
+    search returned this case — same words, not necessarily the same fault">· ${d.search_hits}
+    in search</span>`:''}`;
+}
+function kbView(){
+  const f=KB_FILTER;
+  const rows=KB_DOCS.filter(d=>(!f.topics.length||f.topics.some(t=>(d.topics||[]).includes(t)))
+    &&(!f.from||kbDay(d.created)>=f.from)&&(!f.to||kbDay(d.created)<=f.to));
+  const sign=KB_SORT.dir==='asc'?1:-1;
+  const tkey=d=>[...(d.topics||[])].sort().join(',');
+  return rows.sort((x,y)=>{
+    if(KB_SORT.by==='topics'){
+      // A case with no topics sorts last whichever way: it has nothing to sort on.
+      const a=tkey(x), b=tkey(y);
+      if(!a||!b) return (!a)-(!b);
+      return sign*a.localeCompare(b)||x.name.localeCompare(y.name);
+    }
+    return sign*(x.created||'').localeCompare(y.created||'')||x.name.localeCompare(y.name);
+  });
+}
+function renderKbList(){
+  const box=$('#kb-rows'); if(!box)return;
+  const rows=kbView();
+  box.innerHTML=rows.map(d=>`<tr>
+     <td class="mono">${esc(d.name)}</td>
+     <td>${topicChips(d.topics)}</td>
+     <td class="${d.symptom_count?'dim':'warn'}">${d.symptom_count||'0 — add some'}</td>
+     <td style="white-space:nowrap">${kbCreated(d)}</td>
+     <td>${kbSessions(d)}</td>
+     <td style="white-space:nowrap"><button class="sm" onclick="toggleKb('${esc(d.name)}')">edit</button>
+         <button class="sm no" onclick="delKb('${esc(d.name)}')">delete</button></td></tr>`).join('')
+    ||`<tr><td colspan="6" class="dim">${KB_DOCS.length
+        ?'No case matches these filters.'
+        :'No cases recorded yet. Until one is, every diagnosis reasons from the system model alone.'}</td></tr>`;
+  const used=[...new Set(KB_DOCS.flatMap(d=>d.topics||[]))].sort();
+  $('#kbf-topics').innerHTML=used.map(t=>{const on=KB_FILTER.topics.includes(t);
+    return `<button type="button" class="tchip ${on?'on':''}" onclick="kbFilterTopic('${esc(t)}')"
+      >${on?'✓ ':''}${esc(t)}</button>`;}).join(' ')||'<span class="dim">no topics on any case</span>';
+  $('#kbdir').textContent=KB_SORT.dir==='asc'?'↑ ascending':'↓ descending';
+  $('#kbcount').textContent=rows.length===KB_DOCS.length?`${rows.length} cases`
+    :`${rows.length} of ${KB_DOCS.length}`;
+}
+function kbFilterTopic(t){
+  const i=KB_FILTER.topics.indexOf(t); i<0?KB_FILTER.topics.push(t):KB_FILTER.topics.splice(i,1);
+  renderKbList();
+}
+function kbFilterDates(){ KB_FILTER.from=$('#kbf-from').value; KB_FILTER.to=$('#kbf-to').value; renderKbList(); }
+function kbSort(by,flip){
+  if(by) KB_SORT.by=by;
+  if(flip) KB_SORT.dir=KB_SORT.dir==='asc'?'desc':'asc';
+  renderKbList();
+}
+function kbClear(){
+  KB_FILTER={topics:[],from:'',to:''}; KB_SORT={by:'time',dir:'desc'};
+  $('#kbf-from').value=''; $('#kbf-to').value=''; $('#kbsort').value='time';
+  renderKbList();
+}
+
 async function loadKb(){
   const [{docs,all_topics,removable_topics}, sm] =
     await Promise.all([api('/kb'), api('/system-model')]);
   TOPICS_ALL=all_topics; TOPICS_REMOVABLE=removable_topics; TOPICS_SEL.kbnew=[];
-  const rows=docs.map(d=>`<tr>
-     <td class="mono">${esc(d.name)}</td>
-     <td>${topicChips(d.topics)}</td>
-     <td class="${d.symptom_count?'dim':'warn'}">${d.symptom_count
-        ||'0 — add some'}</td>
-     <td class="dim">${d.bytes} B</td>
-     <td><button class="sm" onclick="toggleKb('${esc(d.name)}')">edit</button>
-         <button class="sm no" onclick="delKb('${esc(d.name)}')">delete</button></td></tr>`).join('');
+  KB_DOCS=docs;
   $('#kb').innerHTML=`
    <div class="card"><h3>Add a case by hand</h3>
      <p class="note">Two steps. This creates the file and immediately opens the editor
@@ -529,9 +1449,27 @@ async function loadKb(){
        prompt — they are retrieved with <code>search_runbook</code>, which is what lets the
        history grow without growing every request. The topics and the symptom list are what
        a ticket gets matched against, so keep symptoms short and in the words a reporter
-       would use. A new case normally arrives through the approval queue rather than here.</p>
-     <div class="scroll"><table><tr><th>case</th><th>topics</th><th>symptoms</th><th>size</th><th></th></tr>
-       ${rows||'<tr><td colspan="5" class="dim">No cases recorded yet. Until one is, every diagnosis reasons from the system model alone.</td></tr>'}</table></div>
+       would use. A new case normally arrives through the approval queue rather than here.
+       <i>Sessions</i> counts the sessions whose final report named this case as the fault,
+       plus the one that created it; a runbook search that merely returned it is shown
+       beside that, dimmed. A created time marked <code>~</code> is an estimate.</p>
+     <div class="tfilt">
+       <label>created from<input type="date" id="kbf-from" onchange="kbFilterDates()"></label>
+       <label>to<input type="date" id="kbf-to" onchange="kbFilterDates()"></label>
+       <label>sort by<select id="kbsort" onchange="kbSort(this.value)">
+         <option value="time">created time</option><option value="topics">topics</option></select></label>
+       <button class="sm" id="kbdir" onclick="kbSort(null,true)"
+         title="switch ascending / descending"></button>
+       <button class="sm" onclick="kbClear()"
+         title="remove every filter and go back to newest first">clear</button>
+       <span class="dim" id="kbcount" style="font-size:12.5px"></span>
+     </div>
+     <div class="kbf-tags"><span class="dim">topics:</span> <span id="kbf-topics"></span>
+       <span class="note" style="margin:0">— a case with any selected topic is shown</span></div>
+     <div class="scroll" style="margin-top:8px"><table><thead><tr><th>case</th><th>topics</th>
+       <th>symptoms</th><th>created</th>
+       <th title="sessions whose diagnosis was this case, or that created it">sessions</th>
+       <th></th></tr></thead><tbody id="kb-rows"></tbody></table></div>
    </div>
 
    <div id="kbdetail"></div>
@@ -547,6 +1485,9 @@ async function loadKb(){
      <pre>${esc(sm.text||'(missing)')}</pre>
    </details>`;
   renderTopics('kbnew'); renderRemovable(); previewSlug();
+  $('#kbf-from').value=KB_FILTER.from; $('#kbf-to').value=KB_FILTER.to;
+  $('#kbsort').value=KB_SORT.by;
+  renderKbList();
 }
 
 function closeKb(){ KBDOC=null; const b=$('#kbdetail'); if(b) b.innerHTML=''; }
@@ -618,6 +1559,8 @@ function renderKb(){
        <button class="sm yes" onclick="saveKb()">Save</button>
        <button class="sm" onclick="showKb('${esc(d.name)}')">Revert</button>
        <button class="sm" onclick="closeKb()">Close</button>
+       <button class="sm no" style="margin-left:auto" onclick="delKb('${esc(d.name)}')"
+         title="delete the file now — unsaved edits are discarded with it">Delete case</button>
        <span class="note">Takes effect immediately — cases are read at search time.</span>
      </div>
    </div>`;
@@ -658,8 +1601,10 @@ async function newKb(){
 }
 
 async function delKb(n){
-  if(!confirm(`Delete ${n}.md? The agent will no longer see this guidance.`))return;
-  try{ await api('/kb/'+n,{method:'DELETE'}); $('#kbdetail').innerHTML=''; loadKb(); }
+  const editing=KBDOC&&KBDOC.name===n;
+  if(!confirm(`Delete ${n}.md? The agent will no longer see this guidance.`
+    +(editing?' Anything unsaved in the editor goes with it.':'')))return;
+  try{ await api('/kb/'+n,{method:'DELETE'}); if(editing) closeKb(); loadKb(); }
   catch(e){ alert(e.message); }
 }
 
@@ -741,9 +1686,21 @@ async function openChat(id){
 }
 
 // ---------------- graph ----------------
+// The diagram lives at the foot of Agents & permissions now — it IS the shape those
+// settings produce, so reading it beside them beats a separate tab you had to remember
+// to go and check. Fetch and paint are split for the same reason: every edit repaints
+// it from cache, so a reorder shows up immediately instead of on the next tab switch.
+var GRAPHDATA=null;
+
 async function loadGraph(){
   const [g,cfg] = await Promise.all([api('/graph'),api('/config')]);
-  const eff = cfg.effective;
+  GRAPHDATA={g, eff:cfg.effective};
+  paintGraph();
+}
+
+function paintGraph(){
+  if(!GRAPHDATA||!$('#graphpane'))return;
+  const {g,eff}=GRAPHDATA;
   const N=(x,y,w,h,label,cls,sub)=>({x,y,w,h,label,cls,sub});
   const ags=g.agents, n=ags.length;
   // Size the agent box to its label. A fixed width clipped "acoustic_deep_dive".
@@ -823,8 +1780,8 @@ async function loadGraph(){
   const mk=(id,c)=>`<marker id="${id}" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6"
     markerHeight="6" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="${c}" stroke="none"/></marker>`;
 
-  $('#graph').innerHTML=`
-   <div class="card"><h3>Execution graph</h3>
+  $('#graphpane').innerHTML=`
+   <div class="card">
     <svg class="g" viewBox="-4 0 ${W+8} ${ySave+96}" style="max-width:${W+8}px"
          role="img" aria-label="agent execution graph">
       <defs>${mk('ar','var(--dim)')}${mk('arw','var(--warn)')}${mk('arg','var(--ok)')}${mk('arr','var(--bad)')}</defs>
@@ -849,8 +1806,7 @@ async function loadGraph(){
       ${ags.some(a=>!a.in_order)?`<br><b class="warn">Greyed out:</b> defined but absent from
         <code>order</code>, so the supervisor can never pick it — add it to the order to enable it.`:''}
     </p>
-   </div>
-   <div id="flowed"></div>`;
+   </div>`;
 
   FLOW={order:[...g.order], requires:JSON.parse(JSON.stringify(eff.requires||{})),
         picks:g.supervisor_picks, all:g.agents, sel:null};
@@ -1055,6 +2011,7 @@ function togglePerm(kind,name){
 async function loadPerms(){
   CFG=await api('/config'); META=await api('/meta');
   renderPerms();
+  loadGraph();               // refetch: a save may have changed the topology
 }
 
 function entry(kind,name,{badges='',summary='',chips='',body='',ro=false,actions=''}){
@@ -1190,6 +2147,10 @@ function renderPerms(){
        model-facing view is rebuilt from a field allowlist.</p>
    </div>
 
+   <h2 class="sec">Execution graph <em>the shape the settings above produce</em></h2>
+   <div id="graphpane"></div>
+   <div id="flowed"></div>
+
    <h2 class="sec">Configuration source <em>where these values come from</em></h2>
    <div class="card">
      <p class="note">${over.length
@@ -1202,12 +2163,20 @@ function renderPerms(){
      </div>
      <div id="auditbox"></div>
    </div>`;
+  // This just wiped #graphpane and #flowed out of the DOM by rebuilding #perms. Repaint
+  // from cache — expanding an agent card should not cost two API calls.
+  paintGraph();
+  if(FLOW)renderFlow();
 }
 
 // ---------------- inventory & systems ----------------
 var INV=null, EDIT=null, VIEW=null;
 
-async function loadInv(){ INV=await api('/inventory'); renderInv(); }
+async function loadInv(){
+  const [inv,ty]=await Promise.all([api('/inventory'),api('/inventory/types')]);
+  INV=inv; INVTYPES=ty.types||{}; TYPEMETA=ty; rebuildSections(); renderInv();
+}
+var TYPEMETA={roles:[],defaults:{},overridden:false};
 
 const ROLE_LABEL={sensor:'Sensor',compute:'Compute',laptop:'Laptop',network:'Network',
                   power:'Power',other:'Other'};
@@ -1266,8 +2235,135 @@ function renderInv(){
        file, never in the registry. This is the exact text that goes into the cached system
        prompt.</p>
      <pre>${esc(INV.agent_prompt||'(no systems)')}</pre>
-   </div>`;
+   </div>
+
+   <h2 class="sec">Component types <em>what a kind of hardware is, and what it records</em></h2>
+   <div id="typeed"></div>`;
   if(EDIT) renderEdit(); else if(VIEW) renderView();
+  renderTypes();
+}
+
+// ---------------- component type editor ----------------
+// The sections above ARE these types. Adding one gives every system a new section to
+// put hardware in; adding a field to one gives every component of that type somewhere
+// to record it — and the value reaches the model, which is the point of recording it.
+var TYPEDRAFT=null;
+
+function startTypes(){ TYPEDRAFT=JSON.parse(JSON.stringify(INVTYPES)); renderTypes(); }
+function cancelTypes(){ TYPEDRAFT=null; renderTypes(); }
+
+function renderTypes(){
+  const box=$('#typeed'); if(!box)return;
+  const d=TYPEDRAFT;
+  if(!d){
+    box.innerHTML=`<div class="card">
+      <p class="note">${Object.keys(INVTYPES).length} type${Object.keys(INVTYPES).length===1?'':'s'}:
+        ${Object.entries(INVTYPES).map(([k,t])=>`<b>${esc(t.label||k)}</b>${
+          (t.fields||[]).length?` <span class="dim">(${(t.fields||[]).map(f=>esc(f.key)).join(', ')})</span>`:''}`)
+          .join(' · ')}
+        ${TYPEMETA.overridden?'<span class="badge">edited</span>':''}</p>
+      <div class="row"><button class="sm" onclick="startTypes()">Edit types &amp; fields</button>
+      </div></div>`;
+    return;
+  }
+  const roles=(TYPEMETA.roles||['sensor']);
+  const cards=Object.entries(d).map(([k,t])=>`
+    <div class="card ent"><header><b>${esc(t.label||k)}</b>
+      <span class="dim mono" style="font-size:11px">${esc(k)}</span>
+      <span class="grow"></span>
+      <button class="sm no" onclick="rmType('${esc(k)}')">Remove type</button></header>
+      <div class="fg">
+        ${fldT(3,'Shown as',`<input type="text" value="${esc(t.label||'')}"
+          oninput="TYPEDRAFT['${esc(k)}'].label=this.value">`)}
+        ${fldT(3,'Role',`<select onchange="TYPEDRAFT['${esc(k)}'].role=this.value">
+          ${roles.map(r=>`<option value="${esc(r)}" ${t.role===r?'selected':''}>${esc(r)}</option>`).join('')}
+        </select>`)}
+        ${fldT(3,'Domain',`<input type="text" value="${esc(t.domain||'')}" placeholder="radar / camera / -"
+          oninput="TYPEDRAFT['${esc(k)}'].domain=this.value">`)}
+        ${fldT(3,'Default scheme',`<input type="text" value="${esc(t.scheme||'')}" placeholder="tcp / http"
+          oninput="TYPEDRAFT['${esc(k)}'].scheme=this.value">`)}
+      </div>
+      <p class="note" style="margin-top:10px"><b>Standard fields</b> — untick the ones a
+        ${esc(t.label||k)} does not have. Hiding only takes them off the form; a value
+        already recorded is kept and still reaches the model.
+        <span class="dim">${(TYPEMETA.always_shown||[]).map(esc).join(' and ')} are always
+        shown — the name is what a tool resolves against.</span></p>
+      <div class="row">
+        ${(TYPEMETA.builtin_fields||[]).map(b=>`<label class="tchip ${
+          (t.builtin||{})[b.key]===false?'':'on'}" style="cursor:pointer">
+          <input type="checkbox" ${(t.builtin||{})[b.key]===false?'':'checked'}
+            style="margin-right:5px"
+            onchange="setBuiltin('${esc(k)}','${esc(b.key)}',this.checked)">${esc(b.label)}
+        </label>`).join('')}
+      </div>
+      <p class="note" style="margin-top:10px">Extra fields every ${esc(t.label||k)} carries.
+        A default is filled in when one is added, and can be overridden per component.</p>
+      ${(t.fields||[]).map((f,fi)=>`<div class="row" style="margin-top:5px">
+        <input type="text" style="max-width:150px" value="${esc(f.key)}" placeholder="azimuth"
+          oninput="TYPEDRAFT['${esc(k)}'].fields[${fi}].key=this.value">
+        <input type="text" style="max-width:190px" value="${esc(f.label||'')}" placeholder="label, e.g. Azimuth °"
+          oninput="TYPEDRAFT['${esc(k)}'].fields[${fi}].label=this.value">
+        <input type="text" style="max-width:150px" value="${esc(f.default??'')}" placeholder="default (optional)"
+          oninput="TYPEDRAFT['${esc(k)}'].fields[${fi}].default=this.value">
+        <button class="sm no" onclick="rmField('${esc(k)}',${fi})">×</button></div>`).join('')}
+      <div class="row" style="margin-top:6px">
+        <button class="sm" onclick="addField('${esc(k)}')">+ Add field</button></div>
+    </div>`).join('');
+
+  box.innerHTML=`${cards}
+    <div class="card"><h3>Add a type</h3>
+      <div class="row"><input type="text" id="newtype" placeholder="lowercase, e.g. weather_station">
+        <button class="sm yes" onclick="addType()">Create</button></div>
+      <p class="note">It becomes a section in every system editor above.</p></div>
+    ${TYPEDRAFT.__err?`<div class="alert" id="typeerr"><b>Not saved.</b> ${esc(TYPEDRAFT.__err)}</div>`:''}
+    <div class="row" style="margin-top:8px">
+      <button class="sm yes" onclick="saveTypes()">Save types</button>
+      <button class="sm" onclick="cancelTypes()">Cancel</button></div>`;
+}
+
+const fldT=(span,label,inner)=>`<div class="fd" style="grid-column:span ${span}">
+  <span>${label}</span>${inner}</div>`;
+
+function setBuiltin(k,b,on){
+  (TYPEDRAFT[k].builtin=TYPEDRAFT[k].builtin||{})[b]=on;
+  renderTypes();
+}
+
+function addField(k){ (TYPEDRAFT[k].fields=TYPEDRAFT[k].fields||[])
+  .push({key:'',label:'',default:''}); renderTypes(); }
+function rmField(k,i){ TYPEDRAFT[k].fields.splice(i,1); renderTypes(); }
+
+function addType(){
+  const n=($('#newtype').value||'').trim().toLowerCase();
+  if(!n)return;
+  if(!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(n))return alert('lowercase letters, digits, - or _');
+  if(TYPEDRAFT[n])return alert(`"${n}" already exists`);
+  TYPEDRAFT[n]={label:n,role:'sensor',domain:'',scheme:'tcp',fields:[]};
+  renderTypes();
+}
+
+function rmType(k){
+  // Components of this type do not vanish — bucket() keeps them visible under a
+  // "type no longer defined" heading — but say so rather than let it surprise them.
+  const used=(INV.systems||[]).flatMap(sy=>sy.components||sy.sensors||[])
+    .filter(c=>c.type===k||sectionOf(c)===k).length;
+  if(!confirm(`Remove the "${k}" type?`
+    +(used?`\n\n${used} existing component${used===1?' uses':'s use'} it. They are kept, and `
+           +`appear under "${k} (type no longer defined)" until you move them.`
+          :'\n\nNothing uses it.')))return;
+  delete TYPEDRAFT[k]; renderTypes();
+}
+
+async function saveTypes(){
+  const payload=JSON.parse(JSON.stringify(TYPEDRAFT)); delete payload.__err;
+  try{
+    const r=await api('/inventory/types',{method:'PUT',
+      headers:{'content-type':'application/json'},body:JSON.stringify({types:payload})});
+    INVTYPES=r.types; TYPEMETA=r; TYPEDRAFT=null; rebuildSections(); renderInv();
+  }catch(e){
+    TYPEDRAFT.__err=e.message; renderTypes();
+    const box=$('#typeerr'); if(box)box.scrollIntoView({block:'center'});
+  }
 }
 
 // ---- read-only summary, expanded in place ----
@@ -1294,23 +2390,53 @@ function closeView(){ if(!discardOk())return; VIEW=null; EDIT=null; renderInv();
 // stored model is unchanged, so routing and the agent-facing inventory are untouched.
 // `other` is last and catches everything, so nothing a system holds can be hidden by a
 // category nobody thought of.
-const SECTIONS=[
-  {key:'radar',    label:'Radar',     add:{role:'sensor', domain:'radar',    scheme:'tcp'}},
-  {key:'camera',   label:'Camera',    add:{role:'sensor', domain:'camera',   scheme:'http'}},
-  {key:'acoustic', label:'Acoustic',  add:{role:'sensor', domain:'acoustic', scheme:'http'}},
-  {key:'computers',label:'Computers', add:{role:'compute',                   scheme:'tcp'}},
-  {key:'other',    label:'Other',     add:{role:'other',                     scheme:'tcp'}},
-];
+// The sections ARE the component types, and the catalogue is operator-editable — so a
+// new kind of hardware becomes a section by being defined, not by a code change.
+// SECTIONS is rebuilt from it; the built-in five are the defaults the server ships.
+var INVTYPES={}, SECTIONS=[];
+
+function rebuildSections(){
+  SECTIONS=Object.entries(INVTYPES).map(([key,t])=>({
+    key, label:t.label||key, fields:t.fields||[],
+    // `type` is REQUIRED by the server, so a section prefills it where the section
+    // itself answers the question — adding an acoustic sensor and then being told it
+    // "needs a hardware type" is asking twice. A type whose name is generic (computers,
+    // other) deliberately leaves it blank and the field is marked required.
+    add:{role:t.role||'sensor', domain:t.domain||'', scheme:t.scheme||'',
+         type:(t.domain||'')===key?key:'',
+         fields:Object.fromEntries((t.fields||[])
+           .filter(f=>f.default!==''&&f.default!=null).map(f=>[f.key,f.default]))}}));
+  if(!SECTIONS.length)SECTIONS=[{key:'other',label:'Other',fields:[],add:{role:'other'}}];
+}
 var SEC_OPEN=new Set();
 
+// A component belongs to the type it declares. Falling back to domain and then role
+// keeps registries written before the catalogue existed rendering in the right place.
 function sectionOf(c){
-  if(['radar','camera','acoustic'].includes(c.domain)) return c.domain;
-  if(['compute','laptop'].includes(c.role)) return 'computers';
-  return 'other';
+  const keys=SECTIONS.map(s=>s.key);
+  if(keys.includes(c.type)) return c.type;
+  if(keys.includes(c.domain)) return c.domain;
+  const byRole=SECTIONS.find(s=>(INVTYPES[s.key]||{}).role===c.role&&!INVTYPES[s.key].domain);
+  if(byRole) return byRole.key;
+  // Last resort must be a real string: an undefined key buckets every component into
+  // one nameless group, which renders as nothing at all.
+  return keys.includes('other')?'other':(keys[keys.length-1]||'other');
+}
+
+function typeFields(c){ return (INVTYPES[sectionOf(c)]||{}).fields||[]; }
+// Whether this component's type shows a given standard field. Unknown types and
+// catalogues saved before a field existed default to showing it: an invisible field is
+// a worse failure than an extra one.
+function showsField(c,key){
+  const b=(INVTYPES[sectionOf(c)]||{}).builtin;
+  return !b || b[key]!==false;
 }
 function bucket(comps){
   const m=Object.fromEntries(SECTIONS.map(s=>[s.key,[]]));
-  (comps||[]).forEach((c,i)=>m[sectionOf(c)].push({c,i}));
+  // Created on demand: a component can name a type the catalogue no longer has — an
+  // operator renamed or deleted it — and that component must still be visible and
+  // editable rather than disappearing into an exception.
+  (comps||[]).forEach((c,i)=>{const k=sectionOf(c); (m[k]=m[k]||[]).push({c,i});});
   return m;
 }
 function openDefaults(comps){
@@ -1364,14 +2490,20 @@ function renderView(){
 function newSys(){
   const n=$('#newsys').value.trim(); if(!n)return;
   if(!/^[a-z][a-z0-9_-]{0,63}$/.test(n)) return alert('lowercase letters, digits, - or _');
-  EDIT={name:n,orig:n,site:'',description:'',components:[],isNew:true}; VIEW=null;
+  EDIT={name:n,orig:n,site:'',lat:null,lon:null,description:'',components:[],
+        isNew:true,sections:new Set()}; VIEW=null;
   renderInv();
 }
 function editSys(n){
   const sy=INV.systems.find(x=>x.name===n);
   EDIT=JSON.parse(JSON.stringify({name:sy.name,orig:sy.name,site:sy.site,
-    description:sy.description,
-    components:(sy.components||sy.sensors||[]).map(c=>({...c,ssh:c.ssh||{}})),isNew:false}));
+    lat:sy.lat,lon:sy.lon,description:sy.description,host:sy.host||'',config:sy.config||'',
+    components:(sy.components||sy.sensors||[]).map(c=>({...c,ssh:c.ssh||{},
+                                                        fields:c.fields||{}})),isNew:false}));
+  // Which sections this system shows: the ones it uses. Everything else is off the
+  // page until somebody adds it — a tower with no acoustic sensor should not carry an
+  // empty Acoustic heading forever.
+  EDIT.sections=new Set(EDIT.components.map(sectionOf));
   VIEW=n; openDefaults(EDIT.components); renderInv();
 }
 function cancelEdit(){ EDIT=null; renderInv(); }
@@ -1392,12 +2524,30 @@ function nextName(){
 function addComp(key){
   const sec=SECTIONS.find(s=>s.key===key)||SECTIONS[0];
   EDIT.components.push({name:nextName(),type:'',domain:'',address:'',port:null,
-                        hardware:'',software_version:'',web:'',ssh:{},
-                        role:'sensor', ...sec.add});
+                        hardware:'',software_version:'',web:'',ssh:{},fields:{},
+                        role:'sensor', ...JSON.parse(JSON.stringify(sec.add))});
   SEC_OPEN.add(sec.key);
+  if(EDIT.sections)EDIT.sections.add(sec.key);
   renderEdit();
 }
-function rmComp(i){ EDIT.components.splice(i,1); renderEdit(); }
+function addSection(k){ (EDIT.sections=EDIT.sections||new Set()).add(k);
+  SEC_OPEN.add(k); renderEdit(); }
+function dropSection(k){
+  // Guarded anyway: the × is only rendered on an empty section, but renderEdit() is
+  // not the only thing that could call this.
+  if((bucket(EDIT.components)[k]||[]).length)return;
+  EDIT.sections.delete(k); SEC_OPEN.delete(k); renderEdit();
+}
+
+function rmComp(i){
+  const c=EDIT.components[i]||{};
+  // Asked for, because Remove is next to the fields you were just typing into and an
+  // accidental click otherwise silently drops a node the agent can address.
+  if(!confirm(`Remove ${c.name?`"${c.name}"`:'this component'} from this system?`
+             +`\n\nIt stops being addressable once you save.`))return;
+  EDIT.components.splice(i,1); renderEdit();
+}
+const setF=(i,k,v)=>{ (EDIT.components[i].fields=EDIT.components[i].fields||{})[k]=v; };
 const setS=(i,k,v)=>{ EDIT.components[i][k]=v; };
 const setSsh=(i,k,v)=>{ (EDIT.components[i].ssh=EDIT.components[i].ssh||{})[k]=v; };
 
@@ -1425,19 +2575,32 @@ function renderEdit(){
         <button class="sm no" onclick="rmComp(${i})">Remove</button></header>
       <div class="fg">
         ${fld(3,'Name',txt(i,'name'))}
-        ${fld(4,'Hardware type',`<input type="text" list="types-${esc(role)}"
-          value="${esc(c.type??'')}" placeholder="-"
-          oninput="setS(${i},'type',this.value)">`)}
-        ${fld(3,'IP address',txt(i,'address'))}
-        ${fld(2,'Port',num(i,'port'))}
+        ${fld(4,'Hardware type <b class="req">required</b>',
+          `<input type="text" list="types-${esc(role)}" id="type-${i}"
+          class="${(c.type||'').trim()?'':'missing'}"
+          value="${esc(c.type??'')}" placeholder="what it is, e.g. magos / axis"
+          oninput="setS(${i},'type',this.value);this.classList.toggle('missing',!this.value.trim())">`)}
+        ${showsField(c,'address')?fld(3,'IP address',txt(i,'address')):''}
+        ${showsField(c,'port')?fld(2,'Port',num(i,'port')):''}
 
-        ${fld(3,'Hardware model',txt(i,'hardware'))}
-        ${fld(2,'Version',txt(i,'software_version'))}
-        ${fld(4,'Web address',txt(i,'web'))}
-        ${fld(3,'Username',`<input type="text" value="${esc(ssh.user??'')}"
-          placeholder="-" oninput="setSsh(${i},'user',this.value)">`)}
+        ${showsField(c,'hardware')?fld(3,'Hardware model',txt(i,'hardware')):''}
+        ${showsField(c,'software_version')?fld(2,'Version',txt(i,'software_version')):''}
+        ${showsField(c,'web')?fld(4,'Web address',txt(i,'web')):''}
+        ${showsField(c,'ssh')?fld(3,'Username',`<input type="text" value="${esc(ssh.user??'')}"
+          placeholder="-" oninput="setSsh(${i},'user',this.value)">`):''}
 
-        ${fld(4,'Password',`<div class="pwrow">
+        ${typeFields(c).map(f=>fld(3,esc(f.label||f.key),
+          `<input type="text" value="${esc((c.fields||{})[f.key]??'')}"
+            placeholder="${esc(f.default!==''&&f.default!=null?String(f.default):'-')}"
+            oninput="setF(${i},'${esc(f.key)}',this.value)">`)).join('')}
+        ${showsField(c,'location')?fld(2,'Latitude',`<input type="number" step="any"
+          value="${c.lat??''}" placeholder="-"
+          oninput="setS(${i},'lat',this.valueAsNumber)">`):''}
+        ${showsField(c,'location')?fld(2,'Longitude',`<input type="number" step="any"
+          value="${c.lon??''}" placeholder="inherits the system"
+          oninput="setS(${i},'lon',this.valueAsNumber)">`):''}
+
+        ${!showsField(c,'ssh')?'':fld(4,'Password',`<div class="pwrow">
           <input type="password" id="pw-${i}" value="${esc(ssh.password??'')}"
             ${fromEnv?'disabled':''} placeholder="-"
             oninput="setSsh(${i},'password',this.value)">
@@ -1445,22 +2608,44 @@ function renderEdit(){
           ${ssh.password&&!fromEnv?`<button class="sm no" type="button" onclick="clearPw(${i})">clear</button>`:''}
         </div>`)}
       </div>
-      <p class="note">Stored as <code>${esc(ssh.password_env||'(derived from the name on save)')}</code>
+      ${!showsField(c,'ssh')?'':`<p class="note">Stored as
+        <code>${esc(ssh.password_env||'(derived from the name on save)')}</code>
         ${fromEnv?'<span class="badge">from environment</span>':''} —
-        a password typed here goes to the secrets file, never to the registry.</p>
+        a password typed here goes to the secrets file, never to the registry.</p>`}
     </div>`;};
 
   const groups=bucket(EDIT.components);
-  const body=SECTIONS.map(sec=>{
+  // Only the sections this system uses. A tower with no acoustic sensor carrying an
+  // empty Acoustic heading forever is noise, and it makes every system look alike.
+  EDIT.sections=EDIT.sections||new Set(EDIT.components.map(sectionOf));
+  EDIT.components.forEach(c=>EDIT.sections.add(sectionOf(c)));
+  const known=SECTIONS.map(s=>s.key);
+  // A section for a type that no longer exists, so its components stay reachable.
+  const orphans=[...new Set(EDIT.components.map(sectionOf))].filter(k=>!known.includes(k))
+    .map(k=>({key:k,label:k+' (type no longer defined)',fields:[],add:{}}));
+  const shown=[...SECTIONS,...orphans].filter(sec=>EDIT.sections.has(sec.key));
+  const body=shown.map(sec=>{
     const items=groups[sec.key];
     const add=`<button class="sm" onclick="event.stopPropagation();addComp('${sec.key}')">
-      + Add ${esc(sec.label.toLowerCase())}</button>`;
+      + Add ${esc(sec.label.toLowerCase())}</button>`
+      // Only an EMPTY section can be dropped: removing one with components in it would
+      // be deleting hardware behind a heading, which is not what "hide this" means.
+      +(items.length?'':`<button class="sm no" title="remove this section"
+        onclick="event.stopPropagation();dropSection('${sec.key}')">×</button>`);
     return `<div class="secg${items.length?'':' empty'}">
       ${secHead(sec,items.length,add)}
       ${SEC_OPEN.has(sec.key)?`<div class="secbody">
         ${items.map(({c,i})=>compCard(c,i)).join('')
           ||'<p class="note">Nothing here yet.</p>'}</div>`:''}
-    </div>`;}).join('');
+    </div>`;}).join('')
+    + (()=>{
+        const rest=SECTIONS.filter(sec=>!EDIT.sections.has(sec.key));
+        if(!rest.length)return '';
+        return `<div class="row" style="margin-top:8px;align-items:baseline">
+          <span class="note">Add a section:</span>
+          ${rest.map(sec=>`<button class="sm" onclick="addSection('${sec.key}')">
+            + ${esc(sec.label)}</button>`).join('')}</div>`;
+      })();
 
   box.innerHTML=`
    <div class="inline">
@@ -1469,13 +2654,26 @@ function renderEdit(){
      <div class="fg" style="margin-bottom:12px">
        ${fld(3,'Name',`<input type="text" value="${esc(EDIT.name??'')}"
          placeholder="lowercase, e.g. tower1" oninput="EDIT.name=this.value">`)}
-       ${fld(3,'Site',`<input type="text" value="${esc(EDIT.site??'')}" placeholder="beit-yanai"
+       ${fld(2,'Site',`<input type="text" value="${esc(EDIT.site??'')}" placeholder="beit-yanai"
          oninput="EDIT.site=this.value">`)}
+       ${fld(2,'Latitude',`<input type="number" step="any" value="${EDIT.lat??''}"
+         placeholder="32.3891" oninput="EDIT.lat=this.valueAsNumber">`)}
+       ${fld(2,'Longitude',`<input type="number" step="any" value="${EDIT.lon??''}"
+         placeholder="34.8703" oninput="EDIT.lon=this.valueAsNumber">`)}
        ${fld(6,'Description',`<input type="text" value="${esc(EDIT.description??'')}"
          placeholder="model-visible; no secrets" oninput="EDIT.description=this.value">`)}
+       ${fld(3,'Gotcha runs on',`<select onchange="EDIT.host=this.value"
+         title="every check for this system runs on this component, over SSH">
+         <option value="">— none (checks run on this server)</option>
+         ${EDIT.components.filter(c=>(c.name||'').trim()).map(c=>`<option value="${esc(c.name)}"
+           ${c.name===EDIT.host?'selected':''}>${esc(c.name)}${c.address?` · ${esc(c.address)}`:''}</option>`).join('')}
+         </select>`)}
+       ${fld(5,'Config path on it',`<input type="text" value="${esc(EDIT.config??'')}"
+         placeholder="~/gotcha30/configs/site.yaml" oninput="EDIT.config=this.value"
+         title="this system's own gotcha config, read over SSH from the machine above">`)}
      </div>
      ${body}
-     ${EDIT.error?`<div class="alert"><b>Not saved.</b> ${esc(EDIT.error)}</div>`:''}
+     ${EDIT.error?`<div class="alert" id="syserr"><b>Not saved.</b> ${esc(EDIT.error)}</div>`:''}
      <div class="row" style="margin-top:10px">
        <button class="sm yes" onclick="saveSys()">Save system</button>
        <button class="sm" onclick="${EDIT.isNew?'cancelEdit()':`viewSys('${esc(EDIT.orig)}')`}">Cancel</button>
@@ -1491,15 +2689,49 @@ function togglePw(i){
 }
 function clearPw(i){ setSsh(i,'password',''); setSsh(i,'clear_password',true); renderEdit(); }
 
+// Catch the one required field the form can check itself. The server enforces it too —
+// this is not the guarantee, it is the difference between "Not saved: component '1'
+// needs a hardware type" appearing under a form you have scrolled past, and the field
+// itself being marked before anything is sent.
+function missingTypes(){
+  return (EDIT.components||[])
+    .map((c,i)=>({name:c.name,i,sec:sectionOf(c)}))
+    .filter(x=>!((EDIT.components[x.i].type||'').trim()));
+}
+
 async function saveSys(){
+  const bad=missingTypes();
+  if(bad.length){
+    bad.forEach(x=>SEC_OPEN.add(x.sec));          // do not hide the field being complained about
+    EDIT.error=`${bad.length>1?'These components need':'Component '+JSON.stringify(bad[0].name)+' needs'}`
+      +` a hardware type${bad.length>1?': '+bad.map(x=>x.name).join(', '):''} — it is what a tool `
+      +`resolves against, so the registry will not load without it.`;
+    renderEdit();
+    const f=$('#type-'+bad[0].i);
+    if(f){ f.scrollIntoView({block:'center'}); f.focus(); }
+    return;
+  }
+  const num=v=>Number.isFinite(v)?v:null;
   const payload={new_name:(EDIT.name||'').trim(),
     site:EDIT.site||null,description:EDIT.description||null,
+    host:EDIT.host??'', config:(EDIT.config??'').trim(),
+    lat:num(EDIT.lat), lon:num(EDIT.lon),
     components:EDIT.components.map(c=>({
       name:(c.name||'').trim(), type:(c.type||'').trim(), role:c.role||'sensor',
       domain:c.domain||null, address:c.address||null,
       port:Number.isFinite(c.port)?c.port:null, scheme:c.scheme||null,
       hardware:c.hardware||null, software_version:c.software_version||null,
       web:c.web||null, description:c.description||null,
+      lat:num(c.lat), lon:num(c.lon),
+      // Everything recorded, not just what the type currently declares. Sending only
+      // the declared keys meant reverting the catalogue — or renaming a field — turned
+      // the next save of an unrelated system into a silent delete of values nobody
+      // could see to rescue. Invisible-but-kept is recoverable from the YAML; deleted
+      // is not, so a stale key is the better failure.
+      fields:Object.fromEntries(Object.entries({
+          ...(c.fields||{}),
+          ...Object.fromEntries(typeFields(c).map(f=>[f.key,(c.fields||{})[f.key]])),
+        }).filter(([,v])=>v!==undefined&&v!==null&&v!=='')),
       // Only what the form edits. Sending back the SSH port and key file would
       // round-trip values nobody can see — and one stale bad value would then block
       // every save of an unrelated field. The server keeps them.
@@ -1515,7 +2747,11 @@ async function saveSys(){
   }catch(e){
     // Sticky and next to the button, not a flash in a header that may be scrolled
     // out of view — a save that failed silently reads exactly like one that worked.
+    // Scrolled to as well: "sticky next to the button" is no use under a long form the
+    // operator is looking at the top of, which is what made this read as "it just
+    // does not save".
     EDIT.error=e.message; renderEdit();
+    const box=$('#syserr'); if(box) box.scrollIntoView({block:'center'});
   }
 }
 
@@ -1594,13 +2830,17 @@ async function showAudit(){
       <td class="mono">${esc(e.by)}</td><td>${esc(e.change)}</td></tr>`).join('')}</table></div>`
     : '<p class="note">No changes recorded.</p>';
 }
-Object.assign(window,{decide,showTrace,loadChat,submitChat,openChat,
+Object.assign(window,{decide,rmAtt,startAddTopic,cancelAddTopic,kbFilterTopic,kbFilterDates,kbSort,kbClear,toggleTrace,filterTraces,sortTraces,clearTraceFilters,toggleAllTraces,loadChat,submitChat,openChat,
   showKb,toggleKb,closeKb,saveKb,newKb,delKb,
   slugify,previewSlug,addSym,rmSym,renderTopics,toggleTopic,addTopic,removeTopic,renderRemovable,
   saveAgent,addAgent,delAgent,saveFlow,savePost,saveTool,resetTool,saveCmds,resetAll,showAudit,
   togglePerm,renderPerms,
   loadGraph,renderFlow,pick,unlink,chipDrag,chipDrop,laneOver,laneOut,laneDrop,
   loadInv,newSys,editSys,viewSys,toggleSys,toggleSec,closeView,cancelEdit,addComp,rmComp,setS,setSsh,nextName,
-  saveSys,delSys,togglePw,clearPw});
+  saveSys,delSys,togglePw,clearPw,
+  // The type editor and per-system sections are driven from inline onclick handlers,
+  // which resolve against window rather than the module scope.
+  startTypes,cancelTypes,saveTypes,addType,rmType,addField,rmField,
+  addSection,dropSection,setF,setBuiltin});
 
 </script></body></html>
