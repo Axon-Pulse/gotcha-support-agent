@@ -14,3 +14,6 @@ config_audit.jsonl
 # Claude skill: per-machine record of what each system last ran, and any local SSH keys
 /support-agent-skill/state/
 /support-agent-skill/sshkey*
+# Slack bridge: thread -> session map, and its local venv
+/slack-bridge/state/
+/slack-bridge/.venv/

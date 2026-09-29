@@ -1,0 +1,45 @@
+# Slack app manifest for the gotcha support bot.
+#
+# api.slack.com/apps -> Create New App -> From a manifest -> paste this file.
+# Then, by hand (a manifest cannot do these):
+#   1. Basic Information -> App-Level Tokens -> Generate, scope `connections:write`
+#      -> that is SLACK_APP_TOKEN (xapp-...)
+#   2. Install App -> Install to Workspace -> the Bot User OAuth Token is
+#      SLACK_BOT_TOKEN (xoxb-...)
+#   3. In the support channel: /invite @gotcha-support
+#
+# Socket Mode: the bridge holds an outbound WebSocket to Slack, so no inbound port, no
+# public URL and no request-signing secret are needed.
+
+display_information:
+  name: gotcha support
+  description: First-line diagnosis for deployed gotcha systems. Read-only.
+  background_color: "#1d2b3a"
+
+features:
+  bot_user:
+    display_name: gotcha-support
+    always_online: true
+  app_home:
+    # DMs work only if the bridge is started with SLACK_ALLOW_DMS=1 and the user is in
+    # SLACK_ALLOWED_USERS; the tab is here so that switch needs no app change.
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: false
+
+oauth_config:
+  scopes:
+    bot:
+      - app_mentions:read   # @gotcha-support in a channel
+      - chat:write          # the "Checking…" message, then the answer edited into it
+      - im:history          # DMs, when enabled
+
+settings:
+  event_subscriptions:
+    bot_events:
+      - app_mention
+      - message.im
+  interactivity:
+    is_enabled: false
+  org_deploy_enabled: false
+  socket_mode_enabled: true
+  token_rotation_enabled: false

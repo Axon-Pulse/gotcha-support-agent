@@ -1,0 +1,30 @@
+{
+  "$comment": "The Slack bot's whole permission surface. The bridge runs `claude -p --permission-mode dontAsk --setting-sources project` in this directory, so only this file (and managed settings) applies: anything not allowed below is refused without asking, and every Bash call is vetted by ../bash_guard.py.",
+  "permissions": {
+    "defaultMode": "dontAsk",
+    "allow": ["Skill", "Read", "Grep", "Glob", "Bash", "TodoWrite"],
+    "deny": [
+      "Write", "Edit", "NotebookEdit", "WebFetch", "WebSearch", "Agent",
+      "Read(~/.ssh/**)",
+      "Read(~/.claude/**)",
+      "Read(~/.config/**)",
+      "Read(~/.aws/**)",
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Read(**/secrets.local.env)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)",
+      "Read(**/id_*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {"type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/../bash_guard.py\""}
+        ]
+      }
+    ]
+  }
+}
