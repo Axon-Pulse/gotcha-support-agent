@@ -195,6 +195,7 @@ work" branches are only in the file.
 | `node-died-no-message` | "one sensor just stopped", "died overnight" | `[node-died-no-message]`; node absent from launcher's children; OOM kills |
 | `two-launcher-sessions` | "node flapping", "duplicate detections" | `system_launcher processes: 2+`; same node twice with very different uptimes |
 | `radar-connected-but-no-detections` | "no targets", "nothing detected in a flight test" | sensor IPs `no route`, neigh `FAILED`/`none`, or routed via tailscale0; config has no/wrong radars |
+| `radar-transmitter-off` | "radar connected, cable fine, still no detections", "the radar was reconnected and nothing changed" | node status line `CONNECTED ... det 0.0/s ... radar=stopped`; `[radar-transmitter-off]` signature |
 | `asu-backend-never-reachable` | "acoustic panel all zeros", "page contradicts launcher" | dumbo container absent/exited (137 = OOM); `asu api` 000; nothing on :8000 |
 | `camera-offline-onvif` | "camera offline", "can't move the camera" | `[camera-offline-onvif]`; no `python_optic_ptz` node in config means they mean another device |
 | `no-video-in-ui` | "camera moves but black video" | `[no-video-in-ui]`; `ffmpeg MISSING` in a container |
@@ -256,6 +257,15 @@ the reply, look up in the source:
   (`scripts/code.sh grep <ver> 'reconnect|retry' src`). If it does, "wait" or "fix the cable"
   is the answer, not a restart.
 - **what is the smallest restart?** One node, or the container. Say which and why.
+- **who can change it, from the product?** Once you know what a state means, look for the control
+  that changes it *before* you send anyone to a vendor interface or a device's own page. The C2
+  GUI is the operator's control surface (radar transmitter start/stop, node restart, platform
+  repositioning). Search for it with the *domain word from the code you just read*, not the
+  operator's word: the radar code says "transmitter" / `tx`, and nothing in it says "start
+  radar". Search the whole repo, since the GUI is under `GUItcha30/`, not `src/`
+  (`scripts/code.sh grep <ver> 'transmitter|tx_enabled' GUItcha30 src/nodes`). Give the
+  operator the exact place to click, and never say "I have no command for this" before you have
+  searched the GUI.
 - **what does the config key really mean?** The schema (`schemas/nodes/<type>.schema.json`)
   gives each key's help text and default, but its wording can mislead: it calls the
   `magos_radar` `ip` the radar's address, and it is the APU's. Read the code that uses the value

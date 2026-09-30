@@ -16,3 +16,4 @@ container-up-but-nonfunctional|503 Service Unavailable
 env-missing-vars-after-upgrade|machine not initialized
 asu-backend-never-reachable|asu_connected["': =]+false|localhost:8000.*(refused|failed|error)
 end-on-first-complete-resets-system|First node completed:|Platform .* repositioned
+radar-transmitter-off|radar=stopped
