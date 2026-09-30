@@ -50,7 +50,7 @@ So the question is never "did it start". It is "can it reach the sensor".
 First, what should this site have?
 
 ```
-./build/bin/system_launcher -c configs/<site>/full_system.yaml --print-config
+docker compose exec -T gotcha30 ./build/bin/system_launcher -c configs/<site>/full_system.yaml --print-config
 ```
 
 Then, can the machine reach each of those addresses? Radars are conventionally on

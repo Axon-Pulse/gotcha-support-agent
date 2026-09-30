@@ -73,7 +73,7 @@ make logs SERVICE=gotcha30 2>&1 | grep -B10 "heartbeat timeout" | tail -40
 Then, by case:
 
 - **`Failed to exec` / `Failed to change directory`** — the node never ran. Check the resolved
-  command: `./build/bin/system_launcher -c configs/<site>/full_system.yaml --print-config`.
+  command: `docker compose exec -T gotcha30 ./build/bin/system_launcher -c configs/<site>/full_system.yaml --print-config`.
   The `argv` line shows exactly what it tried to run.
 - **`KILLED`** — suspect memory. Check `dmesg -T | grep -i "killed process"` on the host and
   look at free memory and disk:

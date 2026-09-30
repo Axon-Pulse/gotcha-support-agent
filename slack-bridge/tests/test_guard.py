@@ -105,6 +105,11 @@ def test_with_followups_the_read_only_path_is_open(followups, cmd):
     ("tailscale ssh axon-gotcha-3 'curl https://evil.example/x'", "leaves the machine"),
     ("tailscale ssh axon-gotcha-3 'docker exec gotcha30 sh -c reboot'", "shell in container"),
     ("tailscale ssh axon-gotcha-3 'docker exec -u root gotcha30 ls'", "exec flags"),
+    ("tailscale ssh axon-gotcha-3 'docker compose exec -T gotcha30 ls'", "compose exec"),
+    ("tailscale ssh axon-gotcha-3 'docker compose exec -T gotcha30 ./build/bin/system_launcher "
+     "-c configs/x.yaml --print-config'", "compose exec"),
+    ("tailscale ssh axon-gotcha-3 'make shell SERVICE=gotcha30'", "make shell"),
+    ("tailscale ssh axon-gotcha-3 'docker exec gotcha30 rm /app/configs/x.yaml'", "rm in container"),
     ("tailscale ssh axon-gotcha-3", "interactive shell"),
     # secrets
     ("tailscale ssh axon-gotcha-3 'cat /home/gotcha/deploy/.env'", ".env"),
@@ -167,3 +172,26 @@ def test_a_malformed_event_fails_closed():
 
 def test_other_tools_are_left_to_the_permission_rules():
     assert run_hook({"tool_name": "Read", "tool_input": {"file_path": "x"}}).returncode == 0
+
+
+def test_the_triage_payload_only_reads():
+    """triage_remote.sh runs on the customer's machine; it must hold no mutating command."""
+    import re
+    script = (SCRIPTS / "triage_remote.sh").read_text()
+    code = "\n".join(l for l in script.splitlines() if not l.lstrip().startswith("#"))
+    code = code.replace("<redacted>", "")     # redact()'s replacement text, not a redirect
+    banned = [
+        r"\b(rm|mv|cp|tee|touch|mkdir|chmod|chown|kill|pkill|reboot|shutdown|systemctl\s+(start|stop|restart)"
+        r"|make\s+(up|down|restart|pull|rollback|init))\b",
+        r"\bsed\s+(-[a-zA-Z]*i|--in-place)",
+        r"\bdocker\s+(restart|stop|rm|start|kill|pull|run|compose)\b",
+        r"\bD\s+(restart|stop|rm|start|kill|pull|run)\b",
+        r"\bip\s+(route|addr|link|neigh)\s+(add|del|delete|flush|change|replace)",
+    ]
+    # A redirect to a file: `>` outside any quotes (echo "a -> b" is text), not to /dev/null or an fd.
+    bare = re.sub(r"\"[^\"]*\"|'[^']*'", '""', code)
+    m = re.search(r"(?<![-=<])>>?\s*(?!/dev/null|&)[^\s|&;)]", bare)
+    assert not m, f"triage_remote.sh writes to a file: {bare[max(0, m.start() - 40):m.end() + 20]!r}"
+    for pat in banned:
+        m = re.search(pat, code)
+        assert not m, f"triage_remote.sh contains {m.group(0)!r}"

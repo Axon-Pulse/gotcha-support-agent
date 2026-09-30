@@ -178,6 +178,18 @@ if [ -n "$GDIR" ] && [ -n "$CFG" ]; then
 fi
 printf '%s\n' "$PC" | grep -q '32\.7767' && echo "NOTE: Dallas coordinates (32.7767) in resolved config"
 
+# --- sensor addresses, straight from the site's own config ---------------------------------
+# The only trustworthy source for a sensor's address. The config lives on the host (bind-mounted
+# into the core container at /app/configs); nothing here comes from the KB or the defaults.
+sec "site config: sensor addresses (node, type, address; from $([ -n "$CFG" ] && echo "$CFG" || echo '?'))"
+SITECFG="$GDIR/${CFG#/app/}"   # the launcher may have been given the in-container path
+if [ -n "$GDIR" ] && [ -f "$SITECFG" ]; then
+  echo "file: $SITECFG"
+  grep -nE '^  /|^    [A-Za-z0-9_-]+:[[:space:]]*$|type:|\b(ip|base_url|host|address)\b *:' "$SITECFG" | redact | clip 160
+else
+  echo "site config not readable on the host ($SITECFG); the resolved config above is what the launcher loaded"
+fi
+
 # --- sensor paths ---------------------------------------------------------------------------
 sec "sensor paths (route taken, neighbour cache$([ "$PING_SENSORS" = 1 ] && echo ', ping'))"
 IPS=$(printf '%s\n' "$PC" | grep -oE '\b(10\.[0-9]+|172\.(1[6-9]|2[0-9]|3[01])|192\.168)\.[0-9]+\.[0-9]+\b' | sort -uV | head -40)

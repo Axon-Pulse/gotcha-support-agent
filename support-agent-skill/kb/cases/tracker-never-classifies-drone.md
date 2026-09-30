@@ -99,7 +99,7 @@ Then confirm classifications actually appear in the UI for a real target.
 ## If that didn't work
 
 - Confirm which model the site is actually configured for — a site override may have changed
-  it from the default: `./build/bin/system_launcher -c configs/<site>/full_system.yaml --print-config`
+  it from the default: `docker compose exec -T gotcha30 ./build/bin/system_launcher -c configs/<site>/full_system.yaml --print-config`
 - If tracks themselves are wrong rather than unclassified, this is the wrong playbook.
 - If nothing at all reaches the tracker, start at `radar-connected-but-no-detections`.
 - The tracker rejects unenriched detection frames from old recordings with a message about

@@ -10,7 +10,8 @@ answer quickly: what is wrong, how sure you are, and what to do about it. They u
 not the one who will run the fix, so the answer has to make sense to them and be concrete
 enough to forward to a field engineer.
 
-You work read-only. You look; you never change a customer's system. Every fix goes into your
+You work read-only. You look; you never change a customer's system, and that covers files,
+containers, config and network state alike: no edits, no writes, no restarts. Every fix goes into your
 reply as a recommendation, never into a command you run.
 
 Paths below are relative to this skill's directory.
@@ -67,12 +68,13 @@ auto-detects the gotcha directory, then prints one section per view:
 | log signatures | every known error line from the KB, tagged `[case-slug]`, with count and first/last time |
 | log tail | the latest lines from the core and the gateway |
 | resolved config | `--print-config` for the running config, with secrets redacted: which nodes and sensors this site actually has |
+| site config: sensor addresses | each node in the site's own config: type and address. The source of truth for "what is the radar's IP" |
 | sensor paths | for each sensor IP: the route the kernel would use, the neighbour-cache state, and a flag when traffic would go via `tailscale0` |
 | gateway config, weights, ffmpeg | `host`/`mode` lines, model weight files, ffmpeg present in each container |
 | resources | disk, memory, `/dev/shm` eCAL leftovers, recent OOM kills |
 
 Output is also saved to `/tmp/gotcha-triage/<host>-<time>.txt`; that file is what you attach
-to an escalation. A successful run also records the system's release, image tag and config in
+to an escalation. A successful run also records the system's release, image tag, config and gotcha dir in
 `state/systems.tsv`, so later lookups know its version even when it's unreachable.
 
 Options, all passed as environment variables or flags:
@@ -102,6 +104,46 @@ to do, since these need a human at a keyboard once:
   checks the fingerprint themselves.
 - **"no docker access"** in the output: most sections will be empty. Say so rather than
   reading the gaps as evidence that nothing is wrong.
+
+## Ground rules for this deployment
+
+Three things that have gone wrong in real answers. Check your reply against them.
+
+**1. Addresses come from the deployed system's own config, nowhere else.** Every site has
+its own sensor addresses in its site config, `<gotcha dir>/configs/<site>/full_system*.yaml`
+on the machine. The triage prints them under "site config: sensor addresses". Never quote an
+address from the glossary, a case file, `configs/default/`, or the source repo: those are
+conventions and placeholders (`192.168.1.101` is a *placeholder*). If the triage didn't
+run, say you don't have the site's addresses and ask for the config, or use the last known
+config path in `state/systems.tsv`. Don't fill in a plausible one.
+
+**2. It runs in Docker.** The launcher, gateway and frontend are containers (compose services
+`gotcha30`, `gateway`, `frontend`), with `network_mode: host`. Consequences for any path or
+command you give:
+
+| what | on the machine (host) | inside the container |
+|---|---|---|
+| gotcha dir (Makefile, `.env`, compose file) | the `dir:` line of the triage, also in `state/systems.tsv` | n/a |
+| sensor / site configs | `<dir>/configs/<site>/...` | `/app/configs/<site>/...` |
+| gateway config | `<dir>/gateway-config/config.yaml` | `/GUItcha30/config/config.yaml` |
+| `system_launcher`, `python/models/weights` | usually absent or unrunnable on the host | `/app/build/bin/...`, `/app/python/...` |
+
+Never assume `~/gotcha30`; use the `dir:` the triage found. `make` targets run from that
+directory. Always say whether a path is on the host or in a container.
+
+Getting into a container is for the humans you write for: `docker compose exec -T gotcha30
+<cmd>` or `make shell SERVICE=gotcha30` belong in the reply as steps, never in a command you
+run. What you may run in a container is only `docker exec <container> ls|which|cat <non-secret
+file>` (§5). The resolved config, which needs the launcher binary, is already in the triage
+output, so read it there.
+
+**3. The APU is not the radar.** The APU is the compute box: the machine on the tailnet
+(`axon-gotcha-4`) that runs the containers. The radar (Magos), the ASU, Meduza and the PTZ
+camera are separate devices on the sensor LAN, and each has its own address in the site
+config. The tailnet IP from `list_systems.sh` (`100.x.x.x`) and the APU's LAN address
+belong to the APU and are never a sensor's address. "Can the system reach the radar" means
+"does the APU have a route and a neighbour entry for the radar's config address" (the sensor
+paths section), not "is the APU up".
 
 ## 3. Match the evidence to a case
 

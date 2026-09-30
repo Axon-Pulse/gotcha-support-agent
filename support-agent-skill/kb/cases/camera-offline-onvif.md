@@ -53,7 +53,7 @@ never delivers anything. There is no startup connectivity gate anywhere in this 
 has been spent on a camera a site does not have:
 
 ```
-./build/bin/system_launcher -c configs/<site>/full_system.yaml --print-config
+docker compose exec -T gotcha30 ./build/bin/system_launcher -c configs/<site>/full_system.yaml --print-config
 ```
 
 Look for a node of type `python_optic_ptz`. If there isn't one, stop — the customer is
@@ -70,7 +70,7 @@ make logs SERVICE=gotcha30 2>&1 | grep -i "optic_ptz\|onvif"
 Get the camera's address from the resolved config, then work outward from the network:
 
 ```
-./build/bin/system_launcher -c configs/<site>/full_system.yaml --print-config | grep -A3 optic_ptz
+docker compose exec -T gotcha30 ./build/bin/system_launcher -c configs/<site>/full_system.yaml --print-config | grep -A3 optic_ptz
 ```
 
 With the IP in hand, from the gotcha machine:

@@ -81,13 +81,15 @@ fi
 echo "saved: $OUT"
 
 # Remember what this system runs, so code lookups and answers still know its version when
-# the machine is unreachable later. One row per host: host, when, release, image tag, config.
+# the machine is unreachable later. One row per host: host, when, release, image tag, config,
+# gotcha dir (absolute, on the machine; the config path above is relative to it).
 if grep -q '^=== end of triage ===' "$OUT"; then
   STATE="$HERE/../state/systems.tsv"; mkdir -p "$(dirname "$STATE")"
   rel=$(grep -m1 '^release: ' "$OUT" | cut -d' ' -f2)
   tag=$(grep -m1 '^IMAGE_TAG=' "$OUT" | cut -d= -f2)
   cfg=$(grep -m1 '^config: ' "$OUT" | cut -d' ' -f2)
+  gdir=$(grep -m1 '^dir: ' "$OUT" | cut -d' ' -f2-)
   { [ -f "$STATE" ] && awk -F'\t' -v h="$HOST" '$1!=h' "$STATE"
-    printf '%s\t%s\t%s\t%s\t%s\n' "$HOST" "$(date -u +%FT%TZ)" "${rel:-unknown}" "${tag:-unknown}" "${cfg:-UNKNOWN}"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$HOST" "$(date -u +%FT%TZ)" "${rel:-unknown}" "${tag:-unknown}" "${cfg:-UNKNOWN}" "${gdir:-unknown}"
   } > "$STATE.tmp" && mv "$STATE.tmp" "$STATE"
 fi

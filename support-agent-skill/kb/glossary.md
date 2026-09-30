@@ -41,13 +41,22 @@ version mismatches in this one component.
 
 ## Sensors
 
-**Magos** — the radar. A site typically has several, each covering a sector. Conventionally on
-the `192.168.1.x` subnet.
+**Addresses.** The subnets below are only the reference convention. A real site's addresses
+are whatever its own site config says (`configs/<site>/full_system*.yaml` on the machine).
+Never quote one from here.
 
-**ASU** — the acoustic sensor unit; detects drones by sound. Conventionally `192.168.2.x`.
+**APU** — the compute box a site runs the software on: the tailnet machine (`axon-gotcha-4`).
+It is **not a sensor**. Its tailnet IP (`100.x`) and LAN address are the APU's, never the
+radar's.
 
-**Meduza** — an electro-optical sensor that detects and reports on its own. Conventionally
-`192.168.3.x`. **Not the same thing as the PTZ camera** — this confusion is common and costs
+**Magos** — the radar, a separate device on the sensor LAN. A site typically has several, each
+covering a sector. Reference convention: the `192.168.1.x` subnet.
+
+**ASU** — the acoustic sensor unit; detects drones by sound. Reference convention: `192.168.2.x`.
+(Its backend is the local "Dumbo" container; see `system-model.md`.)
+
+**Meduza** — an electro-optical sensor that detects and reports on its own. Reference
+convention: `192.168.3.x`. **Not the same thing as the PTZ camera** — this confusion is common and costs
 real time, so establish which one the customer means early.
 
 **PTZ camera** — a pan/tilt/zoom camera the system can point at a target, spoken to over

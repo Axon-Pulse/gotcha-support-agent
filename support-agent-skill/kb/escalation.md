@@ -51,7 +51,7 @@ make status
 make logs SERVICE=gotcha30 2>&1 | tail -200
 make logs SERVICE=gateway  2>&1 | tail -200
 grep IMAGE_TAG .env
-./build/bin/system_launcher -c configs/<site>/full_system.yaml --print-config
+docker compose exec -T gotcha30 ./build/bin/system_launcher -c configs/<site>/full_system.yaml --print-config
 ```
 
 ## Never attach

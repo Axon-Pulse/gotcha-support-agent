@@ -62,7 +62,7 @@ but it is a `WARN` in a wall of startup output, so in practice nobody sees it.
 Ask the launcher what it actually resolved, without starting anything:
 
 ```
-./build/bin/system_launcher --config configs/<site>/full_system.yaml --print-config
+docker compose exec -T gotcha30 ./build/bin/system_launcher --config configs/<site>/full_system.yaml --print-config
 ```
 
 This prints every node it would run, with its type, whether it is enabled, the config file it
@@ -73,7 +73,7 @@ thinks they configured.** The disagreement is the answer.
 Then look for the warning, which goes to stderr:
 
 ```
-./build/bin/system_launcher --config configs/<site>/full_system.yaml --print-config 2>&1 >/dev/null
+docker compose exec -T gotcha30 ./build/bin/system_launcher --config configs/<site>/full_system.yaml --print-config 2>&1 >/dev/null
 ```
 
 ## Fix
@@ -91,7 +91,7 @@ Those are the real key shapes. Your override file must use the same ones.
 Then confirm before restarting anything:
 
 ```
-./build/bin/system_launcher --config configs/<site>/full_system.yaml --print-config
+docker compose exec -T gotcha30 ./build/bin/system_launcher --config configs/<site>/full_system.yaml --print-config
 ```
 
 ## Verify
@@ -101,7 +101,7 @@ warning is gone. Nodes are printed sorted by path specifically so you can diff t
 two revisions line by line:
 
 ```
-./build/bin/system_launcher -c configs/<site>/full_system.yaml --print-config > /tmp/after.txt
+docker compose exec -T gotcha30 ./build/bin/system_launcher -c configs/<site>/full_system.yaml --print-config > /tmp/after.txt
 diff /tmp/before.txt /tmp/after.txt
 ```
 

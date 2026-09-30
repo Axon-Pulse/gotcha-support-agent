@@ -71,7 +71,7 @@ tag is a build problem, not a site problem. Check what the machine is running:
 
 ```
 grep IMAGE_TAG .env
-./build/bin/system_launcher --version
+docker compose exec -T gotcha30 ./build/bin/system_launcher --version
 ```
 
 Then move it to an image where the wheel and the code agree:
