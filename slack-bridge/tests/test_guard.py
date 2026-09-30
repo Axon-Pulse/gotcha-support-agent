@@ -124,7 +124,6 @@ def test_with_followups_the_read_only_path_is_open(followups, cmd):
     ("bash -c 'tailscale ssh h reboot'", "shell"),
     (f"{SCRIPTS}/run_triage.sh axon-gotcha-3 | tee /tmp/x", "local pipe"),
     (f"{SCRIPTS}/run_triage.sh axon-gotcha-3 && reboot", "local chaining"),
-    (f"{SCRIPTS}/run_triage.sh axon-gotcha-3 --ping", "sensor traffic needs a person"),
     (f"{SCRIPTS}/code.sh clone", "setup step"),
     (f"{SCRIPTS}/triage_remote.sh", "not a bot entry point"),
     ("PATH=/tmp/evil " + f"{SCRIPTS}/run_triage.sh axon-gotcha-3", "env"),
@@ -195,3 +194,13 @@ def test_the_triage_payload_only_reads():
     for pat in banned:
         m = re.search(pat, code)
         assert not m, f"triage_remote.sh contains {m.group(0)!r}"
+
+
+def test_ping_is_on_by_default_and_can_be_switched_off(monkeypatch):
+    call = f"{SCRIPTS}/run_triage.sh axon-gotcha-3 --ping"
+    assert G.ALLOW_PING, "BRIDGE_ALLOW_PING defaults to on"
+    assert allowed(call)
+    monkeypatch.setattr(G, "ALLOW_PING", False)
+    with pytest.raises(G.Denied, match="switched off"):
+        G.check(call, WS)
+    assert allowed(f"{SCRIPTS}/run_triage.sh axon-gotcha-3")      # the plain triage is unaffected

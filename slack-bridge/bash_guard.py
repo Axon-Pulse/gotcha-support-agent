@@ -33,8 +33,10 @@ SCRIPTS_DIR = SKILL_DIR / "scripts"
 
 # Environment assignments a script invocation may be prefixed with (see run_triage.sh).
 ENV_OK = {"GOTCHA_SSH_USER", "GOTCHA_CONFIG", "GOTCHA_SSH", "GOTCHA_TRIAGE_TIMEOUT"}
-# `--ping` puts traffic on the customer's sensor subnets; the skill wants a person's OK.
-ALLOW_PING = os.environ.get("BRIDGE_ALLOW_PING") == "1"
+# `--ping` sends two packets to each sensor address on the customer's subnets. On by default,
+# because "the APU answers but the radar doesn't" can only be confirmed with a ping;
+# BRIDGE_ALLOW_PING=0 switches it off.
+ALLOW_PING = os.environ.get("BRIDGE_ALLOW_PING", "1") == "1"
 # STRICT BY DEFAULT: the bot runs the skill's scripts and nothing it composed itself.
 # With BRIDGE_FOLLOWUPS=1 it may also run its own `tailscale ssh <host> '<cmd>'`
 # follow-ups (SKILL.md §5), each one vetted by check_remote() below.
@@ -251,8 +253,8 @@ def check(command: str, cwd: str) -> None:
     script = _script(tok[0], cwd)
     if script == "run_triage.sh":
         if "--ping" in tok[2:] and not ALLOW_PING:
-            raise Denied("--ping puts traffic on the customer's sensor subnets; ask a "
-                         "person to run it, or answer from the passive route checks")
+            raise Denied("--ping is switched off (BRIDGE_ALLOW_PING=0); answer from the passive "
+                         "route checks and name the ping as the step that would confirm it")
         if len(tok) < 2 or len(tok) > 3:
             raise Denied("usage: run_triage.sh <tailnet-host> [--ping]")
         return

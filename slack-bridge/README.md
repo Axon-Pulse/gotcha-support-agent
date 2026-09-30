@@ -146,7 +146,7 @@ WantedBy=multi-user.target
 | `BRIDGE_TIMEOUT_S` | `300` | One answer's wall-clock cap; the ssh sessions die with it. |
 | `BRIDGE_MAX_CONCURRENT` | `2` | Questions answered at once. |
 | `BRIDGE_FOLLOWUPS` | `0` (strict) | `1` also lets the bot run its own read-only follow-up commands on a site. See [Strict mode](#strict-mode). |
-| `BRIDGE_ALLOW_PING` | `0` | `1` lets the triage ping sensors (traffic on customer subnets). |
+| `BRIDGE_ALLOW_PING` | `1` | The triage may ping sensors (two packets per address, on the customer's subnets). `0` switches it off. |
 
 ### Strict mode
 
@@ -181,8 +181,8 @@ to read-only users, before customer access.
      `grep`, `ls`, `ss`, `ip route get`, local `curl` GETs, `--print-config`, and similar.
 
    Denied: restarts, `make`, `sudo` (except the triage's `sudo -n docker`), `;` `&&` `>`
-   `$(…)`, printing `.env` or site configs (camera passwords), tunnels, `--ping` unless
-   enabled, and anything it can't parse. A crash in the guard is a denial, because
+   `$(…)`, printing `.env` or site configs (camera passwords), tunnels, `--ping` when switched off
+   (`BRIDGE_ALLOW_PING=0`), and anything it can't parse. A crash in the guard is a denial, because
    Claude Code runs the command when a hook fails any other way.
 3. **The remote account** is read-only by its own permissions, once the logins are
    switched (setup step 2).

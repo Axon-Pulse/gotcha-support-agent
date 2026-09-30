@@ -69,7 +69,7 @@ auto-detects the gotcha directory, then prints one section per view:
 | log tail | the latest lines from the core and the gateway |
 | resolved config | `--print-config` for the running config, with secrets redacted: which nodes and sensors this site actually has |
 | site config: sensor addresses | each node in the site's own config: type and address. The source of truth for "what is the radar's IP" |
-| sensor paths | for each sensor IP: the route the kernel would use, the neighbour-cache state, and a flag when traffic would go via `tailscale0` |
+| sensor paths | for each sensor IP: the route the kernel would use, the neighbour-cache state, and a flag when traffic would go via `tailscale0`. Magos addresses are labelled APU, and the radar's derived address (APU `.6x` -> `.5x`) gets its own line |
 | gateway config, weights, ffmpeg | `host`/`mode` lines, model weight files, ffmpeg present in each container |
 | resources | disk, memory, `/dev/shm` eCAL leftovers, recent OOM kills |
 
@@ -82,9 +82,14 @@ Options, all passed as environment variables or flags:
 - `GOTCHA_SSH_USER=<user>` if the default login is refused.
 - `GOTCHA_CONFIG=configs/<...>` when no launcher is running and the output says it can't tell
   which config the site uses. Pick the one matching the system name.
-- `--ping` also pings every sensor. That puts traffic on the customer's sensor subnets, so
-  use it only after the PM has said that's OK, and only when reachability is the open question.
-  The route and neighbour-cache columns are passive and usually answer it without pinging.
+- `--ping` also pings every address in the site config and each Magos radar's derived address
+  (two packets each, from the gotcha machine). It puts traffic on the sensor subnets, so use it
+  only when reachability is the open question. That is the case when the APU answers and the
+  radar shows no route or neighbour entry, or when nothing on the sensor LAN answers passively.
+  The route and neighbour columns are passive and usually settle the rest without it. In the
+  Slack bot, pings are on by default (`BRIDGE_ALLOW_PING=0` turns them off), so run it without asking the PM. If the
+  guard blocks `--ping`, say the ping is switched off, answer from the passive checks, and name
+  the ping as the step that would confirm it.
 
 **How it connects.** Only some machines run Tailscale SSH; `list_systems.sh` shows which
 under `via`. The script uses `tailscale ssh` where it's available. Everywhere else it uses
@@ -137,13 +142,40 @@ run. What you may run in a container is only `docker exec <container> ls|which|c
 file>` (§5). The resolved config, which needs the launcher binary, is already in the triage
 output, so read it there.
 
-**3. The APU is not the radar.** The APU is the compute box: the machine on the tailnet
-(`axon-gotcha-4`) that runs the containers. The radar (Magos), the ASU, Meduza and the PTZ
-camera are separate devices on the sensor LAN, and each has its own address in the site
-config. The tailnet IP from `list_systems.sh` (`100.x.x.x`) and the APU's LAN address
-belong to the APU and are never a sensor's address. "Can the system reach the radar" means
-"does the APU have a route and a neighbour entry for the radar's config address" (the sensor
-paths section), not "is the APU up".
+**3. The radar's APU is not the radar.** A Magos radar is two devices on the sensor LAN: the
+**APU** (its processing unit) and the **radar** itself. They share an address except for the
+last number: **APU `.6x`, radar `.5x`** (APU `192.168.44.60` means radar `192.168.44.50`).
+
+The `magos_radar` node's `ip` in the site config is the **APU**. It's what the node connects
+to (`ws://<ip>/radar/v1/detections`, `magos.cpp:136`), even though the schema help text calls
+it "IP address of the radar". The radar's own address is **not in the config**; you derive it
+from the APU's, and the triage's sensor paths section does that for you, labelled
+`magos RADAR (derived ...)`. So:
+
+- call the config `ip` "the APU" and the `.5x` one "the radar". Never call the config `ip`
+  "the radar's IP", and never say the radar answers because the APU does.
+- **APU answers, radar doesn't: the radar is probably disconnected** (power or cable at the
+  radar, or the APU-to-radar link). That's the usual reason for a live system with no
+  detections. The APU being up is the reason it looks fine.
+- The radar's route and neighbour entry are passive and can be blank even when it's fine,
+  because this machine talks to the APU, not the radar. So a blank neighbour entry is a lead,
+  not a finding. Only `--ping` (with the PM's OK, §2) tests it: `ping DOWN` for the radar
+  with `ping OK` for the APU is what "probably disconnected" rests on. Say which of the two
+  you have.
+- If the APU doesn't end in `.6x`, the triage says so and can't derive the radar; ask.
+- Once the radar is reconnected, **no restart is needed**. The node reconnects on its own.
+
+The gotcha machine itself (the tailnet host, `axon-gotcha-4`) is a third thing: its tailnet
+IP (`100.x`) and its own address on the sensor LAN (e.g. `192.168.44.1`) are neither the
+APU's nor the radar's.
+
+**4. Restart the smallest thing, and usually nothing.** Sensor nodes reconnect on their own, so
+a fix that restores a cable, power or a route needs no restart. If a restart is needed, it is
+the one node (C2 UI Node Health window, or `keyboard_node` `r`), never the whole system by
+default. `make restart SERVICE=gotcha30` restarts every node, and is for a site-config edit or
+after a single-node restart didn't help. Before recommending any node restart, check
+`end_on_first_complete` in the site config: if it is `true`, one node restart resets
+everything (`end-on-first-complete-resets-system`).
 
 ## 3. Match the evidence to a case
 
@@ -213,6 +245,21 @@ scripts/code.sh log  <ver> <path>                   # what changed there recentl
   machine may have local edits), and the code that reads it.
 - In the reply, cite what you read as `file:line`. It lets an engineer check your reasoning
   in seconds.
+
+**Check the code before you recommend a fix, not only before you explain a symptom.** A case
+tells you what worked once; it can be broader than needed or out of date. One real miss: a
+case said "restart the core" after a radar fault, but the Magos node reconnects on its own
+forever, and a single node can be restarted without touching the rest. Before you put a fix in
+the reply, look up in the source:
+
+- **does it recover by itself?** Search for `reconnect` / `retry` in the sensor's code
+  (`scripts/code.sh grep <ver> 'reconnect|retry' src`). If it does, "wait" or "fix the cable"
+  is the answer, not a restart.
+- **what is the smallest restart?** One node, or the container. Say which and why.
+- **what does the config key really mean?** The schema (`schemas/nodes/<type>.schema.json`)
+  gives each key's help text and default, but its wording can mislead: it calls the
+  `magos_radar` `ip` the radar's address, and it is the APU's. Read the code that uses the value
+  (`scripts/code.sh grep <ver> 'ip_address|ipAddress' src/nodes src/radar`).
 
 Reading the source is for understanding. It doesn't license a source edit as the fix. If
 the only fix is a code change, that's an escalation (see the end).

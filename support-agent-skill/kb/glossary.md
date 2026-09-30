@@ -45,9 +45,13 @@ version mismatches in this one component.
 are whatever its own site config says (`configs/<site>/full_system*.yaml` on the machine).
 Never quote one from here.
 
-**APU** — the compute box a site runs the software on: the tailnet machine (`axon-gotcha-4`).
-It is **not a sensor**. Its tailnet IP (`100.x`) and LAN address are the APU's, never the
-radar's.
+**APU** — the radar's processing unit, a separate box from the radar itself. It's what the
+gotcha software connects to: the `ip` in a `magos_radar` node's site config is the APU's. The
+**radar** is a different device with the same address except the last number: APU `.6x`,
+radar `.5x` (APU `192.168.44.60`, radar `192.168.44.50`). The radar's address is derived, not
+in the config. An APU that answers with a radar that doesn't usually means the radar is
+disconnected. Neither is the gotcha machine (`axon-gotcha-N`, the tailnet host that runs the
+containers), and neither is its `100.x` tailnet IP.
 
 **Magos** — the radar, a separate device on the sensor LAN. A site typically has several, each
 covering a sector. Reference convention: the `192.168.1.x` subnet.

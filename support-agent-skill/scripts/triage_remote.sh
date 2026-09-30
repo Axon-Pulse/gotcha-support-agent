@@ -189,18 +189,38 @@ if [ -n "$GDIR" ] && [ -f "$SITECFG" ]; then
 else
   echo "site config not readable on the host ($SITECFG); the resolved config above is what the launcher loaded"
 fi
+# A magos_radar `ip` is the radar's APU, not the radar. The radar itself is not in the config: it
+# sits at the APU's address with .6x -> .5x (e.g. APU .60, radar .50), checked in "sensor paths".
+APUS=""
+[ -f "$SITECFG" ] && APUS=$(awk '/type:/{m=($0 ~ /magos_radar/)} m && match($0,/ip:[[:space:]]*"?[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/){s=substr($0,RSTART,RLENGTH); sub(/ip:[[:space:]]*"?/,"",s); print s; m=0}' "$SITECFG" | sort -uV)
+[ -n "$APUS" ] && echo "NOTE: magos_radar ip = the radar's APU ($(echo $APUS)), not the radar itself; the radar's own address is not in the config (see sensor paths)"
 
 # --- sensor paths ---------------------------------------------------------------------------
 sec "sensor paths (route taken, neighbour cache$([ "$PING_SENSORS" = 1 ] && echo ', ping'))"
 IPS=$(printf '%s\n' "$PC" | grep -oE '\b(10\.[0-9]+|172\.(1[6-9]|2[0-9]|3[01])|192\.168)\.[0-9]+\.[0-9]+\b' | sort -uV | head -40)
 [ -z "$IPS" ] && echo "no sensor addresses found in resolved config"
-for ip in $IPS; do
+sensor_line() {  # $1 = ip, $2 = label
+  local ip=$1 r n p="" flag=""
   r=$(ip route get "$ip" 2>/dev/null | head -1 | grep -oE 'dev [^ ]+( src [^ ]+)?')
   n=$(ip neigh show "$ip" 2>/dev/null | awk '{print $NF}')
-  p=""
   [ "$PING_SENSORS" = 1 ] && { ping -c2 -W2 "$ip" >/dev/null 2>&1 && p="ping OK" || p="ping DOWN"; }
-  flag=""; [[ $r == *tailscale* ]] && flag="  <-- ROUTED VIA TAILNET (hijack)"
-  printf '%-16s %-32s neigh=%-10s %s%s\n' "$ip" "${r:-no route}" "${n:-none}" "$p" "$flag"
+  [[ $r == *tailscale* ]] && flag="  <-- ROUTED VIA TAILNET (hijack)"
+  printf '%-16s %-32s neigh=%-10s %s%s  %s\n' "$ip" "${r:-no route}" "${n:-none}" "$p" "$flag" "$2"
+}
+for ip in $IPS; do
+  lab=""; grep -qxF "$ip" <<<"$APUS" && lab="<- magos APU (config ip)"
+  sensor_line "$ip" "$lab"
+done
+# The radar behind each APU: same address, .6x -> .5x. Derived, not configured. An APU that
+# answers while this address does not is the signature of a radar that is not connected.
+for apu in $APUS; do
+  last=${apu##*.}
+  if [[ $last =~ ^6[0-9]$ ]]; then
+    radar="${apu%.*}.5${last:1}"
+    sensor_line "$radar" "<- magos RADAR (derived from APU $apu, not in config)"
+  else
+    echo "$apu: APU does not end in .6x, so the radar address can't be derived; ask which address the radar has"
+  fi
 done
 tsr=$(ip route show table 52 2>/dev/null | grep -vE '^(100\.|fd7a|throw|unreachable)' | head -10)
 [ -n "$tsr" ] && { echo "tailscale-installed routes to non-tailnet subnets:"; echo "$tsr" | sed 's/^/    /'; }
