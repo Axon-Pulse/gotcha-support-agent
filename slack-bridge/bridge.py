@@ -277,9 +277,16 @@ class Bridge:
         self.client.chat_update(channel=channel, ts=ack_ts, text=body)
 
 
+def make_app(token: str, **kw):
+    """The Bolt app. Signature verification is for Slack's HTTP mode: under Socket Mode
+    no request is signed (the xapp- token authenticates the connection), and Bolt 1.27
+    refuses to start without a signing secret unless the check is switched off."""
+    from slack_bolt import App
+    return App(token=token, request_verification_enabled=False, **kw)
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
-    from slack_bolt import App
     from slack_bolt.adapter.socket_mode import SocketModeHandler
 
     bot, app_token = os.environ.get("SLACK_BOT_TOKEN"), os.environ.get("SLACK_APP_TOKEN")
@@ -290,7 +297,7 @@ def main() -> None:
     if not (WORKSPACE / ".claude" / "skills" / "gotcha-support" / "SKILL.md").exists():
         raise SystemExit(f"the skill is not reachable from {WORKSPACE}/.claude/skills")
 
-    app = App(token=bot)
+    app = make_app(bot)
     bridge = Bridge(app.client)
 
     @app.event("app_mention")

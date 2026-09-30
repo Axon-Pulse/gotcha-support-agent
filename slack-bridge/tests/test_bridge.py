@@ -3,6 +3,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
 
@@ -78,6 +80,15 @@ def test_channel_and_dm_admission(monkeypatch):
     assert B.authorise("U1", "C_SUPPORT")[0]
     assert not B.authorise("U1", "C_OTHER")[0]
     assert not B.authorise("U1", "D123")[0]
+
+
+def test_the_socket_mode_app_starts_without_a_signing_secret(monkeypatch):
+    """Built with the real slack_bolt: this is the call that failed on first start."""
+    pytest.importorskip("slack_bolt")
+    monkeypatch.delenv("SLACK_SIGNING_SECRET", raising=False)
+    # token_verification_enabled=False: no auth.test call to Slack from a test.
+    app = B.make_app("xoxb-test", token_verification_enabled=False)
+    assert app is not None
 
 
 class FakeSlack:
