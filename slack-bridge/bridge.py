@@ -50,9 +50,9 @@ ALLOWED_USERS = _csv("SLACK_ALLOWED_USERS")      # empty = anyone in an allowed 
 ALLOW_DMS = os.environ.get("SLACK_ALLOW_DMS") == "1"
 
 CLAUDE = os.environ.get("CLAUDE_BIN", "claude")
-MODEL = os.environ.get("BRIDGE_MODEL", "")       # empty = Claude Code's default
+MODEL = os.environ.get("BRIDGE_MODEL", "claude-sonnet-5-5")       # empty = Claude Code's default
 EFFORT = os.environ.get("BRIDGE_EFFORT", "medium")
-TIMEOUT_S = int(os.environ.get("BRIDGE_TIMEOUT_S", "300"))
+TIMEOUT_S = int(os.environ.get("BRIDGE_TIMEOUT_S", "30"))
 MAX_CONCURRENT = int(os.environ.get("BRIDGE_MAX_CONCURRENT", "2"))
 # Read by bash_guard.py too, which inherits this environment through claude.
 FOLLOWUPS = os.environ.get("BRIDGE_FOLLOWUPS") == "1"
