@@ -63,3 +63,17 @@ nothing listening on port 8000 (`ss -ltn`).
 
 Start the container, then confirm `success_count` climbs. The container must be up before
 the system launches.
+
+Once the backend is up the node recovers, but its health can stay DEGRADED until the node is
+restarted: see `asu-degraded-after-backend-recovery`.
+
+## How a site starts it
+
+The KB and the source have no start command, and the backend is not part of the gotcha compose
+project, so a machine that has just rebooted may not bring it back. Ask whoever installed the
+site how it is started; sites seen so far:
+
+- `axon-gotcha-4`: `~/.local/share/dumbo/run.sh` (as reported by the PM, who used it to start
+  it on 2026-10-01; not checked on the machine). Images present there:
+  `dumbo-arm64:cuda`, `dumbo-tiles:israel-lebanon-latest`, `dumbo-dashboard:latest`. The
+  launcher points `asu_node` at `http://localhost:9000`.

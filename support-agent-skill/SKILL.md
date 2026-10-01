@@ -228,6 +228,7 @@ work" branches are only in the file.
 | `radar-connected-but-no-detections` | "no targets", "nothing detected in a flight test" | sensor IPs `no route`, neigh `FAILED`/`none`, or routed via tailscale0; config has no/wrong radars |
 | `radar-transmitter-off` | "radar connected, cable fine, still no detections", "the radar was reconnected and nothing changed" | node status line `CONNECTED ... det 0.0/s ... radar=stopped`; `[radar-transmitter-off]` signature |
 | `asu-backend-never-reachable` | "acoustic panel all zeros", "page contradicts launcher" | `acoustic backend:` line says not listening; `asu api` 000 on the configured URL; a stopped/exited container, if one exists (137 = OOM) |
+| `asu-degraded-after-backend-recovery` | "backend is back but acoustic still degraded", "degraded but detections flow" | `acoustic backend:` says it listens; old `asu-backend-never-reachable` lines but none since the backend started; acoustic degraded, not offline |
 | `camera-offline-onvif` | "camera offline", "can't move the camera" | `[camera-offline-onvif]`; no `python_optic_ptz` node in config means they mean another device |
 | `no-video-in-ui` | "camera moves but black video" | `[no-video-in-ui]`; `ffmpeg MISSING` in a container |
 | `tracker-never-classifies-drone` | "everything unknown", "no drone alerts" | `[tracker-never-classifies-drone]`, no `ok:classifier-loaded`; weights dir empty |
