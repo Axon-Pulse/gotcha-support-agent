@@ -4,7 +4,8 @@
 Interactive Claude Code asks a human before an unfamiliar command. The bot has no human
 to ask, so this file decides instead. It allows:
 
-  - the skill's own scripts: run_triage.sh, list_systems.sh, code.sh (not `clone`)
+  - the skill's own scripts: run_triage.sh, list_systems.sh, remote_logs.sh (one container's
+    `docker logs --tail`, redacted), code.sh (not `clone`)
   - `tailscale status|ping|ip|version`
   - only with BRIDGE_FOLLOWUPS=1 (off by default — "strict mode"):
     `tailscale ssh <host> '<cmd>'` / `ssh <host> '<cmd>'` where <cmd> is on the read-only
@@ -259,6 +260,20 @@ def check(command: str, cwd: str) -> None:
             raise Denied("usage: run_triage.sh <tailnet-host> [--ping]")
         return
     if script == "list_systems.sh":
+        return
+    if script == "remote_logs.sh":
+        # <host> <container> [lines] [--grep REGEX]; the script validates again and is the
+        # authority. Here: shape only, so nothing odd reaches it.
+        args = tok[1:]
+        if not 2 <= len(args) <= 5:
+            raise Denied("usage: remote_logs.sh <tailnet-host> <container> [lines] [--grep REGEX]")
+        if not all(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,100}", a) for a in args[:2]):
+            raise Denied("remote_logs.sh: host and container are plain names")
+        rest = args[2:]
+        if rest and rest[0].isdigit():
+            rest = rest[1:]
+        if rest and not (len(rest) == 2 and rest[0] == "--grep"):
+            raise Denied("remote_logs.sh: after the container only [lines] and [--grep REGEX]")
         return
     if script == "code.sh":
         if len(tok) < 2 or tok[1] not in ("resolve", "grep", "show", "log", "sync"):

@@ -103,14 +103,13 @@ for l in "${LAUNCHERS[@]}"; do
 done
 
 sec "listeners + http checks"
-ss -ltnH 2>/dev/null | awk '{print $4}' | grep -E ':(8080|5173|8000)$' | sort -u | sed 's/^/listening /' \
+ss -ltnH 2>/dev/null | awk '{print $4}' | grep -E ':(8080|5173)$' | sort -u | sed 's/^/listening /' \
   || echo "(ss unavailable)"
 LANIP=$(ip -4 -o addr show scope global 2>/dev/null | grep -vE 'tailscale|docker|br-|veth' | awk '{print $4}' | cut -d/ -f1 | head -1)
 code() { curl -s -o /dev/null -m 5 -w '%{http_code}' "$1" 2>/dev/null; }
 echo "gateway  127.0.0.1:8080/health -> $(code http://127.0.0.1:8080/health)"
 [ -n "$LANIP" ] && echo "gateway  $LANIP:8080/health -> $(code "http://$LANIP:8080/health")   (000 here but 200 on loopback = gateway-bound-to-loopback)"
 echo "frontend 127.0.0.1:5173/ -> $(code http://127.0.0.1:5173/)"
-echo "asu api  127.0.0.1:8000/ -> $(code http://127.0.0.1:8000/)"
 echo "gateway /health body: $(curl -s -m 5 http://127.0.0.1:8080/health 2>/dev/null | clip 600)"
 
 scan_logs() {  # $1 = container
@@ -211,6 +210,62 @@ fi
 APUS=""
 [ -f "$SITECFG" ] && APUS=$(awk '/type:/{m=($0 ~ /magos_radar/)} m && match($0,/ip:[[:space:]]*"?[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/){s=substr($0,RSTART,RLENGTH); sub(/ip:[[:space:]]*"?/,"",s); print s; m=0}' "$SITECFG" | sort -uV)
 [ -n "$APUS" ] && echo "NOTE: magos_radar ip = the radar's APU ($(echo $APUS)), not the radar itself; the radar's own address is not in the config (see sensor paths)"
+
+# --- the acoustic backend (ASU) -------------------------------------------------------------
+# asu_node is told where its backend is (`-u URL`); that URL, not a port from the KB, is what
+# must answer. A site can point it anywhere (localhost:9000, another host), so the check is
+# built from the running node, else from the site config, and only then falls back to :8000.
+sec "acoustic backend (ASU)"
+ASU_URLS=$(ps -eo args= | grep -E '[a]su_node' | grep -oE -- '(-u|--[a-z-]*url)[ =]https?://[^ ]+' \
+  | sed -E 's/^(-u|--[a-z-]+)[ =]//' | sort -u)
+ASU_SRC="the running asu_node"
+if [ -z "$ASU_URLS" ] && [ -f "$SITECFG" ]; then
+  ASU_URLS=$(awk 'tolower($0) ~ /type:/ {m=(tolower($0) ~ /asu|acoustic|dumbo/)} m && match($0,/https?:\/\/[^ "]+/){print substr($0,RSTART,RLENGTH)}' "$SITECFG" | sort -u)
+  [ -n "$ASU_URLS" ] && ASU_SRC="the site config"
+fi
+if [ -z "$ASU_URLS" ]; then
+  echo "no asu_node running and no ASU url in the site config (does this site have an acoustic sensor?); trying the default :8000"
+  CHECK_URLS=http://127.0.0.1:8000/
+else
+  echo "configured ASU url (from $ASU_SRC): $(echo $ASU_URLS)"
+  CHECK_URLS=$ASU_URLS
+fi
+ASU_LISTEN=""; ASU_REMOTE=""
+for u in $CHECK_URLS; do
+  hp=${u#*://}; hp=${hp%%/*}; host=${hp%%:*}; port=${hp##*:}; [ "$port" = "$hp" ] && port=80
+  echo "asu api  $u -> $(code "$u")   (from this machine)"
+  [ -n "$CORE" ] && echo "asu api  $u -> $(D exec "$CORE" sh -c 'curl -s -o /dev/null -m 3 -w "%{http_code}" "$1" 2>/dev/null || echo "no curl in the container"' _ "$u" 2>/dev/null)   (from inside $CORE; this is where asu_node runs)"
+  case $host in
+    localhost|127.*|::1)
+      l=$(ss -ltnH "sport = :$port" 2>/dev/null | awk '{print $4}' | paste -sd' ')
+      echo "listeners on :$port: ${l:-none}"
+      [ -n "$l" ] && ASU_LISTEN="$ASU_LISTEN $port" ;;
+    *)
+      ASU_REMOTE="$ASU_REMOTE $host"
+      echo "$host is not this machine, so the backend is not a container here; route: $(ip route get "$host" 2>/dev/null | head -1 | grep -oE 'dev [^ ]+( src [^ ]+)?')" ;;
+  esac
+done
+# What exists under an acoustic name, whether or not it runs. `docker ps -a` already shows
+# exited containers; images, compose files, services and processes tell "stopped" from "never here".
+ASU_PAT='dumbo|acoustic|(^|[^a-z])asu([^a-z]|$)'
+found=""
+c=$(D ps -a --format '{{.Names}} ({{.Status}})' 2>/dev/null | grep -iE "$ASU_PAT" | paste -sd';'); echo "containers named like it: ${c:-none}"; [ -n "$c" ] && found="$found container"
+i=$(D images --format '{{.Repository}}:{{.Tag}} (created {{.CreatedSince}})' 2>/dev/null | grep -iE "$ASU_PAT" | head -5 | paste -sd';'); echo "images named like it: ${i:-none}"; [ -n "$i" ] && found="$found image"
+f=$(timeout 4 find /home /opt -maxdepth 4 \( -name 'docker-compose*.y*ml' -o -name 'compose*.y*ml' \) -not -path '*/node_modules/*' 2>/dev/null \
+    | head -60 | xargs -r grep -lisE "$ASU_PAT" 2>/dev/null | head -5 | paste -sd';'); echo "compose files that mention it: ${f:-none}"; [ -n "$f" ] && found="$found compose-file"
+v=$(systemctl list-units --type=service --all --no-legend 2>/dev/null | grep -iE "$ASU_PAT" | awk '{print $1" "$3" "$4}' | head -5 | paste -sd';'); echo "systemd services named like it: ${v:-none}"; [ -n "$v" ] && found="$found service"
+p=$(ps -eo pid=,etimes=,args= | grep -iE "$ASU_PAT" | grep -vE 'grep|asu_node|triage_remote' | clip 160 | head -5 | paste -sd';'); echo "other processes named like it: ${p:-none}"; [ -n "$p" ] && found="$found process"
+if [ -n "$ASU_LISTEN" ]; then
+  echo "acoustic backend: SOMETHING LISTENS on the configured port$ASU_LISTEN. If the http code above is 000 it accepts connections but does not answer HTTP; if it differs between 'this machine' and 'inside the container', the container cannot reach it."
+elif [ -n "$ASU_REMOTE" ]; then
+  echo "acoustic backend: configured on another host ($ASU_REMOTE); look at that host and the route above, not at containers here."
+elif [ -n "$found" ]; then
+  echo "acoustic backend: NOT LISTENING, but it exists on this machine ($found): stopped or not started. Look at its status above."
+else
+  echo "acoustic backend: NOT LISTENING, and nothing acoustic-named was found as a container, image, compose file, service or process. That shows it is not running here. It does not show it was never installed: it may live under another name or on another host. Do not call it 'not installed'."
+fi
+up_s=$(cut -d. -f1 /proc/uptime 2>/dev/null)
+[ -n "$up_s" ] && [ "$up_s" -lt 3600 ] && echo "NOTE: the machine has been up only $(uptime -p 2>/dev/null). After a reboot, a backend that has not come back is a likelier story than one that was never installed."
 
 # --- sensor paths ---------------------------------------------------------------------------
 sec "sensor paths (route taken, neighbour cache$([ "$PING_SENSORS" = 1 ] && echo ', ping'))"

@@ -35,9 +35,15 @@ with errors only recent.
 
     docker ps -a --filter name=dumbo        # -a matters: an exited container is a
                                             # different fault from an absent one
-    curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/
+    curl -s -o /dev/null -w '%{http_code}' <the URL asu_node was started with>
 
-`get_asu_service_status` does both and reports which of the four cases it is.
+The port differs per site (`:8000` here, `localhost:9000` on `axon-gotcha-4`); take it from
+the triage's "acoustic backend (ASU)" section, which also lists images, compose files and
+services, instead of assuming `:8000` or a container called `dumbo`. `get_asu_service_status`
+does the container and URL checks and reports which of the four cases it is.
+
+If no container is found, say the backend is *not running*, not that it is *not installed*:
+the first is what the output shows, the second needs someone to look at the machine.
 
 ## What the operator sees
 

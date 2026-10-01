@@ -119,11 +119,20 @@ and an address that is a hostname rather than an IP (it is not resolved).
 
 ## Not everything on the network is on the network
 
-The ASU acoustic sensor is a **local Docker service** ("Dumbo") with an HTTP API on this
-machine, not a device on the sensor LAN. So `asu_connected: false` is a statement about a
-container here, and no reachability probe can explain it. The triage's `dumbo` container line and the
-`:8000` check separate four cases: container absent, container exited (with exit code — 137
-is SIGKILL, typically the OOM killer), container up but API unreachable, and healthy.
+The ASU acoustic sensor is, in the cases seen so far, a **local service** ("Dumbo") with an
+HTTP API on this machine, not a device on the sensor LAN. So `asu_connected: false` is a
+statement about that service, and no reachability probe can explain it.
+
+Where it listens is **per site**. `asu_node` is started with `-u <url>` (`:8000` in the bench
+captures, `localhost:9000` on `axon-gotcha-4`), and that URL, not a port from this KB, is what
+must answer. The triage's "acoustic backend (ASU)" section reads it from the running node and
+separates: something listens and answers (healthy), something listens but does not answer HTTP,
+nothing listens but the backend exists on the machine (stopped container with its exit code, 137
+being SIGKILL, typically the OOM killer; or an image/compose file/service that was never started),
+nothing listens and nothing acoustic-named exists, and a backend configured on another host.
+The fourth case still does not mean "not installed": it may be under another name or elsewhere.
+A site where the container is named something other than `dumbo` is possible; the section
+matches `dumbo`, `acoustic` and `asu`.
 
 The counters discriminate further: `request_count` climbing with `success_count` at zero
 means the backend was never reachable since start; a flat `success_count` with recent

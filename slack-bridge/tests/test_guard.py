@@ -40,11 +40,28 @@ SCRIPT_CALLS = [
     f"GOTCHA_SSH_USER=gotcha {SCRIPTS}/run_triage.sh axon-gotcha-3",
     f"{SCRIPTS}/run_triage.sh axon-gotcha-3 2>&1",
     f"{SCRIPTS}/list_systems.sh gotcha 3",
+    f"{SCRIPTS}/remote_logs.sh axon-gotcha-4 dumbo",
+    f"{SCRIPTS}/remote_logs.sh axon-gotcha-4 dumbo 100",
+    f"{SCRIPTS}/remote_logs.sh axon-gotcha-4 gotcha30 200 --grep 'asu1|error'",
     f"{SCRIPTS}/code.sh grep axon-gotcha-3 'First node completed' src",
     f"{SCRIPTS}/code.sh show v1.3.0 src/launcher/main.cpp 140,170",
     "tailscale status",
     "tailscale ping axon-gotcha-3",
 ]
+
+
+@pytest.mark.parametrize("cmd", [
+    f"{SCRIPTS}/remote_logs.sh axon-gotcha-4",                         # no container
+    f"{SCRIPTS}/remote_logs.sh axon-gotcha-4 'dumbo; rm -rf /'",
+    f"{SCRIPTS}/remote_logs.sh axon-gotcha-4 dumbo 100 -f",
+    f"{SCRIPTS}/remote_logs.sh axon-gotcha-4 dumbo --follow",
+    f"{SCRIPTS}/remote_logs.sh axon-gotcha-4 dumbo 100 --grep a --grep b",
+    f"{SCRIPTS}/remote_logs.sh axon-gotcha-4 dumbo | tee /tmp/x",
+    f"{SCRIPTS}/remote_logs.sh axon-gotcha-4 dumbo 100 --grep $(id)",
+    f"{SCRIPTS}/lib_ssh.sh",
+])
+def test_remote_logs_is_one_container_read_and_nothing_else(strict, cmd):
+    assert not allowed(cmd), cmd
 
 
 def test_strict_is_the_default():

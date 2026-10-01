@@ -73,9 +73,10 @@ auto-detects the gotcha directory, then prints one section per view:
 | section | answers |
 |---|---|
 | gotcha dir + version | `release:` (the exact source version compiled into the launcher, e.g. `v1.3.0-38-g7c9b0167`), `IMAGE_TAG`, `MODE`, `.env` keys the release expects but this machine lacks |
-| containers | status, restart count, start time, exit code, OOM flag, for every container |
+| containers | `docker ps -a`, so exited containers are included: status, restart count, start time, exit code, OOM flag, for every container on the machine. Don't ask anyone to re-run `docker ps -a`; it is already here |
 | launcher sessions + node processes | how many `system_launcher`s are running (more than one is its own fault), each node's uptime |
-| listeners + http checks | what's bound on 8080/5173/8000, gateway `/health` on loopback vs LAN IP, the health body |
+| listeners + http checks | what's bound on 8080/5173, gateway `/health` on loopback vs LAN IP, the health body |
+| acoustic backend (ASU) | the URL `asu_node` was actually given (`-u`), whether it answers from the machine and from inside the core container, what listens on that port, what exists under an acoustic name (containers, images, compose files, services, processes), and a closing `acoustic backend:` verdict line |
 | log signatures | every known error line from the KB in the newest 30000 log lines, tagged `[case-slug]`, with count and first/last time. A match marked `OLD` was last seen before the container's last start |
 | log tail | the latest lines from the core and the gateway |
 | sensor node status | the newest status line of each sensor node (e.g. `magos0: CONNECTED \| ... det 0.0/s ... radar=stopped`), found anywhere in the last 5000 core log lines, so the radar's state is in the output even when the tail is noise |
@@ -141,6 +142,8 @@ to do, since these need a human at a keyboard once:
 ## Ground rules for this deployment
 
 Three things that have gone wrong in real answers. Check your reply against them.
+
+**Absent is not uninstalled.** The triage can show that something is not running or not listed. It cannot show that it was never installed: it may be on another host, behind a tunnel, or under another name. Say "not running", quote the `acoustic backend:` line, and say what would settle it. Claim "not installed" or "doesn't exist" only when the PM has told you so. Check `up:` in the host section too: a machine up for minutes has just rebooted, and "hasn't come back yet" beats "was never there".
 
 **1. Addresses come from the deployed system's own config, nowhere else.** Every site has
 its own sensor addresses in its site config, `<gotcha dir>/configs/<site>/full_system*.yaml`
@@ -224,7 +227,7 @@ work" branches are only in the file.
 | `two-launcher-sessions` | "node flapping", "duplicate detections" | `system_launcher processes: 2+`; same node twice with very different uptimes |
 | `radar-connected-but-no-detections` | "no targets", "nothing detected in a flight test" | sensor IPs `no route`, neigh `FAILED`/`none`, or routed via tailscale0; config has no/wrong radars |
 | `radar-transmitter-off` | "radar connected, cable fine, still no detections", "the radar was reconnected and nothing changed" | node status line `CONNECTED ... det 0.0/s ... radar=stopped`; `[radar-transmitter-off]` signature |
-| `asu-backend-never-reachable` | "acoustic panel all zeros", "page contradicts launcher" | dumbo container absent/exited (137 = OOM); `asu api` 000; nothing on :8000 |
+| `asu-backend-never-reachable` | "acoustic panel all zeros", "page contradicts launcher" | `acoustic backend:` line says not listening; `asu api` 000 on the configured URL; a stopped/exited container, if one exists (137 = OOM) |
 | `camera-offline-onvif` | "camera offline", "can't move the camera" | `[camera-offline-onvif]`; no `python_optic_ptz` node in config means they mean another device |
 | `no-video-in-ui` | "camera moves but black video" | `[no-video-in-ui]`; `ffmpeg MISSING` in a container |
 | `tracker-never-classifies-drone` | "everything unknown", "no drone alerts" | `[tracker-never-classifies-drone]`, no `ok:classifier-loaded`; weights dir empty |
@@ -313,8 +316,20 @@ When the source solves something the KB didn't have, offer to write it up as a n
 
 ## 5. At most a couple of targeted follow-ups
 
-If the bundle narrows it to one case but a check in that case's file would settle it, run
-that check with `tailscale ssh <host> '<command>'`. Aim for one or two, not a second
+**Reading one container's log** (the triage only scans for known signatures and shows a short
+tail) works everywhere, Slack included:
+
+```
+scripts/remote_logs.sh <host> <container> [lines<=500] [--grep REGEX]
+```
+
+`<container>` can be a fragment (`dumbo`); a name that matches nothing or several lists the
+machine's containers. Redacted like the triage. Use it instead of asking the PM to run
+`docker logs`. A container that isn't there is an answer too: say so, and say it doesn't show
+the software was never installed.
+
+For any other check, if the bundle narrows it to one case but a check in that case's file
+would settle it, run that check with `tailscale ssh <host> '<command>'`. Aim for one or two, not a second
 investigation. What counts as read-only:
 
 - fine: `docker ps/inspect/logs`, `grep`, `ls`, `ss`, `ip route get`, `ip neigh`, `curl` GETs to

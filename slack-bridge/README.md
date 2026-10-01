@@ -150,8 +150,10 @@ WantedBy=multi-user.target
 
 ### Strict mode
 
-**On by default.** The bot runs the skill's scripts (`run_triage.sh`, `list_systems.sh`,
-`code.sh`) and nothing it composed itself. When the triage doesn't settle a question, the
+**On by default.** The bot runs the skill's scripts (`run_triage.sh`, `remote_logs.sh`,
+`list_systems.sh`, `code.sh`) and nothing it composed itself. `remote_logs.sh <host>
+<container> [lines] [--grep REGEX]` is the one way it reads a container's log: a fixed
+`docker logs --tail`, at most 500 lines, redacted like the triage, never following. When the triage doesn't settle a question, the
 answer names the one next check as a step for the PM, with its exact command.
 
 With `BRIDGE_FOLLOWUPS=1`, the bot may also run `tailscale ssh <site> '<command>'`

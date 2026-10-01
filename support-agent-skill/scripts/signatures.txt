@@ -16,6 +16,6 @@ radar-connected-but-no-detections|SetParams failed|Cannot open binary file
 gateway-bound-to-loopback|WebSocket connection rejected from
 container-up-but-nonfunctional|503 Service Unavailable
 env-missing-vars-after-upgrade|machine not initialized
-asu-backend-never-reachable|asu_connected["': =]+false|localhost:8000.*(refused|failed|error)
+asu-backend-never-reachable|asu_connected["': =]+false|\[asu[0-9]*\].*(HTTP GET .* failed|Couldn't connect to server)|localhost:8000.*(refused|failed|error)
 end-on-first-complete-resets-system|First node completed:
 radar-transmitter-off|radar=stopped

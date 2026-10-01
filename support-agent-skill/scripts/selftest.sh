@@ -38,6 +38,12 @@ grep -q 'every match is offline' <<<"$out" && ok "offline-only match is called o
 out=$(PATH="$STUB:$PATH" "$HERE/list_systems.sh" gotcha 30)
 grep -q 'gotcha-30' <<<"$out" && ! grep -q 'gotcha-3 ' <<<"$out" && ok "gotcha 30 matches gotcha-30 only" || bad "gotcha 30: $out"
 
+# --- every script parses; remote_logs.sh refuses bad input before it touches the network -----
+for f in "$HERE"/*.sh; do bash -n "$f" 2>/dev/null && ok "parses: $(basename "$f")" || bad "syntax error: $(basename "$f")"; done
+for args in "h" "h 'a;b'" "h dumbo 0" "h dumbo 501" "h dumbo 10 -f" "h dumbo --grep" "h dumbo 5 x"; do
+  eval "\"$HERE/remote_logs.sh\" $args" >/dev/null 2>&1; [ $? -eq 2 ] && ok "remote_logs refuses: $args" || bad "remote_logs accepted: $args"
+done
+
 # --- KB consistency: signatures <-> cases <-> SKILL.md index -----------------------------------
 for s in $(grep -vE '^#|^$' "$HERE/signatures.txt" | cut -d'|' -f1 | grep -v '^ok:'); do
   [ -f "$SKILL/kb/cases/$s.md" ] && ok "signature has a case: $s" || bad "signature slug has no case file: $s"

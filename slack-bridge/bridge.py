@@ -88,7 +88,7 @@ than one could match, ask one short question listing the candidates, and stop.
 # Strict mode, stated up front: without it the model spends turns on follow-up commands
 # the guard will only refuse.
 STRICT_NOTE = """
-Only the skill's scripts are available here (run_triage.sh, list_systems.sh, code.sh).
+Only the skill's scripts are available here (run_triage.sh, remote_logs.sh, list_systems.sh, code.sh).
 You cannot run your own commands on a site, so skip the skill's targeted follow-ups
 (§5): answer from the triage output and the KB, and when one more check would settle
 it, give that check to the PM as a step with its exact command.
