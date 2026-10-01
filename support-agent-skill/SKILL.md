@@ -33,6 +33,11 @@ machines run.
 
 ## 1. Which system?
 
+First translate the PM's words, since the wrong word leads to the wrong case. "The camera" may
+be the PTZ (`python_optic_ptz`) or Meduza; "the system" or "the screen" usually means the C2 UI;
+"the radar" may mean the APU or the radar itself (see the radar section). When a word could be
+two things, let the triage settle which (`kb/glossary.md` has the full list).
+
 If the PM didn't name a system, or the name is ambiguous, ask. Asking costs a few seconds;
 diagnosing the wrong machine costs the whole conversation. Make the question easy to answer
 by running this first:
@@ -65,8 +70,9 @@ auto-detects the gotcha directory, then prints one section per view:
 | containers | status, restart count, start time, exit code, OOM flag, for every container |
 | launcher sessions + node processes | how many `system_launcher`s are running (more than one is its own fault), each node's uptime |
 | listeners + http checks | what's bound on 8080/5173/8000, gateway `/health` on loopback vs LAN IP, the health body |
-| log signatures | every known error line from the KB, tagged `[case-slug]`, with count and first/last time |
+| log signatures | every known error line from the KB, tagged `[case-slug]`, with count and first/last time. A match marked `OLD` was last seen before the container's last start |
 | log tail | the latest lines from the core and the gateway |
+| sensor node status | the newest status line of each sensor node (e.g. `magos0: CONNECTED \| ... det 0.0/s ... radar=stopped`), found anywhere in the last 5000 core log lines, so the radar's state is in the output even when the tail is noise |
 | resolved config | `--print-config` for the running config, with secrets redacted: which nodes and sensors this site actually has |
 | site config: sensor addresses | each node in the site's own config: type and address. The source of truth for "what is the radar's IP" |
 | sensor paths | for each sensor IP: the route the kernel would use, the neighbour-cache state, and a flag when traffic would go via `tailscale0`. Magos addresses are labelled APU, and the radar's derived address (APU `.6x` -> `.5x`) gets its own line |
@@ -86,10 +92,13 @@ Options, all passed as environment variables or flags:
   (two packets each, from the gotcha machine). It puts traffic on the sensor subnets, so use it
   only when reachability is the open question. That is the case when the APU answers and the
   radar shows no route or neighbour entry, or when nothing on the sensor LAN answers passively.
-  The route and neighbour columns are passive and usually settle the rest without it. In the
-  Slack bot, pings are on by default (`BRIDGE_ALLOW_PING=0` turns them off), so run it without asking the PM. If the
-  guard blocks `--ping`, say the ping is switched off, answer from the passive checks, and name
-  the ping as the step that would confirm it.
+  The route and neighbour columns are passive and usually settle the rest without it.
+  **In the Slack bot, pings are on by default** (`BRIDGE_ALLOW_PING=0` turns them off), so never
+  ask the PM first. When the report is about a radar, a sensor, or "no detections", run the
+  *first* triage with `--ping` rather than running a second one. For any other report, leave it
+  off. If the guard blocks `--ping`, say the ping is switched off, answer from the passive
+  checks, and name the ping as the step that would confirm it. Outside Slack (a person running
+  this from a terminal), pass `--ping` only once someone has agreed to the extra traffic.
 
 **How it connects.** Only some machines run Tailscale SSH; `list_systems.sh` shows which
 under `via`. The script uses `tailscale ssh` where it's available. Everywhere else it uses
@@ -159,7 +168,7 @@ from the APU's, and the triage's sensor paths section does that for you, labelle
   detections. The APU being up is the reason it looks fine.
 - The radar's route and neighbour entry are passive and can be blank even when it's fine,
   because this machine talks to the APU, not the radar. So a blank neighbour entry is a lead,
-  not a finding. Only `--ping` (with the PM's OK, §2) tests it: `ping DOWN` for the radar
+  not a finding. Only `--ping` (§2) tests it: `ping DOWN` for the radar
   with `ping OK` for the APU is what "probably disconnected" rests on. Say which of the two
   you have.
 - If the APU doesn't end in `.6x`, the triage says so and can't derive the radar; ask.
@@ -215,6 +224,10 @@ are things you recommend.
 messages (`load_model`, `py_glue ... unavailable`) are gone once a container has run long
 enough for its logs to rotate. On a long-running container, the absence of such a signature
 proves nothing.
+
+A match marked `OLD` is history, not the current problem: the container has restarted since
+it last appeared (`docker logs` keeps the earlier runs). Mention it at most as background, and
+don't build the diagnosis on it unless the PM is asking about that earlier event.
 
 ## 4. Look it up in the source
 

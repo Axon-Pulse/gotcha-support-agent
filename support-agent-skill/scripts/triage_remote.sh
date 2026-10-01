@@ -113,18 +113,21 @@ echo "asu api  127.0.0.1:8000/ -> $(code http://127.0.0.1:8000/)"
 echo "gateway /health body: $(curl -s -m 5 http://127.0.0.1:8080/health 2>/dev/null | clip 600)"
 
 scan_logs() {  # $1 = container
-  local c=$1 combined hits first
+  local c=$1 combined hits first started lastts old
   combined=$(printf '%s\n' "$SIGS" | grep -vE '^#|^$' | cut -d'|' -f2- | paste -sd'|')
   hits=$(DT=120 D logs -t "$c" 2>&1 | grep -E -i -- "$combined" | clip 400)
   first=$(D logs -t "$c" 2>&1 | head -1 | cut -c1-30)
-  echo "(log starts $first)"
+  started=$(D inspect -f '{{.State.StartedAt}}' "$c" 2>/dev/null | cut -c1-19)
+  echo "(log starts $first; container last started ${started:-?})"
   [ -z "$hits" ] && { echo "no known signatures"; return; }
   printf '%s\n' "$SIGS" | grep -vE '^#|^$' | while IFS= read -r line; do
     slug=${line%%|*}; re=${line#*|}
     m=$(printf '%s\n' "$hits" | grep -E -i -- "$re")
     [ -z "$m" ] && continue
-    printf '[%s] x%s  first=%s  last=%s\n    %s\n' "$slug" "$(printf '%s\n' "$m" | wc -l)" \
-      "$(printf '%s\n' "$m" | head -1 | cut -d' ' -f1)" "$(printf '%s\n' "$m" | tail -1 | cut -d' ' -f1)" \
+    lastts=$(printf '%s\n' "$m" | tail -1 | cut -d' ' -f1)
+    old=""; [ -n "$started" ] && [[ "${lastts:0:19}" < "$started" ]] && old="  (OLD: last seen before the container's last start)"
+    printf '[%s] x%s  first=%s  last=%s%s\n    %s\n' "$slug" "$(printf '%s\n' "$m" | wc -l)" \
+      "$(printf '%s\n' "$m" | head -1 | cut -d' ' -f1)" "$lastts" "$old" \
       "$(printf '%s\n' "$m" | tail -1 | cut -d' ' -f2- | clip 300)"
   done
 }
@@ -136,6 +139,16 @@ done
 
 [ -n "$CORE" ] && { sec "log tail: $CORE (last 40)"; D logs --tail 40 "$CORE" 2>&1 | clip 250; }
 [ -n "$GW" ]   && { sec "log tail: $GW (last 25)";   D logs --tail 25 "$GW"   2>&1 | clip 250; }
+
+# The newest status line of each sensor node, wherever it is in the log. The tail above can be
+# all noise; `radar=` (the radar's own state) is the line that separates "link up" from "radar up".
+if [ -n "$CORE" ]; then
+  sec "sensor node status: latest line per node ($CORE, last 5000 log lines)"
+  st=$(D logs --tail 5000 "$CORE" 2>&1 | grep -a -E '[A-Za-z0-9_]+: +[A-Z]+ +\| .*det [0-9.]+/s' \
+    | awk '{ if (match($0, /[A-Za-z0-9_]+: +[A-Z]+ +\|/)) { n=substr($0, RSTART, index(substr($0,RSTART), ":")-1); last[n]=$0; if (!(n in ord)) { ord[n]=++k; name[k]=n } } }
+           END { for (i=1; i<=k; i++) print last[name[i]] }' | clip 300)
+  echo "${st:-no sensor status lines in the last 5000 log lines}"
+fi
 
 # --- resolved config ------------------------------------------------------------------------
 sec "resolved config (--print-config, redacted)"

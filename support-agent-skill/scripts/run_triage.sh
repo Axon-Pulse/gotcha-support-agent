@@ -4,7 +4,9 @@
 #   run_triage.sh <tailnet-host> [--ping]
 #
 # --ping also pings each sensor address from the resolved config. It puts traffic on the
-# customer's sensor subnets, so only pass it once someone has agreed to that.
+# customer's sensor subnets, so from a terminal only pass it once someone has agreed to that.
+# The Slack bot has that agreement built in (BRIDGE_ALLOW_PING, on by default) and passes it
+# on the first run for radar / sensor / no-detections reports.
 # Set GOTCHA_SSH_USER to log in as a specific user (default: tailscale ssh's own default).
 # Set GOTCHA_CONFIG=configs/<...> when no launcher is running and the site config can't be
 # guessed (the triage output says so).
