@@ -10,6 +10,7 @@
 export LC_ALL=C
 SIGS=${SIGS:-}
 PING_SENSORS=${PING_SENSORS:-0}
+LOG_LINES=${GOTCHA_LOG_LINES:-30000}   # how far back each log scan reads
 shopt -s nullglob nocaseglob
 
 sec()   { printf '\n=== %s ===\n' "$*"; }
@@ -113,12 +114,15 @@ echo "asu api  127.0.0.1:8000/ -> $(code http://127.0.0.1:8000/)"
 echo "gateway /health body: $(curl -s -m 5 http://127.0.0.1:8080/health 2>/dev/null | clip 600)"
 
 scan_logs() {  # $1 = container
-  local c=$1 combined hits first started lastts old
+  local c=$1 combined hits first started lastts old all
   combined=$(printf '%s\n' "$SIGS" | grep -vE '^#|^$' | cut -d'|' -f2- | paste -sd'|')
-  hits=$(DT=120 D logs -t "$c" 2>&1 | grep -E -i -- "$combined" | clip 400)
-  first=$(D logs -t "$c" 2>&1 | head -1 | cut -c1-30)
+  # One bounded read, not two full ones: a container with a huge log must not eat the time
+  # budget (a Slack turn has 30s in total). The window is the newest lines.
+  all=$(D logs -t --tail "$LOG_LINES" "$c" 2>&1)
+  hits=$(printf '%s\n' "$all" | grep -E -i -- "$combined" | clip 400)
+  first=$(printf '%s\n' "$all" | head -1 | cut -c1-30)
   started=$(D inspect -f '{{.State.StartedAt}}' "$c" 2>/dev/null | cut -c1-19)
-  echo "(log starts $first; container last started ${started:-?})"
+  echo "(scanned the newest $LOG_LINES log lines, from $first; container last started ${started:-?})"
   [ -z "$hits" ] && { echo "no known signatures"; return; }
   printf '%s\n' "$SIGS" | grep -vE '^#|^$' | while IFS= read -r line; do
     slug=${line%%|*}; re=${line#*|}
@@ -212,11 +216,22 @@ APUS=""
 sec "sensor paths (route taken, neighbour cache$([ "$PING_SENSORS" = 1 ] && echo ', ping'))"
 IPS=$(printf '%s\n' "$PC" | grep -oE '\b(10\.[0-9]+|172\.(1[6-9]|2[0-9]|3[01])|192\.168)\.[0-9]+\.[0-9]+\b' | sort -uV | head -40)
 [ -z "$IPS" ] && echo "no sensor addresses found in resolved config"
+# Pings run in parallel and each is capped, so a site with several dead sensors costs a few
+# seconds in total, not ~3s per sensor one after another.
+PINGD=$(mktemp -d 2>/dev/null)
+RADARS=""
+for apu in $APUS; do last=${apu##*.}; [[ $last =~ ^6[0-9]$ ]] && RADARS="$RADARS ${apu%.*}.5${last:1}"; done
+if [ "$PING_SENSORS" = 1 ] && [ -n "$PINGD" ]; then
+  for ip in $IPS $RADARS; do
+    ( timeout 5 ping -c2 -W1 "$ip" >/dev/null 2>&1 && echo "ping OK" || echo "ping DOWN" ) > "$PINGD/$ip" &
+  done
+  wait
+fi
 sensor_line() {  # $1 = ip, $2 = label
   local ip=$1 r n p="" flag=""
   r=$(ip route get "$ip" 2>/dev/null | head -1 | grep -oE 'dev [^ ]+( src [^ ]+)?')
   n=$(ip neigh show "$ip" 2>/dev/null | awk '{print $NF}')
-  [ "$PING_SENSORS" = 1 ] && { ping -c2 -W2 "$ip" >/dev/null 2>&1 && p="ping OK" || p="ping DOWN"; }
+  [ "$PING_SENSORS" = 1 ] && p=$(cat "$PINGD/$ip" 2>/dev/null || echo "ping not run")
   [[ $r == *tailscale* ]] && flag="  <-- ROUTED VIA TAILNET (hijack)"
   printf '%-16s %-32s neigh=%-10s %s%s  %s\n' "$ip" "${r:-no route}" "${n:-none}" "$p" "$flag" "$2"
 }

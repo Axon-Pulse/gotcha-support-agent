@@ -143,7 +143,7 @@ WantedBy=multi-user.target
 | `SLACK_ALLOW_DMS` | `0` | `1` to answer DMs from allowed users. |
 | `BRIDGE_EFFORT` | `medium` | Claude Code effort: `low` is faster, `high` is more thorough. |
 | `BRIDGE_MODEL` | Claude Code default | e.g. `claude-opus-5-5`. |
-| `BRIDGE_TIMEOUT_S` | `300` | One answer's wall-clock cap; the ssh sessions die with it. |
+| `BRIDGE_TIMEOUT_S` | `30` | One answer's wall-clock cap; the ssh sessions die with it, and a turn that hits it posts no answer. The triage's own limit is set 12s below it (`GOTCHA_TRIAGE_TIMEOUT`). |
 | `BRIDGE_MAX_CONCURRENT` | `2` | Questions answered at once. |
 | `BRIDGE_FOLLOWUPS` | `0` (strict) | `1` also lets the bot run its own read-only follow-up commands on a site. See [Strict mode](#strict-mode). |
 | `BRIDGE_ALLOW_PING` | `1` | The triage may ping sensors (two packets per address, on the customer's subnets). `0` switches it off. |

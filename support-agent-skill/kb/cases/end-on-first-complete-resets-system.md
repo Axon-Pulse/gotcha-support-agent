@@ -26,7 +26,9 @@ operator restarts of one node, and one tower reposition from the GUI.
 - `First node completed:`
 - `Initiating shutdown: First node completed`
 - `Executing restart for <node>: Operator restart`
-- `Executing restart for <node>: Platform <id> repositioned`
+- `Executing restart for <node>: Platform <id> repositioned` (routine on its own: every operator
+  reposition logs it. Only a fault when `First node completed:` follows, so the triage signature
+  uses the first line only)
 
 ## Root cause
 

@@ -19,7 +19,14 @@ HOST=$1; shift
 PING=0; [ "${1:-}" = "--ping" ] && PING=1
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 TARGET="${GOTCHA_SSH_USER:+$GOTCHA_SSH_USER@}$HOST"
+# Where the per-system memory (host, release, config, gotcha dir) lives. Outside the skill
+# folder, which can be read-only or replaced on update. Shared with code.sh.
+STATE_DIR=${GOTCHA_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/gotcha-support}
+STATE="$STATE_DIR/systems.tsv"
+OLD_STATE="$HERE/../state/systems.tsv"   # where earlier versions kept it; copied over once
+if [ ! -f "$STATE" ] && [ -f "$OLD_STATE" ]; then mkdir -p "$STATE_DIR" 2>/dev/null && cp "$OLD_STATE" "$STATE" 2>/dev/null; fi
 OUT_DIR=${GOTCHA_TRIAGE_DIR:-/tmp/gotcha-triage}
+umask 077   # the saved triage is for the person escalating, not for other users on this machine
 mkdir -p "$OUT_DIR"
 OUT="$OUT_DIR/$HOST-$(date +%Y%m%d-%H%M%S).txt"
 LIMIT=${GOTCHA_TRIAGE_TIMEOUT:-120}   # whole triage; a healthy link finishes well inside this
@@ -71,7 +78,7 @@ echo "connecting to $TARGET via $LABEL" >&2
   cat "$HERE/signatures.txt"
   printf '__GOTCHA_SIGS__\n)\n'
   cat "$HERE/triage_remote.sh"
-} | timeout "$LIMIT" "${SSH[@]}" 'bash -s' 2>&1 | tee "$OUT"
+} | timeout "$LIMIT" "${SSH[@]}" 'bash -s' 2>&1 | sed -E -f "$HERE/redact.sed" | tee "$OUT"
 rc=${PIPESTATUS[1]}
 
 echo
@@ -85,13 +92,15 @@ echo "saved: $OUT"
 # Remember what this system runs, so code lookups and answers still know its version when
 # the machine is unreachable later. One row per host: host, when, release, image tag, config,
 # gotcha dir (absolute, on the machine; the config path above is relative to it).
-if grep -q '^=== end of triage ===' "$OUT"; then
-  STATE="$HERE/../state/systems.tsv"; mkdir -p "$(dirname "$STATE")"
-  rel=$(grep -m1 '^release: ' "$OUT" | cut -d' ' -f2)
+# A run cut short by the time limit has no "end of triage" line but still has the release,
+# which is what the offline fallback needs, so the release line decides, not the end marker.
+rel=$(grep -m1 '^release: ' "$OUT" | cut -d' ' -f2)
+if [ -n "$rel" ] && [ "$rel" != unknown ]; then
+  mkdir -p "$STATE_DIR"
   tag=$(grep -m1 '^IMAGE_TAG=' "$OUT" | cut -d= -f2)
   cfg=$(grep -m1 '^config: ' "$OUT" | cut -d' ' -f2)
   gdir=$(grep -m1 '^dir: ' "$OUT" | cut -d' ' -f2-)
   { [ -f "$STATE" ] && awk -F'\t' -v h="$HOST" '$1!=h' "$STATE"
-    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$HOST" "$(date -u +%FT%TZ)" "${rel:-unknown}" "${tag:-unknown}" "${cfg:-UNKNOWN}" "${gdir:-unknown}"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$HOST" "$(date -u +%FT%TZ)" "$rel" "${tag:-unknown}" "${cfg:-UNKNOWN}" "${gdir:-unknown}"
   } > "$STATE.tmp" && mv "$STATE.tmp" "$STATE"
 fi

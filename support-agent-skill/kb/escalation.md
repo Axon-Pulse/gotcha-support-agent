@@ -2,11 +2,14 @@
 
 The bot reads this and uses it whenever it cannot answer. It is also the honest answer for a
 human: knowing when to stop is a skill, and guessing at a customer is worse than escalating.
+The PM raises the ticket; the bot never opens or edits one. It tells the PM what to say.
 
 ## Escalate immediately, without troubleshooting
 
 - **Anything safety-related.** An effector that fired unexpectedly, or did not fire when it
-  should have. Do not debug this over the phone.
+  should have. Do not debug this over the phone. The PM speaks to engineering directly, by
+  phone or message, now, and does not wait for a ticket to be picked up. The ticket is opened
+  afterwards, for the record. The bot gives no diagnosis and suggests no restart.
 - **Suspected data loss** — recordings or events that mattered and are gone.
 - **A security concern** — unexpected access, credentials in the wrong place, a machine
   reachable from somewhere it should not be.
@@ -32,10 +35,12 @@ a customer's system.
 
 Always:
 
-1. **The session trace** — `traces/<session_id>.jsonl`, the single most useful artefact.
-   It carries the findings, the transcript and the report, so it shows what was actually
-   observed rather than what someone remembers observing. A trace from a **mock-mode** run
-   says so; say so too, because a fixture answer is not a diagnosis.
+1. **The triage output** — the saved `/tmp/gotcha-triage/<host>-<time>.txt` when someone is at
+   the machine that ran it, or, in Slack, the lines quoted in the reply: the release, the
+   restart counts, and the log lines that matched. It shows what was actually observed rather
+   than what someone remembers observing. Say if the answer rests on the KB and the source
+   alone because the machine could not be reached: an answer from a fixture or the KB is not a
+   diagnosis.
 2. **Which system**, by its real name (`axon-gotcha-3`), not "the customer in the north".
 3. **What the customer actually said**, in their words, before anyone interpreted it.
 4. **When it started**, and what changed around then — an update, a power cut, a network
@@ -43,8 +48,8 @@ Always:
 5. **What you ruled out**, with the evidence. This is the part that saves the next person an
    hour.
 
-If there is no trace (site offline, no access, diagnosed by hand), say so explicitly and
-attach what you ran instead:
+If there is no triage output (site offline, no access, diagnosed by hand), say so explicitly
+and attach what you ran instead:
 
 ```
 make status
@@ -60,14 +65,17 @@ docker compose exec -T gotcha30 ./build/bin/system_launcher -c configs/<site>/fu
 - Site config files unredacted — they carry camera credentials.
 - Anything from a customer's network you were not asked to collect.
 
-A trace is already redacted. Hand-collected output is not — check it before sending.
+The triage output is passed through `scripts/redact.sed`, which catches the usual credential
+formats but is a pattern, not a guarantee: skim it before it goes into a ticket. Hand-collected
+output is not redacted at all.
 
 ## Raising it
 
-Jira project **GOT** at `https://axon-pulse.atlassian.net`.
+Tickets are raised in Linear, by the PM. The bot does not create or edit them: it hands
+the PM the title and body, ready to paste.
 
 A useful ticket opens with the customer's symptom, then the system name and image tag, then
-what was ruled out, then the bundle. Put the symptom first: whoever picks it up is matching
+what was ruled out, then the evidence. Put the symptom first: whoever picks it up is matching
 against things they have seen, and they can only do that from the symptom.
 
 Title it as the customer experienced it — *"axon-gotcha-3: no detections after network

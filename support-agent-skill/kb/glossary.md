@@ -53,8 +53,10 @@ in the config. An APU that answers with a radar that doesn't usually means the r
 disconnected. Neither is the gotcha machine (`axon-gotcha-N`, the tailnet host that runs the
 containers), and neither is its `100.x` tailnet IP.
 
-**Magos** — the radar, a separate device on the sensor LAN. A site typically has several, each
-covering a sector. Reference convention: the `192.168.1.x` subnet.
+**Magos** — the radar product: an APU the gotcha software talks to, plus the radar behind it
+(see **APU** above, and say which one you mean). A site typically has several, each covering a
+sector. Reference convention: the `192.168.1.x` subnet, which is only an example; the APU/radar
+addresses above are from a different example site.
 
 **ASU** — the acoustic sensor unit; detects drones by sound. Reference convention: `192.168.2.x`.
 (Its backend is the local "Dumbo" container; see `system-model.md`.)
@@ -95,7 +97,7 @@ this is wrong, the entire picture is in the wrong place while being internally c
 **IMAGE_TAG** — which version a machine is on. `:stable` is a release; `:latest` is the newest
 build of main. **The first question for any "it broke after the update" report.**
 
-**harness** — the small set of files a field machine has outside the image: the Makefile, the
+**harness** — in this glossary, the small set of files a field machine has outside the image: the Makefile, the
 compose file, `.env`, and a few scripts. Machines without a git checkout get these from inside
 the image itself.
 
@@ -114,5 +116,7 @@ knowledge base is about these, because they are the ones that waste days.
 **degraded** — a node is running but not doing its whole job. Usually deliberate: losing one
 feature is better than taking the system down.
 
-**heartbeat timeout** — a node stopped responding for five seconds and the launcher declared
-it dead.
+**heartbeat timeout** — a node stopped responding for five seconds and the *launcher* declared
+it dead. Not the same as the C2 gateway showing a node `OFFLINE`, which is a separate, longer
+timeout on the health stream (ten seconds) and does not mean the process died; see
+`system-model.md`.

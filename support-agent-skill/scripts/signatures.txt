@@ -1,6 +1,8 @@
 # Log signatures -> KB case. One per line: <case-slug>|<extended regex, matched case-insensitively>
-# Taken from the "Evidence" sections of kb/cases/*.md. When a case is added or its evidence
-# changes, update this file too. Slugs starting with "ok:" are good signs, not faults.
+# Taken from the "Evidence" sections of kb/cases/*.md, but only lines that are a fault on their own:
+# a line that also appears in normal operation (e.g. an operator repositioning a platform)
+# is left out. When a case is added or its evidence changes, update this file too, then run
+# scripts/selftest.sh. Slugs starting with "ok:" are good signs, not faults.
 ui-shows-tracks-over-dallas|py_glue or protobuf not available|MockDataProvider|Dallas Defense Center
 py-glue-stale-or-missing|py_glue\.configmerge is missing|needs the transport bindings|No module named .py_glue
 old-wheel-partial-degradation|py_glue events unavailable|py_glue sensor contract unavailable|py_glue scan-range telemetry unavailable|py_glue wheel lacks event media|BeamFormRequest proto has no request_id|Could not create .* service client
@@ -15,5 +17,5 @@ gateway-bound-to-loopback|WebSocket connection rejected from
 container-up-but-nonfunctional|503 Service Unavailable
 env-missing-vars-after-upgrade|machine not initialized
 asu-backend-never-reachable|asu_connected["': =]+false|localhost:8000.*(refused|failed|error)
-end-on-first-complete-resets-system|First node completed:|Platform .* repositioned
+end-on-first-complete-resets-system|First node completed:
 radar-transmitter-off|radar=stopped

@@ -2,10 +2,11 @@
 
 Read this when the symptom matches no recorded case. It describes the mechanism, so a
 fault nobody has written up can still be reasoned about rather than guessed at. Recorded
-cases live separately and are reached with `search_runbook`.
+cases are in `cases/`: grep their `symptoms:` and read the whole file before acting on it.
 
-This document is derived from the code. Do not hand-edit it — it is read-only in the
-console, and a test pins the facts below against the source they came from.
+This is the skill's copy of the repo's `kb/system-model.md`, with the old bot's tool names
+replaced by this skill's triage sections (named in quotes below). The mechanism facts come
+from the code; when one changes in the original, change it here too.
 
 ## The shape of the system
 
@@ -28,45 +29,40 @@ publishes `LauncherStatus` on `/launcher/status`.
 **Health is a slow stream.** Each node publishes `/system/health` only every few
 seconds — measured on a 6-node bench rig: tracker 4.0s, asu/magos/event_manager 5.0s,
 c2_gateway 6.7s, system_launcher 8.0s, ~1.1 messages/second aggregate across all nodes.
-`/heartbeat` is far faster (~3.6 Hz) and `/launcher/status` is ~1 Hz. This sets the
-sampling window: a capture must run for seconds, not milliseconds, before absence from
-`get_system_health` means anything. A window too short returns a partial view in which a
-node is missing only because its turn had not come round — the tool now flags that as
-`capture.warning` rather than presenting it as the whole system.
+`/heartbeat` is far faster (~3.6 Hz) and `/launcher/status` is ~1 Hz. This sets
+how much a gap means: a node that has not yet reported is missing only because its turn had
+not come round, so look at the node's latest status line in the "sensor node status" section
+before calling it silent.
 
 ## Three independent views, and what each one cannot see
 
 This is the most useful thing in this document. The views fail differently, so
 disagreement between them localises a fault better than any single one.
 
-| view | tool | sees | blind to |
+| view | where in the triage | sees | blind to |
 |---|---|---|---|
-| node self-report | `get_system_health` | what a running node says about itself | a node that never started, or whose eCAL transport is broken |
-| launcher truth | `get_process_table` | every node the config says should exist, its process state, PID, exit code, and `config_path` | anything about whether a running node is working |
-| bus wiring | `get_ecal_topology` | publishers and subscribers per topic, per PID | node-internal state |
-| reachability | `probe_endpoint` | whether an address answers, **and which route was used** | whether the responder is the intended device |
+| node self-report | "sensor node status", "log tail", the gateway `/health` body | what a running node says about itself | a node that never started, or whose eCAL transport is broken |
+| launcher truth | "launcher sessions + node processes", "containers", "resolved config" | every node the config says should exist, its process, uptime and restarts, and which config is running | anything about whether a running node is working |
+| reachability | "sensor paths" (route, neighbour entry, and ping when it was run) | whether an address answers, **and which route would be used** | whether the responder is the intended device |
 
-Three per-domain tools exist but are **not implemented yet**: `get_radar_status`,
-`get_camera_status` and `get_tower_status` probe liveness only and return
-`implemented: false`. Call them to establish that a unit answers, then say the domain
-check could not be performed — never read a domain verdict out of them.
-`search_runbook` reaches the recorded cases, which are not in this context, and returns an
-**excerpt** of each hit. `read_case` fetches one whole. For a short case the excerpt is
-most of it; for a structured one — symptom, cause, checks, fix, verification — it usually
-ends before the fix does. So: search to find the case, read it before you act on it. An
-excerpt is enough to say "this looks like the tailnet hijack"; it is not enough to tell
-someone what to run.
+There is no fourth view of the eCAL bus (publishers and subscribers per topic) in this
+triage. Say so rather than implying you checked the wiring.
+
+A recorded case is found by its `symptoms:` and its signature, and has to be read whole: the
+fix, its caveats and the "if that didn't work" branches come after the part a grep shows.
 
 Consequences worth holding on to:
 
 - **A node missing from health is not necessarily dead.** It may never have started, in
   which case only the launcher knows it should exist.
-- **A node present in health but absent from the bus** is a transport fault, not a node
-  fault.
+- **A node that reports health but whose data never reaches the UI** is a transport fault,
+  not a node fault. The triage can't see the bus, so this is a conclusion from the node
+  running with a long uptime while the UI shows it `OFFLINE`.
 - **A subscriber with no publisher** means the node that should publish that topic is not
   running. This is how a missing node shows up downstream.
-- `config_path` from the launcher catches the case that is otherwise unknowable: you are
-  debugging a different config from the one that is running.
+- The config the launcher was given (the `config:` line and the "resolved config" section)
+  catches the case that is otherwise unknowable: you are debugging a different config from
+  the one that is running.
 
 ## Health semantics
 
@@ -93,44 +89,41 @@ never add them together.
 
 Health is stored per `node_id`, so when two launcher sessions run at once the second
 overwrites the first and a node looks like it is flapping. The signature is the same node
-reporting uptimes an order of magnitude apart in one capture — 30 s and 26,690 s.
-`get_system_health` splits them into rows marked `instance: 1 of 2`, and
-`get_ecal_topology` confirms it as two disjoint PID groups publishing identical topic
-sets. The fix is to stop the older session; the node is not at fault.
+reporting uptimes an order of magnitude apart — 30 s and 26,690 s. The triage shows it as
+`system_launcher processes: 2+` and the same node listed twice with very different uptimes.
+The fix is to stop the older session; the node is not at fault.
 
 ## Reachability is not liveness
 
-`probe_endpoint` returns one of four verdicts, and **two of them cannot support a
+The "sensor paths" section gives each sensor address a route, a neighbour-cache state and, with
+`--ping`, a ping result. Read them as four cases, and **two of them cannot support a
 conclusion**:
 
-- `reachable` — replies over the direct path. Usable.
-- `unreachable` — no reply, and no tailnet route covers the target. Usable.
-- `ambiguous_route_hijack` — no reply **and** a Tailscale peer advertises a subnet
-  containing the target. A dead sensor and a hijacked route are indistinguishable.
-- `reachable_via_tailnet` — replies arrived over `tailscale0`. The traffic tunnelled
-  through a peer, so the local path is untested and the responder may not be the intended
-  device.
+- the ping answers over the direct path. Usable.
+- no ping answer, and no route via `tailscale0` covers the address. Usable.
+- no answer **and** the route goes via `tailscale0` (flagged `ROUTED VIA TAILNET (hijack)`):
+  a Tailscale peer advertises a subnet containing the target. A dead sensor and a hijacked
+  route are indistinguishable.
+- an answer that arrived over `tailscale0`. The traffic tunnelled through a peer, so the local
+  path is untested and the responder may not be the intended device.
 
-On either ambiguous verdict, the honest finding is "the route must be cleared before this
+On either ambiguous case, the honest finding is "the route must be cleared before this
 device can be assessed". Never call the sensor faulty; never call the network healthy.
-`device_liveness` says the same thing in one word: `unknown` and
-`alive_but_path_unverified` are not findings.
+A blank neighbour entry, or a section that did not run, is not a finding either.
 
 **The diagnostic transport is a known cause of the faults it diagnoses.** A tailnet peer
 advertising a sensor subnet makes the kernel prefer `tailscale0` for sensor traffic.
 
-Two further verdicts mean the check never ran: `no_endpoint_configured` (no address in the
-inventory) and `indeterminate` (the address is a hostname, not an IP literal — no DNS
-resolution is attempted).
+Two further outcomes mean the check never ran: no address for that sensor in the site config,
+and an address that is a hostname rather than an IP (it is not resolved).
 
 ## Not everything on the network is on the network
 
 The ASU acoustic sensor is a **local Docker service** ("Dumbo") with an HTTP API on this
 machine, not a device on the sensor LAN. So `asu_connected: false` is a statement about a
-container here, and no reachability probe can explain it. `get_asu_service_status` reads
-the container state and the local API, and separates four cases: container absent,
-container exited (with exit code — 137 is SIGKILL, typically the OOM killer), container up
-but API unreachable, and healthy.
+container here, and no reachability probe can explain it. The triage's `dumbo` container line and the
+`:8000` check separate four cases: container absent, container exited (with exit code — 137
+is SIGKILL, typically the OOM killer), container up but API unreachable, and healthy.
 
 The counters discriminate further: `request_count` climbing with `success_count` at zero
 means the backend was never reachable since start; a flat `success_count` with recent
@@ -154,14 +147,14 @@ start right after someone "fixed" an alignment by hand.
 
 ## How to reason when there is no recorded case
 
-1. **Establish scope before cause.** Which nodes are suspect, and do the three views
+1. **Establish scope before cause.** Which nodes are suspect, and do the views
    agree? Disagreement is itself the finding.
 2. **Rule out shared plumbing before blaming hardware.** A transport fault, a hijacked
    route or a second launcher session explains many nodes at once; a hardware fault
    usually explains one.
 3. **Prefer the view that can see the failure mode.** If a node is missing entirely, ask
    the launcher, not health.
-4. **Treat absence of evidence carefully.** A tool that errored produced no information;
+4. **Treat absence of evidence carefully.** A section or command that errored produced no information;
    it did not produce a negative result.
 5. **Do not upgrade an ambiguous reading into a conclusion.** If the evidence supports two
    stories, say so and list what would separate them. Escalating costs less than a

@@ -117,7 +117,11 @@ def claude_argv(message: str, session_id: str | None) -> list[str]:
 
 def child_env() -> dict[str, str]:
     """The bot's environment minus its Slack tokens. Nothing the model runs needs them."""
-    return {k: v for k, v in os.environ.items() if not k.startswith("SLACK_")}
+    env = {k: v for k, v in os.environ.items() if not k.startswith("SLACK_")}
+    # The triage must end, with whatever it has, well before the turn is killed: a killed turn
+    # answers nothing, a short triage answers with less. Leave the model time to write.
+    env.setdefault("GOTCHA_TRIAGE_TIMEOUT", str(max(10, TIMEOUT_S - 12)))
+    return env
 
 
 def parse_result(stdout: str) -> dict:

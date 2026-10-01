@@ -26,6 +26,10 @@ report is about:
 - **security**: unexpected access, credentials exposed, a machine reachable from somewhere odd
 - **a change, not a fault**: new sensors, new geometry, new thresholds. That is a project.
 
+For **safety** especially, the reply is short and tells the PM to stop and speak to engineering
+directly, by phone or message, now, rather than wait on a ticket. Then the PM opens the Linear
+ticket for the record. Don't diagnose, don't suggest a restart, and don't ask them to gather more.
+
 Not every message is a live fault. For "what does `end_on_first_complete` do?" or "why would
 the tracker drop a track?", skip steps 1–2. Answer from the KB and the source (step 4) at the
 version they care about: a named system's version, otherwise `stable`, which is what deployed
@@ -52,7 +56,9 @@ words, so "gotcha 3" finds `axon-gotcha-3`. Then:
 - one online match: use it, and say which machine you connected to in your reply
 - several matches, or none: show the short list of online systems and ask which one
 - the match is **offline**: tell the PM straight away that you can't reach it and when it was
-  last seen. An offline machine is often the finding itself (power, uplink, site network).
+  last seen. Don't switch to a similarly named machine to get an answer: a number only matches a
+  whole number, so `gotcha 3` never finds `axon-gotcha-30`, and when every match is offline the
+  script says so. An offline machine is often the finding itself (power, uplink, site network).
   Then keep going with **"When you can't connect"** below. The PM still gets an answer.
 
 ## 2. Triage in one round-trip
@@ -70,7 +76,7 @@ auto-detects the gotcha directory, then prints one section per view:
 | containers | status, restart count, start time, exit code, OOM flag, for every container |
 | launcher sessions + node processes | how many `system_launcher`s are running (more than one is its own fault), each node's uptime |
 | listeners + http checks | what's bound on 8080/5173/8000, gateway `/health` on loopback vs LAN IP, the health body |
-| log signatures | every known error line from the KB, tagged `[case-slug]`, with count and first/last time. A match marked `OLD` was last seen before the container's last start |
+| log signatures | every known error line from the KB in the newest 30000 log lines, tagged `[case-slug]`, with count and first/last time. A match marked `OLD` was last seen before the container's last start |
 | log tail | the latest lines from the core and the gateway |
 | sensor node status | the newest status line of each sensor node (e.g. `magos0: CONNECTED \| ... det 0.0/s ... radar=stopped`), found anywhere in the last 5000 core log lines, so the radar's state is in the output even when the tail is noise |
 | resolved config | `--print-config` for the running config, with secrets redacted: which nodes and sensors this site actually has |
@@ -79,9 +85,22 @@ auto-detects the gotcha directory, then prints one section per view:
 | gateway config, weights, ffmpeg | `host`/`mode` lines, model weight files, ffmpeg present in each container |
 | resources | disk, memory, `/dev/shm` eCAL leftovers, recent OOM kills |
 
-Output is also saved to `/tmp/gotcha-triage/<host>-<time>.txt`; that file is what you attach
-to an escalation. A successful run also records the system's release, image tag, config and gotcha dir in
-`state/systems.tsv`, so later lookups know its version even when it's unreachable.
+In Slack a whole turn has 30 seconds, so the triage stops itself at 18 (`GOTCHA_TRIAGE_TIMEOUT`,
+set by the bridge) and prints `TIMED OUT` with what it has. Answer from that and say which
+sections are missing; don't start a second triage. Sensor pings run in parallel for this reason.
+
+The whole output is passed through `scripts/redact.sed` (URL credentials, `--password`-style
+flags, bearer tokens, `key: value` pairs for passwords, tokens and secrets) before you see it or
+it is saved, so quote from it freely, but never ask for or print a raw `.env` or config.
+It is saved, readable by the owner only, to `/tmp/gotcha-triage/<host>-<time>.txt`. That path is
+on the machine running the skill. In a terminal, attach the file to an escalation. In the Slack
+bot the PM can't open it, so put the lines that matter (2–3 quoted log lines, the restart counts,
+the release) in the reply and tell the PM to paste them into the ticket.
+
+A run records the system's release, image tag, config and gotcha dir in `systems.tsv` under
+`${GOTCHA_STATE_DIR:-~/.local/state/gotcha-support}`, so later lookups know its version even
+when it's unreachable. A run cut short by the time limit still records the release if it got
+that far.
 
 Options, all passed as environment variables or flags:
 
@@ -129,7 +148,7 @@ on the machine. The triage prints them under "site config: sensor addresses". Ne
 address from the glossary, a case file, `configs/default/`, or the source repo: those are
 conventions and placeholders (`192.168.1.101` is a *placeholder*). If the triage didn't
 run, say you don't have the site's addresses and ask for the config, or use the last known
-config path in `state/systems.tsv`. Don't fill in a plausible one.
+config path in `systems.tsv` (see §2). Don't fill in a plausible one.
 
 **2. It runs in Docker.** The launcher, gateway and frontend are containers (compose services
 `gotcha30`, `gateway`, `frontend`), with `network_mode: host`. Consequences for any path or
@@ -137,7 +156,7 @@ command you give:
 
 | what | on the machine (host) | inside the container |
 |---|---|---|
-| gotcha dir (Makefile, `.env`, compose file) | the `dir:` line of the triage, also in `state/systems.tsv` | n/a |
+| gotcha dir (Makefile, `.env`, compose file) | the `dir:` line of the triage, also in `systems.tsv` (see §2) | n/a |
 | sensor / site configs | `<dir>/configs/<site>/...` | `/app/configs/<site>/...` |
 | gateway config | `<dir>/gateway-config/config.yaml` | `/GUItcha30/config/config.yaml` |
 | `system_launcher`, `python/models/weights` | usually absent or unrunnable on the host | `/app/build/bin/...`, `/app/python/...` |
@@ -249,8 +268,9 @@ scripts/code.sh log  <ver> <path>                   # what changed there recentl
 - **`<ver>`** is the system's name (it uses the release its last triage recorded), or the
   `release:` value from the triage output. That way you read the code the machine actually
   runs, not today's `main`. `stable` means the newest release tag and `latest` means
-  `origin/main`. If the tool warns that it fell back to `origin/main`, run
-  `scripts/code.sh sync` once. If that doesn't help, say in the answer which version you read.
+  `origin/main`. For a system it has no record of, the tool falls back to the newest release tag
+  and warns `assuming newest release …`; run `scripts/code.sh sync` once in case a newer release
+  exists. Either way, say in the answer which version you read and why.
 - **Searching a log line:** search the fixed words. Drop the parts that vary, like node names,
   numbers and IPs. `grep` names the enclosing function (`file=NN=function` lines), so a
   `show` of that range is usually the whole story.
@@ -345,12 +365,9 @@ out, say what you got before it did.
 ## 7. When nothing matches
 
 Read `kb/system-model.md`. It explains the mechanism, so you can reason about a fault nobody
-has written up. Use step 4 for the specific line or key in front of you. It was written for a different harness, so translate its tool names:
-`get_process_table` means the containers and launcher sections; `probe_endpoint` means sensor
-paths; `get_asu_service_status` means the dumbo container plus the :8000 check;
-`search_runbook`/`read_case` means grepping `kb/cases/`. There is no equivalent here for
-`get_system_health` or `get_ecal_topology`. Don't claim you saw per-node health or bus
-wiring.
+has written up. Use step 4 for the specific line or key in front of you. It names the triage
+sections it relies on. The triage has no per-node health table and no view of the eCAL bus,
+so don't claim you saw either.
 
 The rules from that document that matter most when you're under time pressure:
 
@@ -400,9 +417,10 @@ quietly switched to demo mode, so the picture is fake (it's centred on Dallas).
 **Confidence:** high. Sensors and network weren't involved (all sensor IPs routed on the LAN).
 ```
 
-Adjust the shape when it helps. If it's an escalation, say so in the verdict line and add the
-ticket title as the customer experienced it (e.g. *"axon-gotcha-3: no detections after
-network maintenance"*) plus the saved triage file path. If the fix is "wait for the network
+Adjust the shape when it helps. If it's an escalation, say so in the verdict line and give the PM a
+Linear ticket to open: a title as the customer experienced it (e.g. *"axon-gotcha-3: no
+detections after network maintenance"*) and the body in the order `kb/escalation.md` gives,
+ready to paste. You never open or update tickets yourself; the PM does. If the fix is "wait for the network
 team" or "someone on site checks a cable", say exactly that. Don't pad it with commands.
 
 Don't speculate to the PM. They will repeat it to the customer, and a guess repeated back in
@@ -414,6 +432,8 @@ it isn't, and here's the one check that would tell us".
 - two hypotheses have been ruled out and there's no third
 - the evidence contradicts every case, or shows behaviour that should be impossible
 - the fix would need a source edit, an image rebuild, or a command no case documents
+- the machine is in a state no case describes
 
-`kb/escalation.md` has what to attach and how to title the Jira ticket (project GOT). The
-saved triage file stands in for the "session trace" it mentions.
+`kb/escalation.md` has what to attach and how to title the Linear ticket. The PM opens it;
+you write the title and body for them. The saved triage file stands in for the "session
+trace" it mentions.

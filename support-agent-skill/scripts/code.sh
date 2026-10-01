@@ -10,7 +10,7 @@
 #   code.sh clone                                 first-time clone into ~/.cache/gotcha-support/gotcha30
 #
 # <ver> can be:
-#   a system name        axon-gotcha-5   -> its version from the last successful triage (state/systems.tsv)
+#   a system name        axon-gotcha-5   -> its version from the last successful triage (systems.tsv in the state dir, see below)
 #   a launcher version   v1.3.0-38-g7c9b0167 (from `system_launcher --version`) -> commit 7c9b0167
 #   a release tag        v1.3.0
 #   an image tag         stable -> newest v* tag, latest -> origin/main, sha-7c9b016 -> that commit
@@ -18,12 +18,18 @@
 # Anything unresolvable (e.g. a system never triaged) falls back to the newest release tag,
 # with a warning on stderr saying so.
 #
+# State dir: $GOTCHA_STATE_DIR, else ${XDG_STATE_HOME:-~/.local/state}/gotcha-support.
 # Repo: $GOTCHA_REPO, else ~/gotcha30 if it is a gotcha30 clone, else ~/.cache/gotcha-support/gotcha30.
 # Nothing here touches a working tree: it reads objects by commit, so a clone someone is
 # developing in is safe to use.
 set -uo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-STATE="$HERE/../state/systems.tsv"
+# Where the per-system memory (host, release, config, gotcha dir) lives. Outside the skill
+# folder, which can be read-only or replaced on update. Shared with run_triage.sh.
+STATE_DIR=${GOTCHA_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/gotcha-support}
+STATE="$STATE_DIR/systems.tsv"
+OLD_STATE="$HERE/../state/systems.tsv"   # where earlier versions kept it; copied over once
+if [ ! -f "$STATE" ] && [ -f "$OLD_STATE" ]; then mkdir -p "$STATE_DIR" 2>/dev/null && cp "$OLD_STATE" "$STATE" 2>/dev/null; fi
 URL=${GOTCHA_REPO_URL:-git@github.com:Axon-Pulse/gotcha30.git}
 CACHE="$HOME/.cache/gotcha-support/gotcha30"
 
