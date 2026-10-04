@@ -9,7 +9,7 @@ support-agent-skill/ is the brain, and this only carries messages in and answers
         ▼
     bridge.py ── posts "Checking…" in the thread at once
         │
-        │  claude -p "<message>" --resume <thread's session>   cwd = workspace/
+        │  claude -p --resume <thread's session>  (message on stdin)   cwd = workspace/
         │    · the skill loads from workspace/.claude/skills/gotcha-support
         │    · permission mode dontAsk: anything not allowed is refused, nobody is asked
         │    · bash_guard.py vets every Bash call; only read-only checks run
@@ -54,8 +54,10 @@ MODEL = os.environ.get("BRIDGE_MODEL", "claude-sonnet-5-5")       # empty = Clau
 EFFORT = os.environ.get("BRIDGE_EFFORT", "medium")
 TIMEOUT_S = int(os.environ.get("BRIDGE_TIMEOUT_S", "30"))
 MAX_CONCURRENT = int(os.environ.get("BRIDGE_MAX_CONCURRENT", "2"))
-# Read by bash_guard.py too, which inherits this environment through claude.
-FOLLOWUPS = os.environ.get("BRIDGE_FOLLOWUPS") == "1"
+# The machines the bot may reach. bash_guard.py reads the same variable (it inherits this
+# environment through claude), and list_systems.sh lists only these. Keep the default in step
+# with bash_guard.DEFAULT_ALLOWED_HOSTS (a test checks).
+ALLOWED_HOSTS = os.environ.get("BRIDGE_ALLOWED_HOSTS") or r"axon-gotcha-[0-9]+"
 _SLACK_LIMIT = 3900                              # keep one answer in one readable message
 
 # Appended to Claude Code's system prompt on every turn. The skill says how to diagnose;
@@ -83,29 +85,49 @@ paths, container or tool names. If it escalates, a holding message.
 You are read-only and unattended. You cannot write files or change a system, so never
 offer to; every fix is a step for the PM. If the PM did not say which system and more
 than one could match, ask one short question listing the candidates, and stop.
-"""
 
-# Strict mode, stated up front: without it the model spends turns on follow-up commands
-# the guard will only refuse.
-STRICT_NOTE = """
-Only the skill's scripts are available here (run_triage.sh, remote_logs.sh, list_systems.sh, code.sh).
-You cannot run your own commands on a site, so skip the skill's targeted follow-ups
+Only the skill's scripts are available here (run_triage.sh, remote_logs.sh, list_systems.sh,
+code.sh). You cannot run your own commands on a site, so skip the skill's targeted follow-ups
 (§5): answer from the triage output and the KB, and when one more check would settle
 it, give that check to the PM as a step with its exact command.
 """
 
 
 def system_prompt() -> str:
-    return SLACK_PROMPT + ("" if FOLLOWUPS else STRICT_NOTE)
+    return SLACK_PROMPT
 
 
-def claude_argv(message: str, session_id: str | None) -> list[str]:
-    argv = [CLAUDE, "-p", message,
+SKILL_DIR = (WORKSPACE / ".claude" / "skills" / "gotcha-support").resolve()
+# Secret-looking file names, denied under the skill directory as well (see permission_overlay).
+_SECRET_FILES = (".env", ".env.*", "secrets.local.env", "*.pem", "*.key", "id_*")
+
+
+def permission_overlay() -> str:
+    """Read rules that need this machine's absolute paths, passed as --settings JSON.
+
+    workspace/.claude/settings.json allows reading the workspace and nothing else, but the
+    skill in it is a symlink, and a read is judged on the path it resolves to, so the real
+    skill directory has to be allowed by its absolute path. The `**/.env` style denies in
+    settings.json only match under the workspace, so the same file names are denied here for
+    the skill directory. Everything else on the host stays unreadable. (`//path` is Claude
+    Code's absolute-path form.)"""
+    root = f"/{SKILL_DIR}"
+    return json.dumps({"permissions": {
+        "allow": [f"Read({root}/**)"],
+        "deny": [f"Read({root}/**/{name})" for name in _SECRET_FILES]}})
+
+
+def claude_argv(session_id: str | None) -> list[str]:
+    """The command line. The Slack message is NOT in it: it goes in on stdin (run_claude).
+    As an argument, a message such as `--version` or `--allowedTools=Bash` is parsed as a
+    flag of the claude CLI, and anyone in the channel could set flags."""
+    argv = [CLAUDE, "-p",
             "--output-format", "json",
             "--permission-mode", "dontAsk",
             # Project settings only: this host's own ~/.claude settings must not widen
             # what the bot may do. Managed settings still apply, as they should.
             "--setting-sources", "project",
+            "--settings", permission_overlay(),
             "--append-system-prompt", system_prompt(),
             "--effort", EFFORT]
     if MODEL:
@@ -118,10 +140,37 @@ def claude_argv(message: str, session_id: str | None) -> list[str]:
 def child_env() -> dict[str, str]:
     """The bot's environment minus its Slack tokens. Nothing the model runs needs them."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("SLACK_")}
+    # What the guard allows and what list_systems.sh lists: set here, never by a message.
+    env["BRIDGE_ALLOWED_HOSTS"] = ALLOWED_HOSTS
+    env["GOTCHA_SYSTEMS_REGEX"] = ALLOWED_HOSTS
     # The triage must end, with whatever it has, well before the turn is killed: a killed turn
     # answers nothing, a short triage answers with less. Leave the model time to write.
     env.setdefault("GOTCHA_TRIAGE_TIMEOUT", str(max(10, TIMEOUT_S - 12)))
     return env
+
+
+def verify_guard() -> None:
+    """Refuse to run unless the Bash guard, started the way Claude Code starts it, blocks a
+    command it must and passes one it should. Claude Code runs a command when its hook fails any
+    way other than exit 2, so a guard that can't start (no python3, a syntax error, a moved file)
+    would leave Bash unrestricted. settings.json makes such a failure a block; this proves it."""
+    hook = json.loads((WORKSPACE / ".claude" / "settings.json").read_text())["hooks"]["PreToolUse"][0]
+    command = hook["hooks"][0]["command"]
+    env = {**child_env(), "CLAUDE_PROJECT_DIR": str(WORKSPACE)}
+
+    def run(cmd: str) -> subprocess.CompletedProcess:
+        event = {"tool_name": "Bash", "cwd": str(WORKSPACE), "tool_input": {"command": cmd}}
+        return subprocess.run(["/bin/sh", "-c", command], input=json.dumps(event), env=env,
+                              capture_output=True, text=True, timeout=20)
+
+    blocked = run("rm -rf /")
+    if blocked.returncode != 2:
+        raise SystemExit("the Bash guard did not block `rm -rf /` "
+                         f"(exit {blocked.returncode}: {blocked.stderr.strip()[:200]}); not starting")
+    passed = run(f"{SKILL_DIR}/scripts/list_systems.sh")
+    if passed.returncode != 0:
+        raise SystemExit("the Bash guard blocked the skill's own list_systems.sh "
+                         f"(exit {passed.returncode}: {passed.stderr.strip()[:200]}); not starting")
 
 
 def parse_result(stdout: str) -> dict:
@@ -193,11 +242,11 @@ def run_claude(message: str, session_id: str | None) -> dict:
     """One headless Claude Code turn. Never raises: a failure is an answer to post."""
     started = time.monotonic()
     # Own process group, so a timeout also ends the ssh sessions the turn started.
-    p = subprocess.Popen(claude_argv(message, session_id), cwd=WORKSPACE, env=child_env(),
-                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                         start_new_session=True)
+    p = subprocess.Popen(claude_argv(session_id), cwd=WORKSPACE, env=child_env(),
+                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                         text=True, start_new_session=True)
     try:
-        out, err = p.communicate(timeout=TIMEOUT_S)
+        out, err = p.communicate(input=message, timeout=TIMEOUT_S)
     except subprocess.TimeoutExpired:
         os.killpg(p.pid, signal.SIGKILL)
         p.communicate()
@@ -302,6 +351,7 @@ def main() -> None:
     if not (WORKSPACE / ".claude" / "skills" / "gotcha-support" / "SKILL.md").exists():
         raise SystemExit(f"the skill is not reachable from {WORKSPACE}/.claude/skills")
 
+    verify_guard()
     app = make_app(bot)
     bridge = Bridge(app.client)
 
@@ -314,8 +364,8 @@ def main() -> None:
         if event.get("channel_type") == "im":   # channel posts arrive as app_mention
             bridge.handle(event, body.get("event_id", ""))
 
-    log.info("bridge up: effort=%s model=%s timeout=%ss mode=%s", EFFORT,
-             MODEL or "default", TIMEOUT_S, "follow-ups" if FOLLOWUPS else "strict")
+    log.info("bridge up: effort=%s model=%s timeout=%ss sites=%s", EFFORT,
+             MODEL or "default", TIMEOUT_S, ALLOWED_HOSTS)
     SocketModeHandler(app, app_token).start()
 
 

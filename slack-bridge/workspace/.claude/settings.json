@@ -1,14 +1,15 @@
 {
-  "$comment": "The Slack bot's whole permission surface. The bridge runs `claude -p --permission-mode dontAsk --setting-sources project` in this directory, so only this file (and managed settings) applies: anything not allowed below is refused without asking, and every Bash call is vetted by ../bash_guard.py.",
+  "$comment": "The Slack bot's whole permission surface. The bridge runs `claude -p --permission-mode dontAsk --setting-sources project` in this directory, so only this file (and managed settings) applies, plus the absolute-path read rules the bridge adds with --settings (bridge.py permission_overlay): anything not allowed is refused without asking, and every Bash call is vetted by ../bash_guard.py. Reads are an ALLOW-LIST: this workspace, the real skill directory (added by the bridge) and the saved triage files. A deny list can't do that job: its `**/.env` style patterns only match under this directory, so a .env anywhere else on the host stayed readable.",
   "permissions": {
     "defaultMode": "dontAsk",
-    "allow": ["Skill", "Read", "Grep", "Glob", "Bash", "TodoWrite"],
+    "allow": ["Skill(gotcha-support)", "Bash", "TodoWrite", "Read(./**)", "Read(//tmp/gotcha-triage/**)"],
     "deny": [
       "Write", "Edit", "NotebookEdit", "WebFetch", "WebSearch", "Agent",
       "Read(~/.ssh/**)",
       "Read(~/.claude/**)",
       "Read(~/.config/**)",
       "Read(~/.aws/**)",
+      "Read(~/.netrc)",
       "Read(**/.env)",
       "Read(**/.env.*)",
       "Read(**/secrets.local.env)",
@@ -22,7 +23,7 @@
       {
         "matcher": "Bash",
         "hooks": [
-          {"type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/../bash_guard.py\""}
+          {"type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/../bash_guard.py\" || { echo 'Blocked: the Bash guard did not run cleanly' >&2; exit 2; }"}
         ]
       }
     ]

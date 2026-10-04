@@ -53,7 +53,8 @@ scripts/list_systems.sh [whatever they called it]
 It lists tailnet peers (tailnet name, hostname, IP, online/offline) and fuzzy-matches the PM's
 words, so "gotcha 3" finds `axon-gotcha-3`. Then:
 
-- one online match: use it, and say which machine you connected to in your reply
+- one online match: use it, and say which machine you connected to in your reply (in the Slack bot only
+  `axon-gotcha-<number>` systems are listed or reachable; any other name is refused)
 - several matches, or none: show the short list of online systems and ask which one
 - the match is **offline**: tell the PM straight away that you can't reach it and when it was
   last seen. Don't switch to a similarly named machine to get an answer: a number only matches a
@@ -105,7 +106,8 @@ that far.
 
 Options, all passed as environment variables or flags:
 
-- `GOTCHA_SSH_USER=<user>` if the default login is refused.
+- `GOTCHA_SSH_USER=<user>` if the default login is refused. (In the Slack bot this is the bot host's
+  own setting and a command can't set it; for a refused login, tell the PM the login needs fixing on the bot host.)
 - `GOTCHA_CONFIG=configs/<...>` when no launcher is running and the output says it can't tell
   which config the site uses. Pick the one matching the system name.
 - `--ping` also pings every address in the site config and each Magos radar's derived address
@@ -133,7 +135,7 @@ to do, since these need a human at a keyboard once:
   `! tailscale ssh <host> true` once, then you retry.
 - **`Permission denied (publickey,password)`** (plain ssh): the machine wants a password and
   there's no key for it. The user runs `! ssh-copy-id <user>@<host>` once, then you retry.
-  If they don't know the user, ask; then set `GOTCHA_SSH_USER`.
+  If they don't know the user, ask; then set `GOTCHA_SSH_USER` (not in the Slack bot, see above).
 - **host key unknown / changed**: don't bypass it. The user runs `! ssh <host> true` and
   checks the fingerprint themselves.
 - **"no docker access"** in the output: most sections will be empty. Say so rather than

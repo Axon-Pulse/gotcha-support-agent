@@ -47,6 +47,12 @@ if [ "$cmd" = clone ]; then
   mkdir -p "$(dirname "$CACHE")"
   exec git clone --quiet "$URL" "$CACHE"
 fi
+# The range of `show` goes into a sed script and an arithmetic expansion, and sed's `e` command
+# runs a shell command: anything but line numbers would be code execution. Checked before
+# anything else happens, so it holds even where there is no clone to read.
+if [ "$cmd" = show ] && [ -n "${3:-}" ] && ! [[ ${3} =~ ^[0-9]+(,[0-9]+)?$ ]]; then
+  echo "range must be N or N,M (line numbers), got '${3}'" >&2; exit 2
+fi
 REPO=$(pick_repo) || { echo "no gotcha30 clone found. Run: $0 clone   (or set GOTCHA_REPO)" >&2; exit 3; }
 G() { git -C "$REPO" "$@"; }
 

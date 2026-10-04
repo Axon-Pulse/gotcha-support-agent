@@ -7,11 +7,13 @@
 # "axon-gotcha-3". A number only matches a whole number: "gotcha 3" does not match
 # "axon-gotcha-30". A name that equals what was typed is listed first. With no match it
 # prints every peer so the PM can pick.
+# GOTCHA_SYSTEMS_REGEX (set by the Slack bridge, not by anyone in a message) limits the listing to
+# peers whose name matches it, so the bot shows the gotcha sites and not the rest of the tailnet.
 set -uo pipefail
 command -v tailscale >/dev/null || { echo "tailscale is not installed on this machine" >&2; exit 3; }
 
 tailscale status --json 2>/dev/null | python3 -c '
-import json, re, sys
+import json, os, re, sys
 q = re.sub(r"[^a-z0-9]", "", " ".join(sys.argv[1:]).lower())
 st = json.load(sys.stdin)
 peers = list((st.get("Peer") or {}).values())
@@ -22,6 +24,9 @@ for p in peers:
     ip = (p.get("TailscaleIPs") or [""])[0]
     rows.append((dns or host, host, ip, "online" if p.get("Online") else "offline",
                  "tailscale" if p.get("sshHostKeys") else "ssh", (p.get("LastSeen") or "")[:16]))
+flt = os.environ.get("GOTCHA_SYSTEMS_REGEX")
+if flt:
+    rows = [r for r in rows if re.fullmatch(flt, r[0]) or re.fullmatch(flt, r[1])]
 norm = lambda s: re.sub(r"[^a-z0-9]", "", s.lower())
 def matches(name):
     n = norm(name)
