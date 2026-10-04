@@ -17,3 +17,6 @@ config_audit.jsonl
 # Slack bridge: thread -> session map, and its local venv
 /slack-bridge/state/
 /slack-bridge/.venv/
+
+# Evaluation table for the support bot: kept local for now
+evals/
