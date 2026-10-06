@@ -23,11 +23,9 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 RUN groupadd -g "$BOT_GID" gotcha && useradd -m -u "$BOT_UID" -g "$BOT_GID" -s /bin/bash gotcha
 
-# The code is root-owned: the bot can read its guard and skill, not change them.
-COPY slack-bridge/ /app/slack-bridge/
-COPY support-agent-skill/ /app/support-agent-skill/
-RUN mkdir -p /app/slack-bridge/state && chown gotcha:gotcha /app/slack-bridge/state
-
+# Claude Code goes in before the code is copied, so a code or KB change (`make update`) rebuilds
+# only from the COPY lines down and doesn't download it again. It changes only when
+# CLAUDE_VERSION does.
 USER gotcha
 ENV HOME=/home/gotcha
 RUN curl -fsSL https://claude.ai/install.sh | bash -s "$CLAUDE_VERSION" \
@@ -40,5 +38,12 @@ ENV PATH=/home/gotcha/.local/bin:$PATH \
     GOTCHA_REPO=/home/gotcha/.cache/gotcha-support/gotcha30 \
     PYTHONUNBUFFERED=1
 
+# The code is root-owned: the bot can read its guard and skill, not change them.
+USER root
+COPY slack-bridge/ /app/slack-bridge/
+COPY support-agent-skill/ /app/support-agent-skill/
+RUN mkdir -p /app/slack-bridge/state && chown gotcha:gotcha /app/slack-bridge/state
+
+USER gotcha
 WORKDIR /app
 CMD ["python3", "slack-bridge/bridge.py"]
