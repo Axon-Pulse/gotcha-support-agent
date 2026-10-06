@@ -62,8 +62,10 @@ addresses above are from a different example site.
 (Its backend is the local "Dumbo" container; see `system-model.md`.)
 
 **Meduza** — an electro-optical sensor that detects and reports on its own. Reference
-convention: `192.168.3.x`. **Not the same thing as the PTZ camera** — this confusion is common and costs
-real time, so establish which one the customer means early.
+convention: `192.168.3.x`. Also called **ThirdEye** by PMs and on site: "thirdeye" and "Meduza" are the
+same sensor (`meduza_optic` in the config; it appears as Meduza in logs and node health). **Not the same
+thing as the PTZ camera** — this confusion is common and costs real time, so establish which one the
+customer means early.
 
 **PTZ camera** — a pan/tilt/zoom camera the system can point at a target, spoken to over
 **ONVIF** (the industry standard protocol for IP cameras) and streamed over **RTSP**.

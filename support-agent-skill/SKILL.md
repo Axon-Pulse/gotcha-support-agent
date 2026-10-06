@@ -38,7 +38,7 @@ machines run.
 ## 1. Which system?
 
 First translate the PM's words, since the wrong word leads to the wrong case. "The camera" may
-be the PTZ (`python_optic_ptz`) or Meduza; "the system" or "the screen" usually means the C2 UI;
+be the PTZ (`python_optic_ptz`) or Meduza; "thirdeye" is Meduza; "the system" or "the screen" usually means the C2 UI;
 "the radar" may mean the APU or the radar itself (see the radar section). When a word could be
 two things, let the triage settle which (`kb/glossary.md` has the full list).
 

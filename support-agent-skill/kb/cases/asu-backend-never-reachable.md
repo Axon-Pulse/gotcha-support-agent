@@ -62,7 +62,9 @@ nothing listening on port 8000 (`ss -ltn`).
 ## Fix
 
 Start the container, then confirm `success_count` climbs. The container must be up before
-the system launches.
+the system launches. Give it about 3 minutes after starting before judging it (the team's
+experience, not something the source states: the node's own start-up waits only 5 s,
+`asu_node.cpp:203`), and don't restart anything in the meantime.
 
 Once the backend is up the node recovers, but its health can stay DEGRADED until the node is
 restarted: see `asu-degraded-after-backend-recovery`.

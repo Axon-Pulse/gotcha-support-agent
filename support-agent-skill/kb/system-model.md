@@ -154,6 +154,23 @@ Setting `azimuth_offset`/`yaw` directly on a sensor that also has a `platform:` 
 mutually exclusive and the launcher rejects it — which is why a node sometimes fails to
 start right after someone "fixed" an alignment by hand.
 
+**How it is corrected.** A tower's yaw is changed from the C2 UI, not by editing the site
+config. In the entity drawer's sensor list, expand the tower (listed by its platform id, labelled
+"Platform", with its azimuth in degrees), press **Edit** on its card ("Re-aim or relocate this
+platform"), set **Azimuth** (degrees, 0 = true north; field, steppers or drag) and **Apply**. The
+gateway sends the launcher a platform-pose command; the launcher writes the new `yaw_deg` into the
+site config itself and restarts **that tower's nodes only** (`GUItcha30/gateway/src/web/web_layer.py`
+`/api/v1/commands/platform`, `commands.py` `send_platform_pose`, `PlatformCard.tsx`). Every sensor on the
+tower goes offline briefly ("Sensors will shut down momentarily while the update is applied"), and with
+`end_on_first_complete: true` those restarts reset the whole system, so check the flag first. A person
+has to measure the tower's real heading: nothing here says what the right value is.
+
+What the UI does **not** offer at v1.4.0: moving the tower (position editing is switched off,
+`PlatformCard.tsx` `LOCATION_EDIT_ENABLED = false`; only "Snap to defense center" writes a position), and
+changing one sensor's `mount.yaw_deg` (the UI only displays it). A fault on one sensor alone is still a
+site-config edit and a restart, which is engineering's to do. Read the version the system runs before
+quoting any of this: it is a v1.4.0 reading.
+
 ## How to reason when there is no recorded case
 
 1. **Establish scope before cause.** Which nodes are suspect, and do the views
