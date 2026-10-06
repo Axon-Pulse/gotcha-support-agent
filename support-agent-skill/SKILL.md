@@ -85,7 +85,7 @@ auto-detects the gotcha directory, then prints one section per view:
 | site config: sensor addresses | each node in the site's own config: type and address. The source of truth for "what is the radar's IP" |
 | sensor paths | for each sensor IP: the route the kernel would use, the neighbour-cache state, and a flag when traffic would go via `tailscale0`. Magos addresses are labelled APU, and the radar's derived address (APU `.6x` -> `.5x`) gets its own line |
 | gateway config, weights, ffmpeg | `host`/`mode` lines, model weight files, ffmpeg present in each container |
-| resources | disk, memory, `/dev/shm` eCAL leftovers, recent OOM kills |
+| resources | disk, memory, `/dev/shm` eCAL segments, logind `RemoveIPC` vs the core container's user (`AT RISK` flag), `ecal_rec` CPU, recent OOM kills |
 
 In Slack a whole turn has 30 seconds, so the triage stops itself at 18 (`GOTCHA_TRIAGE_TIMEOUT`,
 set by the bridge) and prints `TIMED OUT` with what it has. Answer from that and say which
@@ -238,6 +238,7 @@ work" branches are only in the file.
 | `env-missing-vars-after-upgrade` | "setting does nothing on the old machine" | `.env` missing keys non-empty |
 | `sensors-aint-centered-at-the-map` | "changed coordinates, center didn't move" | config coordinates changed; tower position not |
 | `end-on-first-complete-resets-system` | "the system reset while I was looking at the GUI", "restarted one node and everything restarted" | `[end-on-first-complete-resets-system]` signature; core `restarts` climbing with `exit=0`; config line `end_on_first_complete is TRUE` |
+| `ecal-shm-removed-on-logout` | "CPU churning on all cores", "recorder eating CPU", "recordings are empty", "restart fixed it then it came back" | `ecal_rec` cpu far over 100%; `[ecal-shm-removed-on-logout]` (KB-sized segments); `logind RemoveIPC: yes ... AT RISK` |
 
 If the PM's words fit a case the index doesn't list, `grep -ril '<key phrase>' kb/cases/`.
 Cases get added over time, and each file's frontmatter `symptoms:` are the phrases people use.

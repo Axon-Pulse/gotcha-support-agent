@@ -19,3 +19,4 @@ env-missing-vars-after-upgrade|machine not initialized
 asu-backend-never-reachable|asu_connected["': =]+false|\[asu[0-9]*\].*(HTTP GET .* failed|Couldn't connect to server)|localhost:8000.*(refused|failed|error)
 end-on-first-complete-resets-system|First node completed:
 radar-transmitter-off|radar=stopped
+ecal-shm-removed-on-logout|Recording validated: .* [0-9]{1,6} bytes

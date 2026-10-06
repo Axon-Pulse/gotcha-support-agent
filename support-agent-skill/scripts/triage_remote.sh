@@ -328,6 +328,16 @@ sec resources
 df -h / /var/lib/docker 2>/dev/null | awk 'NR==1 || !seen[$0]++'
 free -h 2>/dev/null | head -2
 echo "/dev/shm ecal segments: $(ls /dev/shm 2>/dev/null | grep -c ecal)"
+# logind's RemoveIPC deletes a non-system user's /dev/shm files when their last session ends.
+# The core runs as HOST_UID with ipc: host, so that wipes eCAL's live segments (ecal-shm-removed-on-logout).
+rmipc=$(busctl get-property org.freedesktop.login1 /org/freedesktop/login1 org.freedesktop.login1.Manager RemoveIPC 2>/dev/null | awk '{print $2}')
+case $rmipc in true) rmipc=yes ;; false) rmipc=no ;; *) rmipc=unknown ;; esac
+cuid=""; [ -n "$CORE" ] && { cuid=$(D inspect -f '{{.Config.User}}' "$CORE" 2>/dev/null); cuid=${cuid%%:*}; cuid=${cuid:-0}; }
+risk=""; [ "$rmipc" != no ] && [[ "$cuid" =~ ^[0-9]+$ ]] && [ "$cuid" -ge 1000 ] \
+  && risk="   AT RISK: a logout of uid $cuid's last session deletes eCAL shm (ecal-shm-removed-on-logout)"
+echo "logind RemoveIPC: $rmipc   core container user: uid ${cuid:-?}$risk"
+recs=$(ps -C ecal_rec -o pid=,etimes=,pcpu=,nlwp= 2>/dev/null | awk '{printf "pid %s up %ss cpu %s%% threads %s; ", $1, $2, $3, $4}')
+echo "ecal_rec processes (cpu = lifetime average): ${recs:-none}"
 oom=$( (dmesg -T 2>/dev/null || journalctl -k -q --since '-7d' 2>/dev/null) | grep -i 'killed process' | tail -3)
 echo "recent OOM kills: ${oom:-none seen (or kernel log not readable)}"
 
