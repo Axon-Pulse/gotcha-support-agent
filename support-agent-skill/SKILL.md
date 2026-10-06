@@ -231,6 +231,7 @@ work" branches are only in the file.
 | `radar-transmitter-off` | "radar connected, cable fine, still no detections", "the radar was reconnected and nothing changed" | node status line `CONNECTED ... det 0.0/s ... radar=stopped`; `[radar-transmitter-off]` signature |
 | `asu-backend-never-reachable` | "acoustic panel all zeros", "page contradicts launcher" | `acoustic backend:` line says not listening; `asu api` 000 on the configured URL; a stopped/exited container, if one exists (137 = OOM) |
 | `asu-degraded-after-backend-recovery` | "backend is back but acoustic still degraded", "degraded but detections flow" | `acoustic backend:` says it listens; old `asu-backend-never-reachable` lines but none since the backend started; acoustic degraded, not offline |
+| `meduza-needs-connecting-or-starting` | "thirdeye red or yellow, no optic detections", "how do we connect or start the thirdeye" | Meduza address answers (`ping OK`), no `tailscale0` route; node status `Not Connected (0x00)` or stuck `Initializing (0x01)` |
 | `camera-offline-onvif` | "camera offline", "can't move the camera" | `[camera-offline-onvif]`; no `python_optic_ptz` node in config means they mean another device |
 | `no-video-in-ui` | "camera moves but black video" | `[no-video-in-ui]`; `ffmpeg MISSING` in a container |
 | `tracker-never-classifies-drone` | "everything unknown", "no drone alerts" | `[tracker-never-classifies-drone]`, no `ok:classifier-loaded`; weights dir empty |
@@ -305,7 +306,9 @@ the reply, look up in the source:
   radar". Search the whole repo, since the GUI is under `GUItcha30/`, not `src/`
   (`scripts/code.sh grep <ver> 'transmitter|tx_enabled' GUItcha30 src/nodes`). Give the
   operator the exact place to click, and never say "I have no command for this" before you have
-  searched the GUI.
+  searched the GUI. One exception, agreed with the team: the Meduza (ThirdEye) has no GUI
+  control to connect or start it, so there the sensor's own web page is the route
+  (`kb/cases/meduza-needs-connecting-or-starting.md`). Search the GUI first, as for any sensor.
 - **what does the config key really mean?** The schema (`schemas/nodes/<type>.schema.json`)
   gives each key's help text and default, but its wording can mislead: it calls the
   `magos_radar` `ip` the radar's address, and it is the APU's. Read the code that uses the value
