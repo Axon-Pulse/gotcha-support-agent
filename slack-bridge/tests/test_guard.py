@@ -296,6 +296,80 @@ def test_the_real_hook_command_allows_and_blocks():
     assert run_settings_hook(Path(WS), bash("tailscale ssh axon-gotcha-3 uptime")).returncode == 2
 
 
+def outside_quotes(sh: str) -> str:
+    """The shell text with the inside of every quoted string and every comment removed, so a `>`
+    in a message (`echo "re-run with configs/<x> run_triage.sh"`) isn't read as a redirect.
+
+    Quotes are paired the way the shell pairs them: a ' inside "..." is text, a " inside '...' is
+    text, and a backslash escapes. The code inside a `$( ... )` is kept even where it sits in
+    double quotes, because that part is real shell. A regex over "..." and '...' can't do this:
+    one apostrophe in an awk one-liner shifts every pair after it."""
+    out: list[str] = []
+    stack: list = ["code"]      # "code", "dq" (inside "..."), or the open-paren depth of a $( ... )
+    i, n = 0, len(sh)
+    while i < n:
+        c, top = sh[i], stack[-1]
+        if top == "dq":
+            if c == "\\":
+                i += 2
+            elif c == '"':
+                stack.pop()
+                out.append('""')
+                i += 1
+            elif sh.startswith("$(", i):
+                stack.append(1)
+                out.append("$(")
+                i += 2
+            else:
+                i += 1
+            continue
+        if c == "\\":
+            out.append("_")                 # an escaped character is text
+            i += 2
+        elif c == "'":
+            j = sh.find("'", i + 1)
+            out.append("''")
+            i = n if j < 0 else j + 1
+        elif c == '"':
+            stack.append("dq")
+            i += 1
+        elif sh.startswith("$(", i):
+            stack.append(1)
+            out.append("$(")
+            i += 2
+        elif c == "#" and (i == 0 or sh[i - 1].isspace()):
+            j = sh.find("\n", i)            # a comment runs to the end of the line
+            i = n if j < 0 else j
+        else:
+            if isinstance(top, int):
+                if c == "(":
+                    stack[-1] = top + 1
+                elif c == ")":
+                    stack[-1] = top - 1
+                    if stack[-1] == 0:
+                        stack.pop()
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
+def test_outside_quotes_drops_text_but_keeps_real_redirects():
+    f = outside_quotes
+    assert ">" not in f('echo "(re-run with a config: GOTCHA_CONFIG=configs/<x> run_triage.sh <host>)"')
+    assert ">" not in f('echo "it' + "'" + 's a -> b"')          # an apostrophe inside double quotes
+    assert ">" not in f("echo 'a \"quoted\" > b'")               # a double quote inside single quotes
+    assert ">" not in f("echo hi   # a > b")                     # a trailing comment
+    assert ">" not in f('echo "${#arr[@]} > 1"')                 # `#` that isn't a comment
+    # one apostrophe in an earlier awk program must not shift the pairing of what follows
+    assert ">" not in f("awk '{print $1}' f; echo \"a > b\"")
+    # and a write is still a write, plain or hidden inside $( ) in a quoted string
+    assert ">" in f("echo hi > /tmp/x")
+    assert ">" in f("echo hi >/tmp/x")
+    assert ">" in f('echo "done" 2>/tmp/err')
+    assert ">" in f('echo "$(echo a > /tmp/x)"')
+    assert ">" in f('x="$(printf %s "$(date)" > /tmp/x)"')
+
+
 def test_the_triage_payload_only_reads():
     """triage_remote.sh runs on the customer's machine; it must hold no mutating command."""
     import re
@@ -311,7 +385,7 @@ def test_the_triage_payload_only_reads():
         r"\bip\s+(route|addr|link|neigh)\s+(add|del|delete|flush|change|replace)",
     ]
     # A redirect to a file: `>` outside any quotes (echo "a -> b" is text), not to /dev/null or an fd.
-    bare = re.sub(r"\"[^\"]*\"|'[^']*'", '""', code)
+    bare = outside_quotes(code)
     m = re.search(r"(?<![-=<])>>?\s*(?!/dev/null|&)[^\s|&;)]", bare)
     assert not m, f"triage_remote.sh writes to a file: {bare[max(0, m.start() - 40):m.end() + 20]!r}"
     for pat in banned:

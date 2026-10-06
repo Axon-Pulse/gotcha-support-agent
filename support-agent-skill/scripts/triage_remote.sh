@@ -265,28 +265,33 @@ else
   echo "acoustic backend: NOT LISTENING, and nothing acoustic-named was found as a container, image, compose file, service or process. That shows it is not running here. It does not show it was never installed: it may live under another name or on another host. Do not call it 'not installed'."
 fi
 up_s=$(cut -d. -f1 /proc/uptime 2>/dev/null)
-[ -n "$up_s" ] && [ "$up_s" -lt 3600 ] && echo "NOTE: the machine has been up only $(uptime -p 2>/dev/null). After a reboot, a backend that has not come back is a likelier story than one that was never installed."
+[ -n "$up_s" ] && [ "$up_s" -lt 3600 ] && echo "NOTE: the machine has been up only $(uptime -p 2>/dev/null). After the machine restarts, a backend that has not come back is a likelier story than one that was never installed."
 
 # --- sensor paths ---------------------------------------------------------------------------
 sec "sensor paths (route taken, neighbour cache$([ "$PING_SENSORS" = 1 ] && echo ', ping'))"
 IPS=$(printf '%s\n' "$PC" | grep -oE '\b(10\.[0-9]+|172\.(1[6-9]|2[0-9]|3[01])|192\.168)\.[0-9]+\.[0-9]+\b' | sort -uV | head -40)
 [ -z "$IPS" ] && echo "no sensor addresses found in resolved config"
 # Pings run in parallel and each is capped, so a site with several dead sensors costs a few
-# seconds in total, not ~3s per sensor one after another.
-PINGD=$(mktemp -d 2>/dev/null)
+# seconds in total, not ~3s per sensor one after another. The result of each comes back as the
+# exit status of its background job (`wait <pid>`), so nothing is written on the customer's machine.
 RADARS=""
 for apu in $APUS; do last=${apu##*.}; [[ $last =~ ^6[0-9]$ ]] && RADARS="$RADARS ${apu%.*}.5${last:1}"; done
-if [ "$PING_SENSORS" = 1 ] && [ -n "$PINGD" ]; then
+declare -A PINGPID PINGRES
+if [ "$PING_SENSORS" = 1 ]; then
   for ip in $IPS $RADARS; do
-    ( timeout 5 ping -c2 -W1 "$ip" >/dev/null 2>&1 && echo "ping OK" || echo "ping DOWN" ) > "$PINGD/$ip" &
+    [ -n "${PINGPID[$ip]:-}" ] && continue
+    timeout 5 ping -c2 -W1 "$ip" >/dev/null 2>&1 &
+    PINGPID[$ip]=$!
   done
-  wait
+  for ip in "${!PINGPID[@]}"; do
+    wait "${PINGPID[$ip]}" && PINGRES[$ip]="ping OK" || PINGRES[$ip]="ping DOWN"
+  done
 fi
 sensor_line() {  # $1 = ip, $2 = label
   local ip=$1 r n p="" flag=""
   r=$(ip route get "$ip" 2>/dev/null | head -1 | grep -oE 'dev [^ ]+( src [^ ]+)?')
   n=$(ip neigh show "$ip" 2>/dev/null | awk '{print $NF}')
-  [ "$PING_SENSORS" = 1 ] && p=$(cat "$PINGD/$ip" 2>/dev/null || echo "ping not run")
+  [ "$PING_SENSORS" = 1 ] && p=${PINGRES[$ip]:-ping not run}
   [[ $r == *tailscale* ]] && flag="  <-- ROUTED VIA TAILNET (hijack)"
   printf '%-16s %-32s neigh=%-10s %s%s  %s\n' "$ip" "${r:-no route}" "${n:-none}" "$p" "$flag" "$2"
 }
