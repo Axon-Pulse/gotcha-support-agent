@@ -1,0 +1,47 @@
+# The Slack bot as a service on this machine.
+#
+#   cp .env.example .env && chmod 600 .env     # then paste the tokens into .env
+#   docker compose up -d --build                # start; it comes back after a reboot or a crash
+#   docker compose logs -f                      # watch
+#   docker compose down                         # stop
+#
+# Run from slack-bridge/. ${HOME} below is the host user whose access the bot borrows.
+services:
+  bot:
+    build:
+      context: ..
+      dockerfile: slack-bridge/Dockerfile
+      args:
+        BOT_UID: ${BOT_UID:-1000}
+        BOT_GID: ${BOT_GID:-1000}
+    image: gotcha-support-bot
+    container_name: gotcha-support-bot
+    restart: unless-stopped
+    init: true                      # reaps the ssh/claude processes a timed-out turn leaves
+    logging:                        # Docker keeps container logs forever unless capped
+      driver: json-file
+      options: {max-size: 10m, max-file: "5"}
+    env_file: .env
+    # The host's network, so the tailnet names (MagicDNS) and routes work exactly as they do
+    # on the host. No port is opened: Slack is reached over an outbound WebSocket.
+    network_mode: host
+    volumes:
+      # Tailscale: the host's daemon (its socket directory, which survives a tailscaled
+      # restart) and its own CLI, so client and daemon versions always match.
+      - /var/run/tailscale:/var/run/tailscale
+      - /usr/bin/tailscale:/usr/bin/tailscale:ro
+      # Site logins and pinned host keys, read-only. Also the key for `code.sh sync` to GitHub.
+      - ${HOME}/.ssh:/home/gotcha/.ssh:ro
+      # The gotcha30 clone the skill reads source from (code.sh). Writable so `code.sh sync`
+      # can fetch new releases.
+      - ${HOME}/.cache/gotcha-support/gotcha30:/home/gotcha/.cache/gotcha-support/gotcha30
+      # What each site last ran (systems.tsv), shared with runs of the skill on the host.
+      - ${HOME}/.local/state/gotcha-support:/home/gotcha/.local/state/gotcha-support
+      # Claude's sessions (a thread reply resumes one) and the thread -> session map.
+      - claude:/home/gotcha/.claude
+      - threads:/app/slack-bridge/state
+      - /etc/localtime:/etc/localtime:ro
+
+volumes:
+  claude:
+  threads:

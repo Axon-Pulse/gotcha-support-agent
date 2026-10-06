@@ -1,0 +1,17 @@
+# Read by BuildKit for slack-bridge/Dockerfile only (the build context is the repo root).
+# Secrets and per-machine state never go into the image.
+**/.env
+**/.env.*
+!**/.env.example
+**/*.pem
+**/*.key
+**/id_*
+support-agent-skill/sshkey*
+support-agent-skill/state/
+slack-bridge/state/
+slack-bridge/.venv/
+**/__pycache__/
+**/.pytest_cache/
+.git/
+evals/
+traces/
