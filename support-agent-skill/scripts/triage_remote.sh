@@ -274,11 +274,12 @@ IPS=$(printf '%s\n' "$PC" | grep -oE '\b(10\.[0-9]+|172\.(1[6-9]|2[0-9]|3[01])|1
 # Pings run in parallel and each is capped, so a site with several dead sensors costs a few
 # seconds in total, not ~3s per sensor one after another. The result of each comes back as the
 # exit status of its background job (`wait <pid>`), so nothing is written on the customer's machine.
+GWS=$(ip route show default 2>/dev/null | awk '{for(i=1;i<NF;i++) if($i=="via") print $(i+1)}' | sort -u | head -3)
 RADARS=""
 for apu in $APUS; do last=${apu##*.}; [[ $last =~ ^6[0-9]$ ]] && RADARS="$RADARS ${apu%.*}.5${last:1}"; done
 declare -A PINGPID PINGRES
 if [ "$PING_SENSORS" = 1 ]; then
-  for ip in $IPS $RADARS; do
+  for ip in $IPS $RADARS $GWS; do
     [ -n "${PINGPID[$ip]:-}" ] && continue
     timeout 5 ping -c2 -W1 "$ip" >/dev/null 2>&1 &
     PINGPID[$ip]=$!
@@ -312,6 +313,52 @@ for apu in $APUS; do
 done
 tsr=$(ip route show table 52 2>/dev/null | grep -vE '^(100\.|fd7a|throw|unreachable)' | head -10)
 [ -n "$tsr" ] && { echo "tailscale-installed routes to non-tailnet subnets:"; echo "$tsr" | sed 's/^/    /'; }
+
+# --- network links --------------------------------------------------------------------------
+# A link that negotiated down (1000 -> 10 Mbit/s) still pings fine, so ping can't see it; the
+# NIC's own link state, speed and error counters can (link-down-or-slow-physical). Only this
+# machine's side is visible: the switch port, PoE and the far device are not.
+sec "network links (physical NICs, default route)"
+NETSYS=${NETSYS:-/sys/class/net}   # overridable so selftest.sh can feed it a fake tree
+nics=0
+for d in "$NETSYS"/*; do
+  n=${d##*/}
+  [ -e "$d/device" ] || continue                  # physical only: lo, docker0, veth*, br-*, tailscale0 have none
+  nics=$((nics+1))
+  st=$(cat "$d/operstate" 2>/dev/null); sp=$(cat "$d/speed" 2>/dev/null); dx=$(cat "$d/duplex" 2>/dev/null)
+  rxe=$(cat "$d/statistics/rx_errors" 2>/dev/null); crc=$(cat "$d/statistics/rx_crc_errors" 2>/dev/null)
+  txe=$(cat "$d/statistics/tx_errors" 2>/dev/null); ups=$(cat "$d/carrier_up_count" 2>/dev/null)
+  kind=ethernet; [ -d "$d/wireless" ] && kind=wifi
+  addr=$(ip -4 -o addr show dev "$n" 2>/dev/null | awk '{print $4}' | paste -sd,)
+  flag=""; wd=""
+  if [ "$st" != up ]; then
+    flag="  (no link: normal for an unused port, otherwise cable, port or the far end)"
+  elif [ "$kind" = wifi ]; then
+    # /proc/net/wireless: link quality (of 70) and signal level in dBm; readable without root
+    w=$(awk -v n="$n:" '$1==n {gsub(/\./,"",$3); gsub(/\./,"",$4); print $3 " " $4}' "${PROC_WIRELESS:-/proc/net/wireless}" 2>/dev/null)
+    if [ -n "$w" ]; then
+      sig=${w#* }; wd="signal ${sig} dBm quality ${w% *}/70"
+      br=$(iwconfig "$n" 2>/dev/null | grep -oE 'Bit Rate[=:][0-9.]+ [A-Za-z/]+' | head -1 | cut -d= -f2 | cut -d: -f2)
+      [ -n "$br" ] && wd="$wd bitrate $br"
+      [ "$sig" -lt -70 ] 2>/dev/null && flag="  <-- WEAK SIGNAL (below -70 dBm): slow or dropping link"
+    fi
+  elif [ "$kind" = ethernet ]; then
+    [[ $sp =~ ^[0-9]+$ ]] && [ "$sp" -gt 0 ] && [ "$sp" -lt 1000 ] \
+      && flag="  <-- BELOW 1000 Mbit/s: a healthy gigabit link negotiates 1000 (see link-down-or-slow-physical)"
+    [ "$dx" = half ] && flag="$flag  <-- HALF duplex"
+    [[ $crc =~ ^[0-9]+$ ]] && [ "$crc" -gt 0 ] && flag="$flag  <-- $crc CRC errors since boot (bad cable or port)"
+    [[ $ups =~ ^[0-9]+$ ]] && [ "$ups" -gt 3 ] && flag="$flag  <-- link came up $ups times since boot (flapping)"
+  fi
+  if [ "$kind" = wifi ]; then det="${wd:-no signal reading} rx_err=${rxe:-?} link_ups=${ups:-?}"
+  else det="speed=${sp:-?} duplex=${dx:-?} rx_err=${rxe:-?} crc=${crc:-?} tx_err=${txe:-?} link_ups=${ups:-?}"; fi
+  printf '%-12s %-8s state=%-8s %s addr=%s%s\n' "$n" "$kind" "${st:-?}" "$det" "${addr:-none}" "$flag"
+  [ "$st" = up ] && { nb=$(ip neigh show dev "$n" 2>/dev/null | grep -v FAILED | awk '{printf "%s(%s) ", $1, $NF}' | clip 300); [ -n "$nb" ] && echo "    neighbours seen: $nb"; }
+done
+[ "$nics" = 0 ] && echo "no physical NIC found under $NETSYS"
+for g in $GWS; do
+  echo "default gateway $g: $(ip route get "$g" 2>/dev/null | head -1 | grep -oE 'dev [^ ]+') neigh=$(ip neigh show "$g" 2>/dev/null | awk '{print $NF}' | head -1)  ${PINGRES[$g]:-}"
+done
+[ -z "$GWS" ] && echo "no default gateway via an address (no default route, or it is a direct device route)"
 
 # --- gateway config, model weights, ffmpeg --------------------------------------------------
 sec "gateway config (host/port/mode lines)"

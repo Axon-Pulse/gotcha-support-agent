@@ -114,6 +114,12 @@ A blank neighbour entry, or a section that did not run, is not a finding either.
 **The diagnostic transport is a known cause of the faults it diagnoses.** A tailnet peer
 advertising a sensor subnet makes the kernel prefer `tailscale0` for sensor traffic.
 
+**A link that answers ping can still be badly degraded.** Ping works the same at 10 Mbit as at
+1 Gbit, so reachability says nothing about speed. The triage's "network links" section reads this
+machine's NIC speed, duplex and error counts, and is the check for it. It sees only this machine's end
+of the cable: the switch port, PoE and the device on the far side are invisible to it
+(`kb/cases/link-down-or-slow-physical.md`).
+
 Two further outcomes mean the check never ran: no address for that sensor in the site config,
 and an address that is a hostname rather than an IP (it is not resolved).
 

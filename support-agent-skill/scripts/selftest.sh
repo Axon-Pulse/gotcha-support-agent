@@ -44,6 +44,32 @@ for args in "h" "h 'a;b'" "h dumbo 0" "h dumbo 501" "h dumbo 10 -f" "h dumbo --g
   eval "\"$HERE/remote_logs.sh\" $args" >/dev/null 2>&1; [ $? -eq 2 ] && ok "remote_logs refuses: $args" || bad "remote_logs accepted: $args"
 done
 
+# --- triage network section: feed it a fake NIC tree ------------------------------------------
+NET=$(mktemp -d); trap 'rm -rf "$STUB" "$NET"' EXIT
+mknic() {  # name state speed duplex crc ups [wifi]
+  mkdir -p "$NET/$1/statistics" "$NET/$1/device"
+  printf '%s\n' "$2" > "$NET/$1/operstate"; printf '%s\n' "$3" > "$NET/$1/speed"; printf '%s\n' "$4" > "$NET/$1/duplex"
+  printf '%s\n' "$5" > "$NET/$1/statistics/rx_crc_errors"; printf '0\n' > "$NET/$1/statistics/rx_errors"
+  printf '0\n' > "$NET/$1/statistics/tx_errors"; printf '%s\n' "$6" > "$NET/$1/carrier_up_count"
+  [ -n "${7:-}" ] && mkdir -p "$NET/$1/wireless"
+}
+mknic eth0 up 10 half 12 5          # the bad cable: negotiated down, errors, flapping
+mknic eth1 up 1000 full 0 1         # healthy
+mknic eth2 down -1 unknown 0 1      # unplugged
+mknic wlan0 up -1 unknown 0 2 wifi  # weak wifi
+mkdir -p "$NET/docker0"             # virtual: no device link, must not be listed
+printf 'Inter-| sta-|   Quality        |   Discarded packets               | Missed | WE\n face | tus | link level noise |  nwid  crypt   frag  retry   misc | beacon | 22\n wlan0: 0000   28.  -78.  -256        0      0      0      0      0        0\n' > "$NET/wireless"
+net=$( { printf 'PING_SENSORS=0\nGWS=""\nclip() { cut -c1-300; }\nsec() { printf "=== %%s ===\\n" "$*"; }\nNETSYS=%q\nPROC_WIRELESS=%q\ndeclare -A PINGRES\n' "$NET" "$NET/wireless"
+       sed -n '/^# --- network links/,/^# --- gateway config/p' "$HERE/triage_remote.sh" | sed '$d'; } | bash 2>&1 )
+grep -E '^eth0 ' <<<"$net" | grep -q 'BELOW 1000' && ok "net: 10 Mbit link is flagged" || bad "net: 10 Mbit not flagged: $net"
+grep -E '^eth0 ' <<<"$net" | grep -q 'HALF duplex' && ok "net: half duplex is flagged" || bad "net: half duplex not flagged"
+grep -E '^eth0 ' <<<"$net" | grep -q '12 CRC errors' && ok "net: CRC errors are flagged" || bad "net: CRC errors not flagged"
+grep -E '^eth0 ' <<<"$net" | grep -q 'came up 5 times' && ok "net: flapping is flagged" || bad "net: flapping not flagged"
+grep -E '^eth1 ' <<<"$net" | grep -q '<--' && bad "net: healthy gigabit link flagged" || ok "net: healthy gigabit link not flagged"
+grep -E '^eth2 ' <<<"$net" | grep -q 'no link' && ok "net: down port reported as no link" || bad "net: down port: $net"
+grep -E '^wlan0 ' <<<"$net" | grep -q 'WEAK SIGNAL' && ok "net: weak wifi is flagged" || bad "net: weak wifi not flagged: $net"
+grep -q '^docker0' <<<"$net" && bad "net: virtual device listed" || ok "net: virtual device skipped"
+
 # --- KB consistency: signatures <-> cases <-> SKILL.md index -----------------------------------
 for s in $(grep -vE '^#|^$' "$HERE/signatures.txt" | cut -d'|' -f1 | grep -v '^ok:'); do
   [ -f "$SKILL/kb/cases/$s.md" ] && ok "signature has a case: $s" || bad "signature slug has no case file: $s"

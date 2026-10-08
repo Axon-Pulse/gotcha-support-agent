@@ -84,6 +84,7 @@ auto-detects the gotcha directory, then prints one section per view:
 | resolved config | `--print-config` for the running config, with secrets redacted: which nodes and sensors this site actually has |
 | site config: sensor addresses | each node in the site's own config: type and address. The source of truth for "what is the radar's IP" |
 | sensor paths | for each sensor IP: the route the kernel would use, the neighbour-cache state, and a flag when traffic would go via `tailscale0`. Magos addresses are labelled APU, and the radar's derived address (APU `.6x` -> `.5x`) gets its own line |
+| network links | each physical NIC: link state, negotiated speed, duplex, CRC and error counts and link-ups since boot, neighbours seen; wifi signal in dBm; each default gateway with its neighbour state (and ping with `--ping`). Flags below 1000 Mbit/s, half duplex, CRC errors, flapping, weak wifi. Ping cannot see a link that negotiated down, this can; it shows only this machine's side, not the switch port or the far device |
 | gateway config, weights, ffmpeg | `host`/`mode` lines, model weight files, ffmpeg present in each container |
 | resources | disk, memory, `/dev/shm` eCAL segments, logind `RemoveIPC` vs the core container's user (`AT RISK` flag), `ecal_rec` CPU, recent OOM kills |
 
@@ -116,7 +117,8 @@ Options, all passed as environment variables or flags:
   radar shows no route or neighbour entry, or when nothing on the sensor LAN answers passively.
   The route and neighbour columns are passive and usually settle the rest without it.
   **In the Slack bot, pings are on by default** (`BRIDGE_ALLOW_PING=0` turns them off), so never
-  ask the PM first. When the report is about a radar, a sensor, or "no detections", run the
+  ask the PM first. When the report is about a radar, a sensor, "no detections", or the network
+  (a modem, the uplink, a slow or missing connection), run the
   *first* triage with `--ping` rather than running a second one. For any other report, leave it
   off. If the guard blocks `--ping`, say the ping is switched off, answer from the passive
   checks, and name the ping as the step that would confirm it. Outside Slack (a person running
@@ -232,6 +234,7 @@ work" branches are only in the file.
 | `asu-backend-never-reachable` | "acoustic panel all zeros", "page contradicts launcher" | `acoustic backend:` line says not listening; `asu api` 000 on the configured URL; a stopped/exited container, if one exists (137 = OOM) |
 | `asu-degraded-after-backend-recovery` | "backend is back but acoustic still degraded", "degraded but detections flow" | `acoustic backend:` says it listens; old `asu-backend-never-reachable` lines but none since the backend started; acoustic degraded, not offline |
 | `meduza-needs-connecting-or-starting` | "thirdeye red or yellow, no optic detections", "how do we connect or start the thirdeye" | Meduza address answers (`ping OK`), no `tailscale0` route; node status `Not Connected (0x00)` or stuck `Initializing (0x01)` |
+| `link-down-or-slow-physical` | "can't find the new modem", "powered through PoE but unreachable", "link is slow but ping works", "stuck at 10 Mbit" | triage `network links`: a `BELOW 1000 Mbit/s`, `HALF duplex`, CRC or flapping flag; a gateway or neighbour that is `FAILED`/missing; the switch's own port state is not visible to the bot |
 | `camera-offline-onvif` | "camera offline", "can't move the camera" | `[camera-offline-onvif]`; no `python_optic_ptz` node in config means they mean another device |
 | `no-video-in-ui` | "camera moves but black video" | `[no-video-in-ui]`; `ffmpeg MISSING` in a container |
 | `tracker-never-classifies-drone` | "everything unknown", "no drone alerts" | `[tracker-never-classifies-drone]`, no `ok:classifier-loaded`; weights dir empty |
@@ -398,6 +401,9 @@ The rules from that document that matter most when you're under time pressure:
 - a node that is `OFFLINE` in the UI but running with a long uptime is a transport problem,
   not a dead node.
 - a section that errored gave you no information. It did not give you a negative result.
+- a link that pings can still be slow. Read the `network links` speed before calling a connection
+  healthy; a 10 Mbit or half-duplex line with CRC errors is a cable or port, not the device
+  (`kb/cases/link-down-or-slow-physical.md`). The bot sees only this machine's side of the wire.
 - if the evidence supports two stories, say both and name what would separate them.
 
 `kb/glossary.md` helps when the PM's word doesn't match the system's. "The camera" might be
