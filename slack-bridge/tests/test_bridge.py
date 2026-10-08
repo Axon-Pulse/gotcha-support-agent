@@ -27,6 +27,67 @@ def test_the_prompt_tells_the_bot_it_has_only_the_skills_scripts():
     assert not hasattr(B, "FOLLOWUPS") and not hasattr(B, "STRICT_NOTE")
 
 
+def test_the_prompt_asks_for_the_reply_in_the_pms_language():
+    """The reply template is English; without this a Hebrew question got an English answer."""
+    assert "language of the PM's latest message" in B.system_prompt()
+
+
+def test_the_prompt_keeps_commands_out_of_hebrew_sentences():
+    assert "never put a command or a log line inside a Hebrew sentence" in B.system_prompt()
+
+
+def test_the_prompt_gives_the_hebrew_labels_instead_of_leaving_them_to_the_model():
+    prompt = B.system_prompt()
+    for label in ("*מה אומרים ללקוח:*", "*מה עושים:*", "*לוודא שהתקלה נפתרה:*", "*רמת ביטחון:*"):
+        assert label in prompt
+
+
+def test_an_english_answer_is_left_exactly_as_it_is():
+    text = "*gotcha 4: radar off*\n1. Run `docker restart gotcha_c2`\n```\nlog line\n```"
+    assert B.rtl_fix(text) == text
+
+
+def test_a_hebrew_line_is_isolated_rtl_and_its_inline_code_ltr_outside_the_backticks():
+    out = B.rtl_fix("1. מריצים `docker restart x` ובודקים")
+    assert out == "\u2067\u20661\u2069. מריצים \u2066`docker restart x`\u2069 ובודקים\u2069"
+
+
+def test_each_english_run_is_isolated_so_an_arrow_cannot_join_two_of_them():
+    out = B.rtl_fix("ימני ← Transmitter ← Start transmitting).")
+    assert "\u2066Transmitter\u2069 ← \u2066Start transmitting\u2069)." in out
+
+
+def test_an_ellipsis_that_belongs_to_a_menu_name_stays_inside_the_english_run():
+    assert "\u2066Transmitter…\u2069" in B.rtl_fix("בחרו Transmitter… עכשיו")
+
+
+def test_an_ip_keeps_its_dots_and_a_closing_full_stop_stays_outside():
+    out = B.rtl_fix("הכתובת 192.168.44.60, ועונה ל-ping.")
+    assert "\u2066192.168.44.60\u2069," in out and "\u2066ping\u2069." in out
+
+
+def test_double_asterisk_bold_becomes_slacks_single_asterisk_in_a_hebrew_answer():
+    out = B.rtl_fix("לחצו **Start** עכשיו")
+    assert "*" in out and "**" not in out
+
+
+def test_slack_links_and_emoji_are_left_alone_in_a_hebrew_line():
+    out = B.rtl_fix("ראו <https://x.io/a|doc> :warning: עכשיו")
+    assert "<https://x.io/a|doc>" in out and ":warning:" in out and "\u2066warning" not in out
+
+
+def test_code_blocks_and_english_lines_inside_a_hebrew_answer_are_untouched():
+    text = "מריצים את הפקודה:\n```\ndocker restart x  # שורה\n```\nDone."
+    lines = B.rtl_fix(text).split("\n")
+    assert lines[0] == "\u2067מריצים את הפקודה:\u2069"
+    assert lines[1:] == text.split("\n")[1:]
+
+
+def test_the_direction_marks_can_be_switched_off(monkeypatch):
+    monkeypatch.setattr(B, "RTL_MARKS", False)
+    assert B.rtl_fix("שלום") == "שלום"
+
+
 def test_the_allowed_sites_reach_the_guard_and_the_listing(monkeypatch):
     monkeypatch.setattr(B, "ALLOWED_HOSTS", r"axon-gotcha-[0-9]+")
     env = B.child_env()
@@ -216,6 +277,29 @@ def test_a_thread_reply_still_resumes_its_session_with_the_message_on_stdin(echo
     seen = json.loads(B.run_claude("and the camera?", "sess-1")["text"])
     assert seen["argv"][seen["argv"].index("--resume") + 1] == "sess-1"
     assert seen["stdin"] == "and the camera?"
+
+
+def test_a_first_turn_gets_its_session_id_from_the_bridge(echo_cli):
+    seen = json.loads(B.run_claude("map is empty on gotcha 3", None)["text"])
+    assert "--resume" not in seen["argv"]
+    assert len(seen["argv"][seen["argv"].index("--session-id") + 1]) == 36   # a uuid
+
+
+def test_a_resumed_turn_does_not_set_a_session_id(echo_cli):
+    seen = json.loads(B.run_claude("and the camera?", "sess-1")["text"])
+    assert "--session-id" not in seen["argv"]
+
+
+def test_a_turn_killed_at_the_timeout_still_keeps_its_thread_session(tmp_path, monkeypatch):
+    """Else the PM's next message starts a new session that never saw the report."""
+    cli = tmp_path / "claude"
+    cli.write_text("#!/usr/bin/env python3\nimport time\ntime.sleep(30)\n")
+    cli.chmod(cli.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setattr(B, "CLAUDE", str(cli))
+    monkeypatch.setattr(B, "TIMEOUT_S", 1)
+    res = B.run_claude("map is empty on gotcha 3", None)
+    assert not res["ok"] and res["text"].startswith("No answer within 1s")
+    assert res["session_id"] and len(res["session_id"]) == 36
 
 
 def test_the_argv_carries_no_user_text_at_all():

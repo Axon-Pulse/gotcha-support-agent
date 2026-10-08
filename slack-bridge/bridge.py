@@ -32,10 +32,12 @@ Run:
 import json
 import logging
 import os
+import re
 import signal
 import subprocess
 import threading
 import time
+import uuid
 from collections import OrderedDict
 from pathlib import Path
 
@@ -52,7 +54,7 @@ ALLOW_DMS = os.environ.get("SLACK_ALLOW_DMS") == "1"
 CLAUDE = os.environ.get("CLAUDE_BIN", "claude")
 MODEL = os.environ.get("BRIDGE_MODEL", "claude-sonnet-5-5")       # empty = Claude Code's default
 EFFORT = os.environ.get("BRIDGE_EFFORT", "medium")
-TIMEOUT_S = int(os.environ.get("BRIDGE_TIMEOUT_S", "30"))
+TIMEOUT_S = int(os.environ.get("BRIDGE_TIMEOUT_S", "90"))
 MAX_CONCURRENT = int(os.environ.get("BRIDGE_MAX_CONCURRENT", "2"))
 # The machines the bot may reach. bash_guard.py reads the same variable (it inherits this
 # environment through claude), and list_systems.sh lists only these. Keep the default in step
@@ -81,6 +83,16 @@ paths, container or tool names. If it escalates, a holding message.
 1. <step> — `exact command`, copied from the KB case, with real values filled in
 *Confirm fixed:* one line.
 *Confidence:* high/medium/low · verified on the machine or not · what was ruled out.
+
+Write the reply in the language of the PM's latest message (Hebrew in, Hebrew out),
+including the bold labels above. Keep commands, log lines, file names and system names
+exactly as they are, in English. If the message mixes languages, use the one the PM mostly
+wrote in. In Hebrew the labels are exactly these, never the English ones:
+*מה אומרים ללקוח:*  *מה עושים:*  *לוודא שהתקלה נפתרה:*  *רמת ביטחון:*
+Bold is one *asterisk* on each side, never two.
+In a Hebrew reply, never put a command or a log line inside a Hebrew sentence: end the
+sentence with a colon and give the command or log line in a ``` block on its own line.
+A system or node name that has to stay inside a sentence goes in `backticks`.
 
 You are read-only and unattended. You cannot write files or change a system, so never
 offer to; every fix is a step for the PM. If the PM did not say which system and more
@@ -231,6 +243,50 @@ def footer(res: dict) -> str:
     return "_" + " · ".join(b for b in bits if b) + "_" if any(bits) else ""
 
 
+# Slack lays a message out left-to-right, so a Hebrew line that holds English or a command
+# comes out with its words in the wrong order. The fix is Unicode direction isolates (the
+# browser's bidi algorithm does the rest): each Hebrew line is isolated as right-to-left, and
+# every run of English inside it as left-to-right, so a `code span`, an IP or a UI path
+# keeps its own order and a neighbouring arrow, colon or bracket cannot glue two runs
+# together. The marks go outside the backticks so Slack still sees the code span.
+# English-only lines and ``` blocks are left exactly as they are.
+_RLI, _LRI, _PDI = "\u2067", "\u2066", "\u2069"
+_HEBREW = re.compile(r"[\u0590-\u05ff]")
+_WORD = r"[A-Za-z0-9][A-Za-z0-9_.:/@#%+…\-]*"
+# Left alone: Slack's <links> and :emoji:. Isolated whole: `inline code`. Then English runs.
+_RUNS = re.compile(rf"(?P<keep><[^>\n]*>|:[a-z0-9_+\-]+:)|(?P<code>`[^`\n]+`)|(?P<run>{_WORD}(?: {_WORD})*)")
+_DOUBLE_BOLD = re.compile(r"\*\*([^*\n]+)\*\*")
+RTL_MARKS = os.environ.get("BRIDGE_RTL_MARKS", "1") == "1"
+
+
+def _isolate_runs(line: str) -> str:
+    def one(m):
+        if m["keep"]:
+            return m[0]
+        if m["code"]:
+            return _LRI + m[0] + _PDI
+        run = m["run"]
+        tail = len(run) - len(run.rstrip(".:-/"))       # a sentence's own full stop stays outside
+        return _LRI + run[:len(run) - tail] + _PDI + run[len(run) - tail:]
+    return _RUNS.sub(one, line)
+
+
+def rtl_fix(text: str) -> str:
+    if not RTL_MARKS or not _HEBREW.search(text):
+        return text
+    out, in_block = [], False
+    for line in text.split("\n"):
+        if line.count("```") % 2:
+            in_block = not in_block
+            out.append(line)
+        elif in_block:
+            out.append(line)
+        else:
+            line = _DOUBLE_BOLD.sub(r"*\1*", line)          # Slack bolds with one asterisk
+            out.append(_RLI + _isolate_runs(line) + _PDI if _HEBREW.search(line) else line)
+    return "\n".join(out)
+
+
 def fit(text: str) -> str:
     if len(text) <= _SLACK_LIMIT:
         return text
@@ -275,8 +331,15 @@ class ThreadStore:
 def run_claude(message: str, session_id: str | None) -> dict:
     """One headless Claude Code turn. Never raises: a failure is an answer to post."""
     started = time.monotonic()
+    argv = claude_argv(session_id)
+    # A thread's first turn gets its id from us, not from claude's answer: a turn that is
+    # killed at the timeout never answers, and without the id the PM's next message would
+    # start a new session that has not seen the report.
+    new_id = None if session_id else str(uuid.uuid4())
+    if new_id:
+        argv += ["--session-id", new_id]
     # Own process group, so a timeout also ends the ssh sessions the turn started.
-    p = subprocess.Popen(claude_argv(session_id), cwd=WORKSPACE, env=child_env(),
+    p = subprocess.Popen(argv, cwd=WORKSPACE, env=child_env(),
                          stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                          text=True, start_new_session=True)
     try:
@@ -284,10 +347,10 @@ def run_claude(message: str, session_id: str | None) -> dict:
     except subprocess.TimeoutExpired:
         os.killpg(p.pid, signal.SIGKILL)
         p.communicate()
-        return {"ok": False, "session_id": session_id,
+        return {"ok": False, "session_id": session_id or new_id,
                 "text": f"No answer within {TIMEOUT_S}s — the site link may be slow. "
-                        "Nothing was changed on the system; ask again, or name the one "
-                        "thing to check."}
+                        "Nothing was changed on the system. Reply in this thread "
+                        "(tag me) and I'll carry on with what you already told me."}
     res = parse_result(out)
     if p.returncode and not res["ok"]:
         log.error("claude exited %s: %s", p.returncode, (err or "")[-500:])
@@ -361,7 +424,7 @@ class Bridge:
             res = run_claude(text, self.store.get(channel, thread_ts))
             if res.get("session_id"):
                 self.store.put(channel, thread_ts, res["session_id"])
-        body = fit(res["text"]) + (f"\n{footer(res)}" if footer(res) else "")
+        body = fit(rtl_fix(res["text"])) + (f"\n{footer(res)}" if footer(res) else "")
         self.client.chat_update(channel=channel, ts=ack_ts, text=body)
 
 

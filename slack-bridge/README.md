@@ -282,7 +282,7 @@ A dedicated service user (e.g. `support-bot`) works too, but then do steps 3 and
 | "This channel is not approved for the support bot." | Asked in a channel not on the list | Add its ID, comma-separated |
 | No reply at all | Bot not invited, or the process isn't running | `/invite @gotcha-support`; check `docker compose logs` (or `journalctl -u gotcha-support-bot`) |
 | Docker: `Permission denied (publickey)` or git "dubious ownership" | Container uid differs from the owner of `~/.ssh` / the clone | Set `BOT_UID`/`BOT_GID` in `.env` to `id -u`/`id -g`, rebuild |
-| "No answer within 30s" | Slow site link, or a site waiting for a password or browser approval, or `BRIDGE_TIMEOUT_S` too low | Run check 5.2 for that site by hand; raise `BRIDGE_TIMEOUT_S` |
+| "No answer within 90s" | Slow site link, or a site waiting for a password or browser approval, or `BRIDGE_TIMEOUT_S` too low | Run check 5.2 for that site by hand; raise `BRIDGE_TIMEOUT_S` |
 | `tailscale ssh`: "Host key verification failed" | That site doesn't run Tailscale SSH | Expected. Use plain ssh (check 5.2); the skill does this by itself. |
 | Service fails: `claude` not found | `CLAUDE_BIN` missing | Add it to `/etc/gotcha-support-bot.env` |
 | Answer says a check was blocked | The guard refused a command the model wrote | Expected. The answer gives the PM that check as a step. |
@@ -298,7 +298,8 @@ A dedicated service user (e.g. `support-bot`) works too, but then do steps 3 and
 | `SLACK_ALLOW_DMS` | `0` | `1` to answer DMs from allowed users. |
 | `BRIDGE_EFFORT` | `medium` | Claude Code effort: `low` is faster, `high` is more thorough. |
 | `BRIDGE_MODEL` | `claude-sonnet-5-5` | e.g. `claude-opus-5-5`; empty uses Claude Code's own default. |
-| `BRIDGE_TIMEOUT_S` | `30` | One answer's wall-clock cap; the ssh sessions die with it, and a turn that hits it posts no answer. The triage's own limit is set 12s below it (`GOTCHA_TRIAGE_TIMEOUT`). |
+| `BRIDGE_TIMEOUT_S` | `90` | One answer's wall-clock cap; the ssh sessions die with it, and a turn that hits it posts no answer. The triage's own limit is set 12s below it (`GOTCHA_TRIAGE_TIMEOUT`). |
+| `BRIDGE_RTL_MARKS` | `1` | Wraps each Hebrew line of an answer in invisible direction marks so Hebrew mixed with English or code keeps its word order in Slack. Set `0` to post the model's text untouched. |
 | `BRIDGE_MAX_CONCURRENT` | `2` | Questions answered at once. |
 | `BRIDGE_ALLOWED_HOSTS` | `axon-gotcha-[0-9]+` | Regex (whole name) for the machines the bot may reach. The guard refuses any other host, and `list_systems.sh` lists only these. |
 | `CLAUDE_BIN` | `claude` | Path to the `claude` binary. Set it for a service. |
