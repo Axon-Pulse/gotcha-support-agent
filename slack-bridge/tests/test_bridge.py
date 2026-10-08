@@ -283,3 +283,31 @@ def test_the_overlay_is_passed_on_every_turn_and_cannot_come_from_a_message():
     for sid in (None, "sess-1"):
         argv = B.claude_argv(sid)
         assert argv[argv.index("--settings") + 1] == B.permission_overlay()
+
+
+def test_the_workspace_is_trusted_so_the_allow_list_applies(tmp_path, monkeypatch):
+    """Claude Code ignores permissions.allow from an untrusted workspace: in a fresh container every
+    Bash and Read was refused and the bot said it couldn't check anything."""
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+    B.ensure_workspace_trusted()
+    f = tmp_path / "cfg" / ".claude.json"
+    assert json.loads(f.read_text())["projects"][str(B.WORKSPACE)]["hasTrustDialogAccepted"] is True
+    assert stat.S_IMODE(f.stat().st_mode) == 0o600
+
+
+def test_trusting_the_workspace_keeps_what_claude_already_stored(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path))
+    f = tmp_path / ".claude.json"
+    f.write_text(json.dumps({"userID": "u", "projects": {"/elsewhere": {"x": 1}, str(B.WORKSPACE): {"y": 2}}}))
+    B.ensure_workspace_trusted()
+    B.ensure_workspace_trusted()   # a second start changes nothing
+    d = json.loads(f.read_text())
+    assert d["userID"] == "u" and d["projects"]["/elsewhere"] == {"x": 1}
+    assert d["projects"][str(B.WORKSPACE)] == {"y": 2, "hasTrustDialogAccepted": True}
+
+
+def test_the_bridge_does_not_start_over_a_config_it_cannot_read(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path))
+    (tmp_path / ".claude.json").write_text("{not json")
+    with pytest.raises(SystemExit):
+        B.ensure_workspace_trusted()

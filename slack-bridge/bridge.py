@@ -149,6 +149,40 @@ def child_env() -> dict[str, str]:
     return env
 
 
+def claude_config_file() -> Path:
+    """The file Claude Code keeps its per-project state in: under CLAUDE_CONFIG_DIR when that is
+    set (the container sets it to the volume), else ~/.claude.json."""
+    d = os.environ.get("CLAUDE_CONFIG_DIR")
+    return Path(d) / ".claude.json" if d else Path.home() / ".claude.json"
+
+
+def ensure_workspace_trusted() -> None:
+    """Mark the bot's workspace as trusted in Claude Code's own config.
+
+    Without it Claude Code ignores the `permissions.allow` list in workspace/.claude/settings.json
+    ("this workspace has not been trusted"), so in dontAsk mode every Bash and Read is refused and
+    the bot answers "I couldn't run any checks". On a host that is a trust prompt somebody accepted
+    once; a fresh container has none to accept. The workspace and its settings are ours (root-owned
+    in the image, and the bot has no write tool), so trusting them is the intent."""
+    path = claude_config_file()
+    try:
+        data = json.loads(path.read_text())
+    except FileNotFoundError:
+        data = {}
+    except ValueError:
+        raise SystemExit(f"{path} is not valid JSON; not starting")
+    project = data.setdefault("projects", {}).setdefault(str(WORKSPACE), {})
+    if project.get("hasTrustDialogAccepted") is True:
+        return
+    project["hasTrustDialogAccepted"] = True
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+        json.dump(data, f, indent=2)
+    os.replace(tmp, path)
+    log.info("marked %s as trusted in %s", WORKSPACE, path)
+
+
 def verify_guard() -> None:
     """Refuse to run unless the Bash guard, started the way Claude Code starts it, blocks a
     command it must and passes one it should. Claude Code runs a command when its hook fails any
@@ -351,6 +385,7 @@ def main() -> None:
     if not (WORKSPACE / ".claude" / "skills" / "gotcha-support" / "SKILL.md").exists():
         raise SystemExit(f"the skill is not reachable from {WORKSPACE}/.claude/skills")
 
+    ensure_workspace_trusted()
     verify_guard()
     app = make_app(bot)
     bridge = Bridge(app.client)
