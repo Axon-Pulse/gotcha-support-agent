@@ -131,7 +131,7 @@ scan_logs() {  # $1 = container
     old=""; [ -n "$started" ] && [[ "${lastts:0:19}" < "$started" ]] && old="  (OLD: last seen before the container's last start)"
     printf '[%s] x%s  first=%s  last=%s%s\n    %s\n' "$slug" "$(printf '%s\n' "$m" | wc -l)" \
       "$(printf '%s\n' "$m" | head -1 | cut -d' ' -f1)" "$lastts" "$old" \
-      "$(printf '%s\n' "$m" | tail -1 | cut -d' ' -f2- | clip 300)"
+      "$(printf '%s\n' "$m" | tail -1 | cut -d' ' -f2-)"
   done
 }
 for c in "$CORE" "$GW" $(D ps -a --format '{{.Names}}' 2>/dev/null | grep -i dumbo); do
@@ -140,8 +140,9 @@ for c in "$CORE" "$GW" $(D ps -a --format '{{.Names}}' 2>/dev/null | grep -i dum
   scan_logs "$c"
 done
 
-[ -n "$CORE" ] && { sec "log tail: $CORE (last 40)"; D logs --tail 40 "$CORE" 2>&1 | clip 250; }
-[ -n "$GW" ]   && { sec "log tail: $GW (last 25)";   D logs --tail 25 "$GW"   2>&1 | clip 250; }
+# Whole lines: a log line cut short can lose the field that explains it. remote_logs.sh reads more.
+[ -n "$CORE" ] && { sec "log tail: $CORE (last 40)"; D logs --tail 40 "$CORE" 2>&1; }
+[ -n "$GW" ]   && { sec "log tail: $GW (last 25)";   D logs --tail 25 "$GW"   2>&1; }
 
 # The newest status line of each sensor node, wherever it is in the log. The tail above can be
 # all noise; `radar=` (the radar's own state) is the line that separates "link up" from "radar up".

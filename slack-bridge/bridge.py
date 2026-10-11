@@ -108,11 +108,19 @@ Only the skill's scripts are available here (run_triage.sh, remote_logs.sh, list
 code.sh). You cannot run your own commands on a site, so skip the skill's targeted follow-ups
 (§5): answer from the triage output and the KB, and when one more check would settle
 it, give that check to the PM as a step with its exact command.
+
+How to run them, or the command is refused and the try is wasted:
+- One script per Bash call, by its full path: {scripts}/<script> <args>
+- Nothing else on the line: no `cd`, no `&&` or `;`, no pipes (`| head`, `| grep`), no
+  `2>&1`, no redirects. Output comes back whole; do not shorten it.
+- Read KB files and saved triage files with the Read tool, never `cat` or `grep`. To find a
+  case, use the SKILL.md index, then Read the case file under {kb}.
 """
 
 
 def system_prompt() -> str:
-    return SLACK_PROMPT
+    skill = f"{WORKSPACE}/.claude/skills/gotcha-support"
+    return SLACK_PROMPT.replace("{scripts}", f"{skill}/scripts").replace("{kb}", f"{skill}/kb/cases/")
 
 
 SKILL_DIR = (WORKSPACE / ".claude" / "skills" / "gotcha-support").resolve()
@@ -164,6 +172,10 @@ def child_env() -> dict[str, str]:
     # The triage must end, with whatever it has, well before the turn is killed: a killed turn
     # answers nothing, a short triage answers with less. Leave the model time to write.
     env.setdefault("GOTCHA_TRIAGE_TIMEOUT", str(max(10, TIMEOUT_S - 12)))
+    # Claude Code cuts the middle out of a command's output past its default (about 10 KB),
+    # which dropped part of a source search once. A triage is about 18 KB and a log read can be
+    # far more; this lets it all through, and Claude Code still says when it has cut.
+    env.setdefault("BASH_MAX_OUTPUT_LENGTH", "150000")
     return env
 
 

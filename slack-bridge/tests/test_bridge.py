@@ -27,6 +27,18 @@ def test_the_prompt_tells_the_bot_it_has_only_the_skills_scripts():
     assert not hasattr(B, "FOLLOWUPS") and not hasattr(B, "STRICT_NOTE")
 
 
+def test_the_prompt_says_how_to_run_a_script_so_the_guard_lets_it_through():
+    p = B.system_prompt()
+    scripts = f"{B.WORKSPACE}/.claude/skills/gotcha-support/scripts"
+    assert f"{scripts}/<script>" in p and "{scripts}" not in p and "{kb}" not in p
+    assert "no `cd`" in p and "| head" in p and "Read tool" in p
+
+
+def test_command_output_reaches_the_model_whole(monkeypatch):
+    monkeypatch.delenv("BASH_MAX_OUTPUT_LENGTH", raising=False)
+    assert int(B.child_env()["BASH_MAX_OUTPUT_LENGTH"]) >= 100_000
+
+
 def test_the_prompt_asks_for_the_reply_in_the_pms_language():
     """The reply template is English; without this a Hebrew question got an English answer."""
     assert "language of the PM's latest message" in B.system_prompt()

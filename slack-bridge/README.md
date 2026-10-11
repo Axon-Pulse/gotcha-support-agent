@@ -331,7 +331,7 @@ A dedicated service user (e.g. `support-bot`) works too, but then do steps 3 and
 The bot runs the skill's scripts (`run_triage.sh`, `remote_logs.sh`, `list_systems.sh`,
 `code.sh`) and nothing it composed itself: no `ssh`, no `tailscale ssh`. `remote_logs.sh <host>
 <container> [lines] [--grep REGEX]` is the one way it reads a container's log: a fixed
-`docker logs --tail`, at most 500 lines, redacted like the triage, never following. When the
+`docker logs --tail`, at most 5000 whole lines (`--grep` searches the newest 200000), redacted like the triage, never following. When the
 triage doesn't settle a question, the answer names the one next check as a step for the PM, with
 its exact command.
 

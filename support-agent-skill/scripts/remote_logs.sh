@@ -5,13 +5,14 @@
 #
 # <container> is an exact name or a fragment (`dumbo` finds `gotcha-dumbo-1`); a fragment that
 # matches nothing, or several, lists the containers on the machine instead of guessing.
-# [lines] defaults to 100, at most 500. --grep keeps only matching lines, from the newest
-# 30000 (case-insensitive extended regex), then shows the last [lines] of them.
+# [lines] defaults to 100, at most 5000. --grep keeps only matching lines, from the newest
+# 200000 (case-insensitive extended regex), then shows the last [lines] of them. Lines are
+# shown whole: a stack trace or a JSON record cut short can hide the one field that matters.
 # The output goes through redact.sed like the triage's. Never follows (-f), never writes.
 # Settings as for run_triage.sh: GOTCHA_SSH_USER, GOTCHA_SSH, GOTCHA_TRIAGE_TIMEOUT (default 30).
 set -uo pipefail
 
-usage() { echo "usage: $0 <tailnet-host> <container> [lines<=500] [--grep REGEX]" >&2; exit 2; }
+usage() { echo "usage: $0 <tailnet-host> <container> [lines<=5000] [--grep REGEX]" >&2; exit 2; }
 [ $# -ge 2 ] || usage
 HOST=$1; NAME=$2; shift 2
 N=100; PAT=""
@@ -20,7 +21,7 @@ if [ "${1:-}" = "--grep" ]; then [ $# -eq 2 ] || usage; PAT=$2; shift 2; fi
 [ $# -eq 0 ] || usage
 [[ $NAME =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,100}$ ]] || { echo "refusing container name '$NAME' (letters, digits, _ . - only)" >&2; exit 2; }
 [[ $HOST =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,100}$ ]] || { echo "refusing host '$HOST'" >&2; exit 2; }
-[ "$N" -ge 1 ] && [ "$N" -le 500 ] || { echo "lines must be 1..500" >&2; exit 2; }
+[ "$N" -ge 1 ] && [ "$N" -le 5000 ] || { echo "lines must be 1..5000" >&2; exit 2; }
 [ ${#PAT} -le 200 ] || { echo "--grep pattern too long" >&2; exit 2; }
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -50,10 +51,10 @@ if [ "$(printf '%s\n' "$c" | grep -c .)" -ne 1 ]; then
 fi
 echo "container: $c   $("${D[@]}" inspect -f 'state={{.State.Status}} started={{.State.StartedAt}} exit={{.State.ExitCode}} restarts={{.RestartCount}}' "$c" 2>/dev/null)"
 if [ -n "$PAT" ]; then
-  echo "(lines matching /$PAT/ among the newest 30000; last $N shown)"
-  timeout 25 "${D[@]}" logs -t --tail 30000 "$c" 2>&1 | grep -a -E -i -- "$PAT" | tail -n "$N" | cut -c1-300
+  echo "(lines matching /$PAT/ among the newest 200000; last $N shown)"
+  timeout 25 "${D[@]}" logs -t --tail 200000 "$c" 2>&1 | grep -a -E -i -- "$PAT" | tail -n "$N"
 else
-  timeout 25 "${D[@]}" logs -t --tail "$N" "$c" 2>&1 | cut -c1-300
+  timeout 25 "${D[@]}" logs -t --tail "$N" "$c" 2>&1
 fi
 REMOTE
 } | timeout "$LIMIT" "${SSH[@]}" 'bash -s' 2>&1 | sed -E -f "$HERE/redact.sed"

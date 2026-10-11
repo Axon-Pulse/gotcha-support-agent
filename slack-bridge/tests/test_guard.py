@@ -290,6 +290,19 @@ def test_a_guard_that_exits_0_still_lets_a_command_through(tmp_path):
     assert run_settings_hook(ws, bash("x")).returncode == 0
 
 
+def test_a_deliberate_block_does_not_claim_the_guard_failed():
+    r = run_settings_hook(Path(WS), bash("cd /tmp && ls"))
+    assert r.returncode == 2
+    assert "Blocked by the Slack bot's read-only guard" in r.stderr
+    assert "did not run cleanly" not in r.stderr
+
+
+def test_a_guard_that_crashes_blocks_and_says_so(tmp_path):
+    ws = fake_project(tmp_path, "raise SystemExit(1)\n")
+    r = run_settings_hook(ws, bash("x"))
+    assert r.returncode == 2 and "did not run cleanly" in r.stderr
+
+
 def test_the_real_hook_command_allows_and_blocks():
     assert run_settings_hook(Path(WS), bash(f"{SCRIPTS}/list_systems.sh")).returncode == 0
     assert run_settings_hook(Path(WS), bash("rm -rf /")).returncode == 2

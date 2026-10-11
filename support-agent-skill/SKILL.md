@@ -330,7 +330,7 @@ When the source solves something the KB didn't have, offer to write it up as a n
 tail) works everywhere, Slack included:
 
 ```
-scripts/remote_logs.sh <host> <container> [lines<=500] [--grep REGEX]
+scripts/remote_logs.sh <host> <container> [lines<=5000] [--grep REGEX]
 ```
 
 `<container>` can be a fragment (`dumbo`); a name that matches nothing or several lists the
