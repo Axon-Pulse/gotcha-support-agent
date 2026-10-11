@@ -1,4 +1,9 @@
-# support-agent
+# support-agent (legacy)
+
+> **Retired.** This is the old LangGraph bot, kept for reference. The live bot is
+> `../slack-bridge/` with the skill in `../support-agent-skill/`, and its console is
+> `../console/`. Everything below is relative to this `legacy/` directory: run the commands
+> from here (`cd legacy`).
 
 Multi-agent troubleshooting assistant for gotcha30. Reads a gotcha30 checkout for its
 node inventory; never imports from it.
