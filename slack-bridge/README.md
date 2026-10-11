@@ -42,7 +42,10 @@ an answer built on what was already found. A new top-level message starts fresh.
 | `workspace/.claude/skills/gotcha-support` | Symlink to the skill, so Claude Code loads it in this workspace. |
 | `manifest.yaml` | The Slack app, as a paste-in manifest. |
 | `tests/` | The guard's allow/deny table, and the bridge without Slack or Claude. `GOTCHA_LIVE_CLAUDE=1 pytest tests/test_live_permissions.py` also runs the real `claude` against canary files, to check the read allow-list (about ten model calls). |
+| `skill_hash.sh` | Fingerprint of the skill and bridge files. `make build`/`update` stamp it on the image, so the console can tell whether an edit is deployed. |
 | `state/threads.json` | Slack thread → Claude session (created at run time, gitignored). |
+| `state/turns.jsonl` | One line when a turn starts, one when it ends: who asked, in which thread, outcome, time, cost. No message text; that is in Claude's transcript. |
+| `state/claude/` | Claude Code's config directory in the container: its session transcripts are under `projects/-app-slack-bridge-workspace/`. |
 
 ## Setup
 
@@ -220,8 +223,22 @@ host user:
   if it's missing, Docker creates an empty root-owned directory there).
 - **Site versions:** `~/.local/state/gotcha-support`, shared with runs of the skill on the host.
 
-Claude's sessions and the thread map live in Docker volumes (`claude`, `threads`), so threads
-survive a restart or rebuild.
+Claude's sessions, the thread map and the turn log live in `slack-bridge/state/` on the host
+(bind mounts, gitignored), so threads survive a restart or rebuild and the console can read
+them. `make check` creates `state/claude` as you: a directory Docker creates is root-owned and
+the bot couldn't write it.
+
+**Upgrading from the Docker volumes.** Earlier versions kept the sessions in the volumes
+`slack-bridge_claude` and `slack-bridge_threads`; `make check` refuses to start until they are
+moved. Once:
+
+```sh
+make migrate    # stops the bot, copies both volumes into state/, merges the thread maps
+make update     # starts it on the bind mounts
+```
+
+Reply in an old thread to check it still resumes its session, then
+`docker volume rm slack-bridge_claude slack-bridge_threads`.
 
 ### 7b. Or as a systemd service, without Docker
 Reads its credentials from a root-only file. Needs `sudo`. Replace `YOURUSER` with the login
@@ -271,7 +288,7 @@ the bot runs as: its `~/.ssh` (keys, pinned host keys) and Claude install live t
 
 What is remembered where: the Slack tokens and API key in `/etc/gotcha-support-bot.env`;
 the SSH keys and pinned host keys in the bot user's `~/.ssh`; the Tailscale login in
-`tailscaled`; the Slack thread to Claude session map in `slack-bridge/state/threads.json`.
+`tailscaled`; the Slack thread to Claude session map and the turn log in `slack-bridge/state/`.
 A dedicated service user (e.g. `support-bot`) works too, but then do steps 3 and 5 as that user.
 
 ### When something fails

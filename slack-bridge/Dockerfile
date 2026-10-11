@@ -43,6 +43,10 @@ USER root
 COPY slack-bridge/ /app/slack-bridge/
 COPY support-agent-skill/ /app/support-agent-skill/
 RUN mkdir -p /app/slack-bridge/state && chown gotcha:gotcha /app/slack-bridge/state
+# What these files hash to (skill_hash.sh), so the console can tell whether the KB on disk is
+# the one running. Declared after the COPY lines, so a new value doesn't rebuild earlier layers.
+ARG SKILL_HASH=unknown
+LABEL gotcha.skill-hash=$SKILL_HASH
 
 USER gotcha
 WORKDIR /app

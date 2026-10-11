@@ -20,6 +20,11 @@ ONE SLACK THREAD IS ONE CLAUDE SESSION. A reply in the thread resumes the same s
 so a follow-up ("what about the camera?") sees what was already found, and a new
 top-level message starts fresh. The mapping lives in state/threads.json.
 
+Each turn is also recorded in state/turns.jsonl: the Slack side only (who asked, in which
+thread, how it ended, time and cost). The conversation itself, question, steps and answer,
+is Claude's own transcript, under the Claude config directory by session id. The console at
+../console/ puts the two together.
+
 WHY IT MUST RUN ON THE TAILNET. The skill reaches the sites with `tailscale ssh`, so this
 runs on a machine that can. Claude in Slack runs in Anthropic's cloud and cannot reach a
 private network, which is the reason this file exists at all.
@@ -45,6 +50,7 @@ log = logging.getLogger("slack_bridge")
 HERE = Path(__file__).resolve().parent
 WORKSPACE = HERE / "workspace"
 STATE = HERE / "state" / "threads.json"
+TURNS = HERE / "state" / "turns.jsonl"
 
 _csv = lambda v: {x.strip() for x in os.environ.get(v, "").split(",") if x.strip()}  # noqa: E731
 ALLOWED_CHANNELS = _csv("SLACK_ALLOWED_CHANNELS")
@@ -324,6 +330,30 @@ class ThreadStore:
             tmp.replace(self.path)
 
 
+class TurnLog:
+    """Appends one line when a turn starts and one when it ends, to state/turns.jsonl.
+
+    Only what Claude's transcript of the turn doesn't have: the Slack user and thread, and how
+    the turn ended (a turn killed at the timeout leaves no answer and no cost in its
+    transcript). A start with no end is a turn still running, which the console's Deploy
+    waits for. Writing it must never cost an answer, so a failure is logged and dropped."""
+
+    def __init__(self, path: Path = TURNS):
+        self.path = path
+        self._lock = threading.Lock()
+
+    def write(self, event: str, **fields) -> None:
+        line = json.dumps({"event": event, "ts": round(time.time(), 3), **fields},
+                          ensure_ascii=False)
+        try:
+            with self._lock:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                with open(self.path, "a", encoding="utf-8") as f:
+                    f.write(line + "\n")
+        except OSError as e:
+            log.warning("could not record the turn in %s: %s", self.path, e)
+
+
 # --------------------------------------------------------------------------
 # Running one turn
 # --------------------------------------------------------------------------
@@ -347,13 +377,15 @@ def run_claude(message: str, session_id: str | None) -> dict:
     except subprocess.TimeoutExpired:
         os.killpg(p.pid, signal.SIGKILL)
         p.communicate()
-        return {"ok": False, "session_id": session_id or new_id,
+        return {"ok": False, "outcome": "timeout", "session_id": session_id or new_id,
                 "text": f"No answer within {TIMEOUT_S}s — the site link may be slow. "
                         "Nothing was changed on the system. Reply in this thread "
                         "(tag me) and I'll carry on with what you already told me."}
     res = parse_result(out)
+    res["outcome"] = "ok" if res["ok"] else "error"
     if p.returncode and not res["ok"]:
         log.error("claude exited %s: %s", p.returncode, (err or "")[-500:])
+        res["error"] = f"claude exited {p.returncode}: {(err or '').strip()[-300:]}"
     res["seconds"] = res.get("seconds") or round(time.monotonic() - started)
     res["session_id"] = res.get("session_id") or session_id
     return res
@@ -375,9 +407,10 @@ def authorise(user: str, channel: str) -> tuple[bool, str]:
 
 
 class Bridge:
-    def __init__(self, client, store: ThreadStore | None = None):
+    def __init__(self, client, store: ThreadStore | None = None, turns: TurnLog | None = None):
         self.client = client
         self.store = store or ThreadStore()
+        self.turns = turns or TurnLog()
         self._seen: OrderedDict[str, None] = OrderedDict()
         self._slots = threading.BoundedSemaphore(MAX_CONCURRENT)
         self._threads: dict[str, threading.Lock] = {}
@@ -415,15 +448,27 @@ class Bridge:
         ack = self.client.chat_postMessage(channel=channel, thread_ts=thread_ts,
                                            text=":mag: Checking…")
         threading.Thread(target=self._answer, daemon=True,
-                         args=(channel, thread_ts, ack["ts"], text)).start()
+                         args=(channel, thread_ts, ack["ts"], text, user)).start()
 
-    def _answer(self, channel: str, thread_ts: str, ack_ts: str, text: str) -> None:
+    def _answer(self, channel: str, thread_ts: str, ack_ts: str, text: str,
+                user: str = "") -> None:
+        key = f"{channel}:{thread_ts}"
+        # Recorded before waiting for a slot, so a question still queued counts as in flight.
+        self.turns.write("start", key=key, channel=channel, thread_ts=thread_ts, user=user,
+                         model=MODEL or None, effort=EFFORT)
         # One turn at a time per thread, so a quick follow-up resumes the session the
         # first turn created instead of starting a second one beside it.
-        with self._thread_lock(f"{channel}:{thread_ts}"), self._slots:
-            res = run_claude(text, self.store.get(channel, thread_ts))
+        with self._thread_lock(key), self._slots:
+            resumed = self.store.get(channel, thread_ts)
+            began = time.monotonic()
+            res = run_claude(text, resumed)
+            took = round(time.monotonic() - began)
             if res.get("session_id"):
                 self.store.put(channel, thread_ts, res["session_id"])
+        self.turns.write("end", key=key, session_id=res.get("session_id"), resumed=bool(resumed),
+                         outcome=res.get("outcome") or ("ok" if res.get("ok") else "error"),
+                         seconds=res.get("seconds") or took, turns=res.get("turns"),
+                         cost_usd=res.get("cost"), error=res.get("error"))
         body = fit(rtl_fix(res["text"])) + (f"\n{footer(res)}" if footer(res) else "")
         self.client.chat_update(channel=channel, ts=ack_ts, text=body)
 

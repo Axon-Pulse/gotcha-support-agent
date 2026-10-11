@@ -222,7 +222,7 @@ def test_a_mention_acks_at_once_then_edits_in_the_answer(monkeypatch, tmp_path):
                         lambda target, args, daemon: started.append((target, args))
                         or type("T", (), {"start": lambda self: target(*args)})())
     slack = FakeSlack()
-    b = B.Bridge(slack, B.ThreadStore(tmp_path / "t.json"))
+    b = B.Bridge(slack, B.ThreadStore(tmp_path / "t.json"), B.TurnLog(tmp_path / "turns.jsonl"))
     b.handle({"channel": "C1", "user": "U1", "ts": "111.1",
               "text": "<@UBOT> map is empty on gotcha 3"}, "Ev1")
     assert slack.posts[0]["text"].startswith(":mag: Checking")
@@ -233,6 +233,96 @@ def test_a_mention_acks_at_once_then_edits_in_the_answer(monkeypatch, tmp_path):
     b.handle({"channel": "C1", "user": "U1", "ts": "111.1",
               "text": "<@UBOT> map is empty on gotcha 3"}, "Ev1")   # redelivered
     assert len(slack.posts) == 1, "a redelivered event must not run twice"
+
+
+# --------------------------------------------------------------------------
+# Every turn is recorded for the console
+# --------------------------------------------------------------------------
+
+def _run_one(monkeypatch, tmp_path, result, *, thread_ts="111.1", store=None):
+    monkeypatch.setattr(B, "run_claude", lambda text, sid: dict(result))
+    slack = FakeSlack()
+    log = B.TurnLog(tmp_path / "turns.jsonl")
+    b = B.Bridge(slack, store or B.ThreadStore(tmp_path / "t.json"), log)
+    b._answer("C1", thread_ts, "ack-1", "map is empty on gotcha 3", "U1")
+    lines = [json.loads(x) for x in log.path.read_text().splitlines()]
+    return slack, lines
+
+
+def test_a_turn_is_recorded_when_it_starts_and_when_it_ends(monkeypatch, tmp_path):
+    slack, (start, end) = _run_one(monkeypatch, tmp_path, {
+        "ok": True, "outcome": "ok", "text": "*axon-gotcha-3: fine*", "session_id": "s-1",
+        "seconds": 41, "turns": 6, "cost": 0.31})
+    assert start["event"] == "start" and end["event"] == "end"
+    assert start["key"] == end["key"] == "C1:111.1"
+    assert start["user"] == "U1" and start["channel"] == "C1" and start["thread_ts"] == "111.1"
+    assert end["outcome"] == "ok" and end["session_id"] == "s-1" and not end["resumed"]
+    assert (end["seconds"], end["turns"], end["cost_usd"]) == (41, 6, 0.31)
+    assert start["ts"] <= end["ts"]
+    assert slack.updates, "recording must not replace the answer"
+
+
+def test_a_reply_is_recorded_as_resuming_the_threads_session(monkeypatch, tmp_path):
+    store = B.ThreadStore(tmp_path / "t.json")
+    store.put("C1", "111.1", "s-1")
+    _, (_, end) = _run_one(monkeypatch, tmp_path, {
+        "ok": True, "outcome": "ok", "text": "a", "session_id": "s-1"}, store=store)
+    assert end["resumed"] is True
+
+
+@pytest.mark.parametrize("result, outcome", [
+    ({"ok": False, "outcome": "timeout", "text": "No answer within 90s", "session_id": "s-2"},
+     "timeout"),
+    ({"ok": False, "outcome": "error", "text": "unreadable", "session_id": None,
+      "error": "claude exited 1: boom"}, "error"),
+])
+def test_a_failed_turn_is_recorded_with_its_outcome(monkeypatch, tmp_path, result, outcome):
+    slack, (_, end) = _run_one(monkeypatch, tmp_path, result)
+    assert end["outcome"] == outcome and end["session_id"] == result["session_id"]
+    assert end["error"] == result.get("error")
+    assert slack.updates
+
+
+def test_the_log_holds_no_message_text(monkeypatch, tmp_path):
+    """The question and answer are in Claude's transcript; the log only says who and how."""
+    _, lines = _run_one(monkeypatch, tmp_path, {
+        "ok": True, "outcome": "ok", "text": "the secret answer", "session_id": "s-1"})
+    raw = json.dumps(lines)
+    assert "map is empty" not in raw and "the secret answer" not in raw
+
+
+def test_a_turn_that_cannot_be_recorded_is_still_answered(monkeypatch, tmp_path):
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("")
+    monkeypatch.setattr(B, "run_claude", lambda text, sid: {
+        "ok": True, "outcome": "ok", "text": "answer", "session_id": "s-1"})
+    slack = FakeSlack()
+    b = B.Bridge(slack, B.ThreadStore(tmp_path / "t.json"), B.TurnLog(blocker / "turns.jsonl"))
+    b._answer("C1", "111.1", "ack-1", "q", "U1")
+    assert slack.updates[0]["text"].startswith("answer")
+
+
+def test_concurrent_turns_leave_whole_lines(tmp_path):
+    import threading
+    log = B.TurnLog(tmp_path / "turns.jsonl")
+    big = "x" * 20000
+    ts = [threading.Thread(target=lambda i=i: [log.write("end", key=f"C:{i}", error=big)
+                                               for _ in range(20)]) for i in range(8)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    lines = log.path.read_text().splitlines()
+    assert len(lines) == 160
+    assert all(json.loads(x)["error"] == big for x in lines)
+
+
+def test_run_claude_says_how_a_turn_ended(echo_cli):
+    assert B.run_claude("hi", None)["outcome"] == "ok"
+
+
+def test_the_turn_log_lives_beside_the_thread_map():
+    assert B.TURNS.parent == B.STATE.parent
 
 
 # --------------------------------------------------------------------------
@@ -299,6 +389,7 @@ def test_a_turn_killed_at_the_timeout_still_keeps_its_thread_session(tmp_path, m
     monkeypatch.setattr(B, "TIMEOUT_S", 1)
     res = B.run_claude("map is empty on gotcha 3", None)
     assert not res["ok"] and res["text"].startswith("No answer within 1s")
+    assert res["outcome"] == "timeout"
     assert res["session_id"] and len(res["session_id"]) == 36
 
 

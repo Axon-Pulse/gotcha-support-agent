@@ -14,6 +14,7 @@ services:
       args:
         BOT_UID: ${BOT_UID:-1000}
         BOT_GID: ${BOT_GID:-1000}
+        SKILL_HASH: ${SKILL_HASH:-unknown}     # set by `make build`/`update` (skill_hash.sh)
     image: gotcha-support-bot
     container_name: gotcha-support-bot
     restart: unless-stopped
@@ -37,11 +38,11 @@ services:
       - ${HOME}/.cache/gotcha-support/gotcha30:/home/gotcha/.cache/gotcha-support/gotcha30
       # What each site last ran (systems.tsv), shared with runs of the skill on the host.
       - ${HOME}/.local/state/gotcha-support:/home/gotcha/.local/state/gotcha-support
-      # Claude's sessions (a thread reply resumes one) and the thread -> session map.
-      - claude:/home/gotcha/.claude
-      - threads:/app/slack-bridge/state
+      # The thread -> session map and the turn log (state/turns.jsonl), and Claude's config
+      # with its session transcripts (a thread reply resumes one). Plain host directories, not
+      # Docker volumes, so the console (../console) can show the conversations. `make check`
+      # creates them as this user: a directory Docker creates is root-owned and unwritable.
+      # The model can't read either: its reads are limited to workspace/ and the skill.
+      - ./state:/app/slack-bridge/state
+      - ./state/claude:/home/gotcha/.claude
       - /etc/localtime:/etc/localtime:ro
-
-volumes:
-  claude:
-  threads:

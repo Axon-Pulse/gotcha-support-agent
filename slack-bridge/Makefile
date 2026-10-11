@@ -10,8 +10,12 @@ IMAGE   := gotcha-support-bot
 # The foreground bot (`make dev`, or the venv python by hand). The [.] keeps pgrep from
 # matching this recipe's own shell, whose command line contains the pattern.
 FOREGROUND := [.]venv/bin/python.*bridge[.]py
+# Stamped on the image, so the console can tell whether the files on disk are the ones running.
+export SKILL_HASH := $(shell ./skill_hash.sh)
+# Where sessions and the thread map lived before they moved to state/ (see migrate).
+OLD_VOLUMES := slack-bridge_claude slack-bridge_threads
 
-.PHONY: help check build run update stop restart logs status shell test dev
+.PHONY: help check build run update stop restart logs status shell test dev migrate
 
 help:  ## List the targets
 	@grep -E '^[a-z]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-8s %s\n", $$1, $$2}'
@@ -30,6 +34,10 @@ check:  ## Check .env and what the container borrows from this host
 	git -C "$$HOME/.cache/gotcha-support/gotcha30" rev-parse --git-dir >/dev/null 2>&1 \
 	  || fail "no gotcha30 clone. Run: ../support-agent-skill/scripts/code.sh clone"
 	mkdir -p "$$HOME/.local/state/gotcha-support"
+	if [ ! -f state/.migrated ] && docker volume inspect slack-bridge_claude >/dev/null 2>&1; then
+	  fail "the bot's sessions are still in the old Docker volumes. Run: make migrate"
+	fi
+	mkdir -p state/claude
 	echo "check: ok"
 
 build: check  ## Build the image from the current files
@@ -69,6 +77,30 @@ shell:  ## A shell in the running container, for checks like `tailscale ping`
 
 test:  ## Unit tests (guard and bridge), with the local venv
 	.venv/bin/python -m pytest tests -q
+
+migrate:  ## One-time: move sessions and the thread map from Docker volumes into state/
+	@if [ -f state/.migrated ]; then echo "Already migrated."; exit 0; fi
+	mkdir -p state/claude
+	if ! docker volume inspect slack-bridge_claude >/dev/null 2>&1; then
+	  touch state/.migrated; echo "No old volumes; nothing to migrate."; exit 0
+	fi
+	uid=$$(sed -n 's/^BOT_UID=//p' .env 2>/dev/null); uid=$${uid:-1000}
+	gid=$$(sed -n 's/^BOT_GID=//p' .env 2>/dev/null); gid=$${gid:-1000}
+	$(COMPOSE) stop
+	# state/threads.json on this host is a `make dev` run's map; the volume's is the service's.
+	# Both are kept, the service's winning where a thread is in both.
+	[ -f state/threads.json ] && cp state/threads.json state/threads.host-backup.json
+	docker run --rm --user "$$uid:$$gid" -v slack-bridge_claude:/from:ro -v "$$PWD/state/claude:/to" \
+	  $(IMAGE) cp -a /from/. /to/
+	docker run --rm --user "$$uid:$$gid" -v slack-bridge_threads:/from:ro -v "$$PWD/state:/to" \
+	  $(IMAGE) sh -c '[ ! -f /from/threads.json ] || cp /from/threads.json /to/threads.volume.json'
+	python3 -c 'import json, pathlib as p; m = {}; \
+	  [m.update(json.loads(f.read_text() or "{}")) for f in map(p.Path, \
+	   ("state/threads.host-backup.json", "state/threads.volume.json")) if f.exists()]; \
+	  p.Path("state/threads.json").write_text(json.dumps(m, indent=1)); print("threads:", len(m))'
+	touch state/.migrated
+	echo "Migrated into state/. Start the bot with: make update"
+	echo "Once a thread reply resumes its old session, remove the old volumes: docker volume rm $(OLD_VOLUMES)"
 
 dev:  ## Run in the foreground with .env, without Docker (Ctrl-C stops)
 	@[ -f .env ] || { echo "no .env; see make check" >&2; exit 1; }
