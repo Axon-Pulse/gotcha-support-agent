@@ -24,7 +24,8 @@ PATH = ROOT / "overrides.json"
 AUDIT = ROOT / "config_audit.jsonl"
 
 KEYS = ("agents", "post_agents", "order", "requires", "supervisor_picks",
-        "tool_descriptions", "allowed_commands")
+        "tool_descriptions", "allowed_commands", "model",
+        "component_types")
 _NAME = re.compile(r"^[a-z][a-z0-9_]{0,40}$")
 
 

@@ -60,8 +60,28 @@ def schemas(names: list[str] | None = None) -> list[dict]:
         sch = t["schema"]
         if n in over and str(over[n]).strip():
             sch = {**sch, "description": over[n]}
-        out.append(sch)
+        out.append(_current_nodes(sch))
     return out
+
+
+def _current_nodes(sch: dict) -> dict:
+    """A `node` argument lists the nodes addressable NOW, not at import.
+
+    The enum was frozen when the tool module loaded — before any session had a system,
+    and before that system's own config had been read. Rebuilt per call, it is exactly
+    the active system's nodes, so the model is never offered another site's hardware.
+    """
+    props = (sch.get("input_schema") or {}).get("properties") or {}
+    node = props.get("node")
+    if not isinstance(node, dict) or "enum" not in node:
+        return sch
+    import inventory
+    names = inventory.names()
+    fresh = {k: v for k, v in node.items() if k != "enum"}
+    if names:                       # an empty enum is not a valid schema; leave it open
+        fresh["enum"] = names
+    return {**sch, "input_schema": {**sch["input_schema"],
+                                    "properties": {**props, "node": fresh}}}
 
 
 def call(name: str, args: dict) -> dict:

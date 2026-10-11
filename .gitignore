@@ -11,6 +11,9 @@ config_audit.jsonl
 /legacy/systems_inventory.yaml
 # transient console<->chat queue; traces/ keeps the durable record
 /legacy/bridge/
+# legacy bot: uploaded attachments, and its SSH connection-sharing sockets
+/legacy/attachments/
+/legacy/.ssh-cm/
 # Claude skill: per-machine record of what each system last ran, and any local SSH keys
 /support-agent-skill/state/
 /support-agent-skill/sshkey*

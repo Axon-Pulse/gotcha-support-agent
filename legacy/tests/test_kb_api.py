@@ -47,6 +47,7 @@ def test_frontmatter_is_written_as_parseable_yaml(client, tmp_path):
     assert raw.startswith("---\n")
     import yaml
     head = yaml.safe_load(raw.split("---")[1])
+    assert head.pop("created"), "a new case must record when it was created"
     assert head == {"topics": ["radar", "network"],
                     "symptoms": ["no tracks", "link flapping"]}
 
@@ -54,7 +55,11 @@ def test_frontmatter_is_written_as_parseable_yaml(client, tmp_path):
 def test_a_document_with_no_metadata_gets_no_empty_frontmatter(client, tmp_path):
     client.post("/api/kb", json={"name": "plain", "topics": [], "symptoms": [],
                                  "body": "# Plain\n"})
-    assert (tmp_path / "plain.md").read_text().strip() == "# Plain"
+    raw = (tmp_path / "plain.md").read_text()
+    # Only the creation stamp: no empty topics: or symptoms: keys.
+    import yaml
+    assert list(yaml.safe_load(raw.split("---")[1])) == ["created"]
+    assert raw.split("---", 2)[2].strip() == "# Plain"
 
 
 def test_legacy_documents_without_frontmatter_still_open(client):

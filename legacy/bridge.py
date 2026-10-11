@@ -61,18 +61,38 @@ def _read(p: Path) -> dict:
 
 # ---------------------------------------------------------------- console side
 
-def submit(question: str, by: str = "console") -> str:
-    """Queue a ticket. Returns the session id the console then polls."""
+def submit(question: str, by: str = "console", typed: str | None = None,
+           attachments: list[dict] | None = None) -> str:
+    """Queue a ticket. Returns the session id the console then polls.
+
+    `question` is what the chat side reads, attachment descriptions included. `typed`
+    and `attachments` keep what the operator typed and what they attached apart, so the
+    trace can show each as itself.
+    """
     q = (question or "").strip()
     if not q:
         raise BridgeError("a ticket needs a description of what the system is doing")
     _dirs()
     sid = uuid.uuid4().hex[:12]
+    now = time.time()
     (REQUESTS / f"{sid}.json").write_text(json.dumps({
         "id": sid, "question": q, "by": by,
-        "submitted_at": time.time(), "status": "pending",
+        **({"typed": typed, "attachments": attachments} if attachments else {}),
+        "submitted_at": now, "status": "pending",
     }, indent=2) + "\n")
+    # In the trace from the moment it is asked, so a ticket nobody ever picks up is
+    # still visible — and the trace dates from the question, not from the answer.
+    _trace_line(sid, status="pending", started_at=now,
+                origin={"via": "bridge", "by": by,
+                        "question": typed if attachments else q, "ts": now},
+                **({"attachments": attachments} if attachments else {}))
     return sid
+
+
+def _trace_line(sid: str, **fields) -> None:
+    TRACES.mkdir(exist_ok=True)
+    with (TRACES / f"{sid}.jsonl").open("a") as f:
+        f.write(json.dumps(fields, default=str) + "\n")
 
 
 def status(sid: str) -> dict | None:
@@ -108,6 +128,7 @@ def claim(sid: str) -> dict:
     req["status"] = "in_progress"
     req["claimed_at"] = time.time()
     p.write_text(json.dumps(req, indent=2) + "\n")
+    _trace_line(sid, status="in_progress")
     return req
 
 
@@ -158,8 +179,10 @@ def publish(sid: str, report: dict, commands: list[dict] | None = None,
     TRACES.mkdir(exist_ok=True)
     with (TRACES / f"{sid}.jsonl").open("a") as f:
         f.write(json.dumps({
+            "status": status_,
             "origin": {"via": "bridge", "by": req.get("by"),
-                       "question": req.get("question"), "ts": time.time()},
+                       "question": req.get("typed") or req.get("question"),
+                       "ts": time.time()},
             "report": report, "commands": commands or [],
             "kb_gaps": kb_gaps or [], "notes": notes,
         }, default=str) + "\n")

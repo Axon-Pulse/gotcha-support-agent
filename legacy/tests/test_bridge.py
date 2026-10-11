@@ -11,7 +11,9 @@ sys.path.insert(0, str(ROOT))
 
 import bridge  # noqa: E402
 
-GOOD = {"root_cause": "The dumbo-backend container was not running", "confidence": "high",
+GOOD = {"bottom_line": "The dumbo-backend container is not running, so the ASU has "
+                       "nothing to connect to. Start it and the detections return.",
+        "root_cause": "The dumbo-backend container was not running", "confidence": "high",
         "evidence": ["asu_connected=false", "request_count 26654, success_count 0"],
         "suggested_actions": ["docker ps -a --filter name=dumbo"],
         "escalate": False, "unknowns": []}
@@ -106,7 +108,10 @@ def test_every_session_leaves_a_trace(tmp_path):
     bridge.publish(sid, GOOD,
                    commands=[{"cmd": "docker ps -a", "readonly": True, "output": "..."}],
                    kb_gaps=["exit code 137 semantics are not documented"])
-    row = json.loads((tmp_path / "traces" / f"{sid}.jsonl").read_text().strip())
+    lines = (tmp_path / "traces" / f"{sid}.jsonl").read_text().splitlines()
+    # Asked, then answered: the ticket is in the trace before anyone picks it up.
+    assert [json.loads(l)["status"] for l in lines] == ["pending", "done"]
+    row = json.loads(lines[-1])
     assert row["origin"]["via"] == "bridge"
     assert row["origin"]["question"] == "no tracks"
     assert row["commands"][0]["cmd"] == "docker ps -a"

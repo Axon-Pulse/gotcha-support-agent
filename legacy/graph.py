@@ -20,11 +20,13 @@ write tool at all — registry.load_tools() refuses to register one.
 import json
 import logging
 import re
+import time
 from pathlib import Path
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
+import inventory
 import llm
 import agents as A
 from agents import MAX_AGENT_STEPS
@@ -36,7 +38,20 @@ KB_DIR = Path(__file__).resolve().parent / "kb" / "cases"
 REPORT_SCHEMA = {
     "type": "object",
     "properties": {
+        "bottom_line": {
+            "type": "string",
+            "description": "The whole answer in 2-3 sentences, for someone who will read "
+                           "nothing else: what is wrong, and what to do about it. Stay "
+                           "technical — node names, PIDs and uptimes belong here, the "
+                           "reader is an engineer. Say plainly if it is not established.",
+        },
         "root_cause": {"type": "string", "description": "One sentence, or empty if unknown."},
+        "matched_case": {
+            "type": "string",
+            "description": "The `doc` name of the recorded case (from a search_runbook hit) "
+                           "that THIS diagnosis is — same root cause, not merely a similar "
+                           "symptom. Empty if no recorded case is this fault.",
+        },
         "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
         "evidence": {"type": "array", "items": {"type": "string"},
                      "description": "Each item quotes a specific tool observation."},
@@ -45,6 +60,24 @@ REPORT_SCHEMA = {
         "escalate": {"type": "boolean"},
         "escalate_reason": {"type": "string"},
         "unknowns": {"type": "array", "items": {"type": "string"}},
+        "needs_permission": {
+            "type": "array",
+            "description": "Checks that were REFUSED, or that you would have run and "
+                           "could not. Only things a person could actually grant — an "
+                           "allowlisted command, a node in the inventory, SSH "
+                           "credentials. Not 'more time' and not a guess. Empty if the "
+                           "run was not held back by permissions.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "what": {"type": "string",
+                             "description": "The command, node or tool needed."},
+                    "why": {"type": "string",
+                            "description": "One sentence: what it would have settled."},
+                },
+                "required": ["what", "why"],
+            },
+        },
         "propose_scenario": {
             "type": "object",
             "description": "A new runbook entry, ONLY if this pattern is not already "
@@ -65,8 +98,10 @@ REPORT_SCHEMA = {
             "required": ["id", "title", "symptoms", "root_cause", "checks", "fix"],
         },
     },
-    "required": ["root_cause", "confidence", "evidence", "suggested_actions",
-                 "escalate", "unknowns"],
+    # bottom_line is required, not optional: it is the only part most readers will see,
+    # and a model allowed to omit it will, leaving the UI with a heading and no answer.
+    "required": ["bottom_line", "root_cause", "confidence", "evidence",
+                 "suggested_actions", "escalate", "unknowns"],
 }
 
 
@@ -144,7 +179,7 @@ def _extract_context(findings: list[dict]) -> dict:
 
     observed, suspect = sorted(set(observed)), sorted(set(suspect))
     # Only nodes we actually saw AND that have an address are probeable.
-    inv = inventory.load()
+    inv = inventory.view()
     targets = sorted({n for n in (suspect or observed)
                       if ((inv.get(n) or {}).get("endpoint") or {}).get("host")})
     ctx = {"observed_nodes": observed, "suspect_nodes": suspect, "probe_targets": targets}
@@ -273,10 +308,13 @@ def _digest(s: S, limit: int = 4000) -> str:
 
 def make_agent_node(name: str):
     def node(s: S) -> dict:
-        text, findings, usage = llm.run_agent(
-            name, A.agents()[name], s["question"],
-            context=f"Findings from earlier agents:\n{_digest(s)}" if s.get("findings") else "")
-        ctx = _extract_context(findings)
+        # The session's system is active for the whole step: the prompt's node list,
+        # the tools' node enum and where every command runs all follow from it.
+        with inventory.using(s.get("system")):
+            text, findings, usage = llm.run_agent(
+                name, A.agents()[name], s["question"],
+                context=f"Findings from earlier agents:\n{_digest(s)}" if s.get("findings") else "")
+            ctx = _extract_context(findings)
         log.info("agent=%s tools=%d cache_read=%d context=%s",
                  name, len(findings), usage["cache_read"], sorted(ctx))
         return {"findings": findings, "visited": [name], "context": ctx,
@@ -284,26 +322,101 @@ def make_agent_node(name: str):
     return node
 
 
+# Refusals that mean "you are not allowed to look", as opposed to "the thing you looked
+# at is broken". The distinction matters to the reader: the first is a gap somebody can
+# close by granting something, the second is evidence.
+# The names are interpolated with !r, so they arrive quoted and followed by ordinary
+# punctuation — `unknown node 'dumbo9'; known nodes: [...]`. Match the NAME rather than
+# a run of non-space, or the ask comes out as "dumbo9';" and reads like a parser bug.
+_NAME = r"['\"]?([A-Za-z0-9_.:-]+)['\"]?"
+_DENIED = (
+    (re.compile(rf"command {_NAME} is not allowlisted", re.I),
+     "the command is not in transport.ALLOWED"),
+    (re.compile(rf"unknown node {_NAME}", re.I),
+     "the node is not in the inventory, so it cannot be addressed"),
+    (re.compile(rf"{_NAME} has no access block", re.I),
+     "the node has no SSH credentials in the inventory"),
+    (re.compile(rf"{_NAME} has no address", re.I),
+     "the node has no address in the inventory"),
+    (re.compile(r"unknown_tool", re.I),
+     "the tool is not registered"),
+)
+
+
+def permission_gaps(findings: list[dict]) -> list[dict]:
+    """Checks that were REFUSED, not failed — the ones a grant would unblock.
+
+    Read off what the tools actually returned rather than asked of the model, because
+    "which permission would have helped" is a fact about this run, and a model asked to
+    remember it across a long transcript will sometimes not.
+    """
+    out, seen = [], set()
+    for f in findings or []:
+        if f.get("ok"):
+            continue
+        err = str((f.get("data") or {}).get("error") or "")
+        for rx, why in _DENIED:
+            m = rx.search(err)
+            if not m:
+                continue
+            subject = m.group(1) if m.re.groups else f.get("tool")
+            key = (f.get("tool"), subject)
+            if key in seen:
+                break
+            seen.add(key)
+            out.append({"what": str(subject).strip("'\""), "tool": f.get("tool"),
+                        "agent": f.get("agent"), "why": why})
+            break
+    return out
+
+
 def synthesize(s: S) -> dict:
     # Checks that could not be performed are part of the diagnosis. Without this the
     # report silently reads as complete while a gated agent never ran, which is exactly
     # the overconfidence the gates exist to prevent.
     gaps = "".join(f"\n- {b['note']}" for b in s.get("blocked", []))
+    # Computed, then shown to the model. A refusal is a fact about this run, so it is
+    # merged into the report afterwards whatever the model says — but it is put in front
+    # of the model too, because a diagnosis that ignores the check it was refused reads
+    # as more complete than it is.
+    denied = permission_gaps(s.get("findings", []))
+    denied_txt = "".join(f"\n- {d['what']} (via {d['tool']}): {d['why']}" for d in denied)
     report = llm.ask_json(
         prompt=(f"Question: {s['question']}\n\n"
                 f"Agent conclusions:\n"
                 + "\n\n".join(f"[{t['agent']}] {t['text']}" for t in s.get("transcript", []))
                 + f"\n\nRaw findings:\n{_digest(s, 8000)}"
-                + (f"\n\nChecks that could NOT be performed:{gaps}" if gaps else "")),
+                + (f"\n\nChecks that could NOT be performed:{gaps}" if gaps else "")
+                + (f"\n\nChecks REFUSED for lack of permission:{denied_txt}"
+                   if denied_txt else "")),
         schema=REPORT_SCHEMA,
-        system=("Write the final diagnosis for an L1 technician. Every evidence item must "
+        system=("Write the final diagnosis for an L1 technician. Lead with bottom_line: "
+                "2-3 sentences that stand alone, because it is the only part most readers "
+                "will open — what is wrong and what to do, or plainly that it is not "
+                "established. It must not claim more certainty than the rest of the "
+                "report. Every evidence item must "
                 "quote something a tool actually returned. If a tool failed or the "
                 "evidence is ambiguous, set escalate=true and list the unknowns rather "
-                "than guessing. Any check listed as not performed must appear in "
+                "than guessing. Set matched_case only when a recorded case from "
+                "search_runbook has the same root cause as this diagnosis. "
+                "Any check listed as not performed must appear in "
                 "unknowns — never present the diagnosis as complete when a planned check "
-                "was skipped. Propose a new runbook scenario ONLY if this pattern is "
+                "was skipped. If a check was refused for lack of permission, or you "
+                "would have run one and could not, put it in needs_permission with what "
+                "it would have settled — only things a person can actually grant, never "
+                "a wish for more time or a guess at what might exist. Propose a new "
+                "runbook scenario ONLY if this pattern is "
                 "genuinely not already in the runbook."),
     )
+    # The refusals are merged in, not left to the model: they are observed facts, and a
+    # report that quietly drops one asks for nothing and looks complete.
+    asked = {(d.get("what"), ) for d in report.get("needs_permission") or []
+             if isinstance(d, dict)}
+    merged = list(report.get("needs_permission") or [])
+    merged += [{"what": d["what"], "why": d["why"]} for d in denied
+               if (d["what"],) not in asked]
+    if merged:
+        report["needs_permission"] = merged
     return {"report": report, "scenario": report.get("propose_scenario")}
 
 
@@ -352,7 +465,11 @@ def customer_communicator(s: S) -> dict:
     text, usage = llm.run_text_agent(
         cfg, f"The client reported:\n{s['question']}\n\nInternal technical report:\n{brief}")
 
-    leaks = _scan_for_leaks(text, list(inventory.load()))
+    # Every name this deployment knows, plus the session's own config nodes — a node
+    # name that exists only in a remote config is still a leak.
+    with inventory.using(s.get("system")):
+        known = set(inventory.load()) | set(inventory.view())
+    leaks = _scan_for_leaks(text, sorted(known))
     msg = {
         "text": text,
         "leaks": leaks,
@@ -390,6 +507,17 @@ def _render(sc: dict) -> str:
             f"## Checks (read-only)\n\n{checks}\n\n## Fix\n\n{sc['fix']}\n")
 
 
+def _stamp_created(md: str) -> str:
+    """Record when the case was created, in its frontmatter. The console reads it back;
+    a file's mtime cannot stand in for it, since every edit moves the mtime."""
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%S")
+    if md.startswith("---\n"):
+        if re.search(r"(?m)^created:", md.split("\n---", 1)[0]):
+            return md
+        return f"---\ncreated: '{stamp}'\n{md[4:]}"
+    return f"---\ncreated: '{stamp}'\n---\n\n{md}"
+
+
 def propose_scenario(s: S) -> Command:
     sc = s.get("scenario")
     if not sc:
@@ -411,7 +539,7 @@ def save(s: S) -> dict:
     slug = re.sub(r"[^a-z0-9-]+", "-", str(sc["id"]).lower()).strip("-") or "scenario"
     KB_DIR.mkdir(parents=True, exist_ok=True)
     path = KB_DIR / f"{slug}.md"
-    path.write_text(sc["_md"] if "_md" in sc else _render(sc))
+    path.write_text(_stamp_created(sc["_md"] if "_md" in sc else _render(sc)))
     log.info("wrote %s", path)
     return {"saved": True}
 
