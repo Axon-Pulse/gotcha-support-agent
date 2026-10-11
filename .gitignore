@@ -5,11 +5,25 @@ traces/
 graph.db*
 .pytest_cache/
 config_audit.jsonl
-# Anchored to the repo root: unanchored, these would also swallow
-# tests/fixtures/systems_inventory.yaml, which must be committed.
-/secrets.local.env
-/systems_inventory.yaml
+# Legacy LangGraph bot (legacy/). Anchored: unanchored, these would also swallow
+# legacy/tests/fixtures/systems_inventory.yaml, which must be committed.
+/legacy/secrets.local.env
+/legacy/systems_inventory.yaml
 # transient console<->chat queue; traces/ keeps the durable record
-/bridge/
-/attachments/
-/.ssh-cm/
+/legacy/bridge/
+# legacy bot: uploaded attachments, and its SSH connection-sharing sockets
+/legacy/attachments/
+/legacy/.ssh-cm/
+# Claude skill: per-machine record of what each system last ran, and any local SSH keys
+/support-agent-skill/state/
+/support-agent-skill/sshkey*
+# Slack bridge: thread -> session map, and its local venv
+/slack-bridge/state/
+/slack-bridge/.venv/
+
+# Evaluation table for the support bot: kept local for now
+evals/
+
+# Console: venv and its audit log of who changed what
+/console/.venv/
+/console/state/
