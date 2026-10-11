@@ -30,6 +30,10 @@ class Settings:
             self.bridge_dir / "state" / "claude" / "projects" / "-app-slack-bridge-workspace",
             Path.home() / ".claude" / "projects" / claude_project_slug(self.bridge_dir / "workspace"),
         ])
+        # Saved triages: the bot's (its /tmp/gotcha-triage, bind-mounted), then runs by hand here.
+        tdirs = env("CONSOLE_TRIAGE_DIRS")
+        self.triage_dirs = ([Path(d) for d in tdirs.split(":") if d] if tdirs else
+                            [self.bridge_dir / "state" / "triage", Path("/tmp/gotcha-triage")])
         self.systems_tsv = Path(env("CONSOLE_SYSTEMS_TSV")
                                 or Path.home() / ".local" / "state" / "gotcha-support" / "systems.tsv")
         self.container = env("CONSOLE_CONTAINER") or "gotcha-support-bot"

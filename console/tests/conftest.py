@@ -35,6 +35,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(S, "state_dir", tmp_path / "console-state")
     monkeypatch.setattr(S, "transcript_dirs", [transcripts])
     monkeypatch.setattr(S, "systems_tsv", tmp_path / "systems.tsv")
+    monkeypatch.setattr(S, "triage_dirs", [bridge / "state" / "triage"])
     monkeypatch.setattr(S, "container", "no-such-container-for-tests")
     monkeypatch.setattr(S, "allowed_users", {"pm@example.com"})
     monkeypatch.setattr(S, "allow_local", True)

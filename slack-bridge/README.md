@@ -46,6 +46,7 @@ an answer built on what was already found. A new top-level message starts fresh.
 | `state/threads.json` | Slack thread → Claude session (created at run time, gitignored). |
 | `state/turns.jsonl` | One line when a turn starts, one when it ends: who asked, in which thread, outcome, time, cost. No message text; that is in Claude's transcript. Read by the console. |
 | `state/claude/` | Claude Code's config directory in the container: its session transcripts are under `projects/-app-slack-bridge-workspace/`. |
+| `state/triage/` | Every triage the bot runs, saved (its `/tmp/gotcha-triage`). The console reads a site's sensors from the newest one. |
 
 The console that shows the conversations, edits the KB and deploys it is `../console/`.
 

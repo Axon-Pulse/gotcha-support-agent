@@ -12,6 +12,7 @@ The console never imports the bot (slack-bridge/) or the retired bot (legacy/). 
 and writes their files: support-agent-skill/ for the KB, slack-bridge/state/ for the turns.
 """
 import json
+import re
 import time
 from pathlib import Path
 
@@ -19,7 +20,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
-from console import conversations, kb, ops
+from console import conversations, kb, ops, sites
 from console.settings import S
 
 HERE = Path(__file__).resolve().parent
@@ -245,6 +246,30 @@ def bot():
 @app.get("/api/systems")
 def systems():
     return ops.systems()
+
+
+def _site_name(host: str) -> str:
+    allowed = ops.bot_env().get("BRIDGE_ALLOWED_HOSTS") or ops.DEFAULTS["BRIDGE_ALLOWED_HOSTS"]
+    if not re.fullmatch(allowed, host):
+        raise HTTPException(404, f"{host} is not one of the bot's sites ({allowed})")
+    return allowed
+
+
+@app.get("/api/systems/{host}")
+def site(host: str):
+    _site_name(host)
+    return sites.site(host)
+
+
+@app.post("/api/systems/{host}/triage")
+def triage(host: str, request: Request):
+    """Runs the skill's read-only triage of the site now, as the bot does for a question."""
+    allowed = _site_name(host)
+    audit(request, "run-triage", host)
+    try:
+        return sites.run_triage(host, ops.bot_env().get("GOTCHA_SSH_USER"), allowed)
+    except RuntimeError as e:
+        raise HTTPException(409, str(e))
 
 
 @app.get("/api/deploy")

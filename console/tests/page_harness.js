@@ -82,6 +82,8 @@ const S=sandbox;
   await check('stats tab',()=>S.showTab('stats'),['#stats','Questions per day']);
   await check('stats chart has columns',async()=>{},['#stats','class="mark"']);
   await check('systems tab',()=>S.showTab('systems'),['#systems','axon-gotcha-4']);
+  await check('open the sensors of a site',()=>S.toggleSite('axon-gotcha-4'),['#systems','magos_radar']);
+  await check('a site shows how each address answered',async()=>{},['#systems','answers (ping)']);
   await check('bot tab',()=>S.showTab('bot'),['#bot','BRIDGE_TIMEOUT_S']);
   await check('deploy panel',async()=>{ await S.refreshDeploy?.(); S.openDeploy(); },['#deploy','Deploy now']);
   await check('selftest pill',()=>S.runSelftest());

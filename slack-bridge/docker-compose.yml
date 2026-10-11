@@ -45,4 +45,7 @@ services:
       # The model can't read either: its reads are limited to workspace/ and the skill.
       - ./state:/app/slack-bridge/state
       - ./state/claude:/home/gotcha/.claude
+      # Each triage the bot runs is saved here (run_triage.sh writes /tmp/gotcha-triage), so the
+      # console can show a site's sensors from its newest one. The model may read this path.
+      - ./state/triage:/tmp/gotcha-triage
       - /etc/localtime:/etc/localtime:ro

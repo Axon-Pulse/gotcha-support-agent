@@ -113,6 +113,9 @@ legend{font:11px/1 var(--mono);color:var(--dim);padding:0 6px;text-transform:upp
 .step code.in{font-size:12px;overflow-wrap:anywhere}
 .step details>summary{cursor:pointer;font-size:12px;color:var(--dim);margin-top:4px}
 .step.text{border-style:dashed;font-size:13px;color:var(--dim)}
+.caret{display:inline-block;color:var(--dim);font-size:9px;width:10px;transition:transform var(--t)}
+.caret.open{transform:rotate(90deg)}
+tr.detail>td{background:var(--sunk);padding:12px 16px}
 .clip{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:420px}
 /* sections editor */
 .secrow{border:1px solid var(--line);border-radius:var(--r);padding:10px 12px;margin-bottom:9px;background:var(--card)}
@@ -675,23 +678,95 @@ function wireTips(){
 }
 
 // ================================================================== Systems
+var SYS=null, SITE={}, SITE_OPEN=new Set(), SITE_BUSY=new Set();
 async function loadSystems(){
   $('#systems').innerHTML='<div class="card"><p class="note">Asking the tailnet…</p></div>';
-  const s=await api('/systems');
-  const last=l=>l?`<span class="mono">${esc(l.release)}</span><div class="dim" style="font-size:12px">triaged ${esc(l.triaged.replace('T',' ').slice(0,16))}${l.config?' · '+esc(l.config):''}</div>`:'<span class="dim">never triaged from here</span>';
+  SYS=await api('/systems');
+  renderSystems();
+  for(const h of SITE_OPEN) loadSite(h);
+}
+const lastRun=l=>l?`<span class="mono">${esc(l.release)}</span><div class="dim" style="font-size:12px">triaged ${esc(l.triaged.replace('T',' ').slice(0,16))}${l.config?' · '+esc(l.config):''}</div>`:'<span class="dim">never triaged from here</span>';
+function renderSystems(){
+  const s=SYS; if(!s)return;
   $('#systems').innerHTML=`<div class="card"><h3>Sites the bot can reach
       <span class="dim" style="font-weight:400">— tailnet names matching <code>${esc(s.allowed)}</code></span>
       <button class="sm grow" onclick="loadSystems()">Refresh</button></h3>
     ${s.error?`<p class="alert">${esc(s.error)}</p>`:''}
+    <p class="note">Click a site to see its sensors.</p>
     <div class="scroll"><table><tr><th>site</th><th>state</th><th>via</th><th>ip</th><th>last known version</th></tr>
-      ${s.systems.map(r=>`<tr><td class="mono">${esc(r.name)}</td>
+      ${s.systems.map(r=>`<tr class="click ${SITE_OPEN.has(r.name)?'open':''}" onclick="toggleSite('${jsq(r.name)}')">
+        <td class="mono"><span class="caret ${SITE_OPEN.has(r.name)?'open':''}">▶</span> ${esc(r.name)}</td>
         <td>${r.state==='online'?'<span class="badge ok">online</span>':`<span class="badge">offline</span> <span class="dim" style="font-size:12px">${esc(r.last_seen)}</span>`}</td>
-        <td class="mono">${esc(r.via)}</td><td class="mono dim">${esc(r.ip)}</td><td>${last(r.last)}</td></tr>`).join('')
+        <td class="mono">${esc(r.via)}</td><td class="mono dim">${esc(r.ip)}</td><td>${lastRun(r.last)}</td></tr>
+        ${SITE_OPEN.has(r.name)?`<tr class="detail"><td colspan="5" id="site-${esc(r.name)}">${renderSite(r.name,r)}</td></tr>`:''}`).join('')
         ||'<tr><td colspan="5" class="dim">No sites.</td></tr>'}</table></div>
     <p class="note">From <code>list_systems.sh</code>. <b>via tailscale</b> sites are reached with Tailscale SSH, <b>via ssh</b> ones with
       plain ssh over the tailnet name. The version is what the last triage from this host found.</p></div>
     ${s.unlisted.length?`<div class="card"><h3>Triaged before, not on the tailnet now</h3><table>
-      ${s.unlisted.map(u=>`<tr><td class="mono">${esc(u.name)}</td><td>${last(u.last)}</td></tr>`).join('')}</table></div>`:''}`;
+      ${s.unlisted.map(u=>`<tr><td class="mono">${esc(u.name)}</td><td>${lastRun(u.last)}</td></tr>`).join('')}</table></div>`:''}`;
+}
+function toggleSite(h){
+  if(SITE_OPEN.has(h)){ SITE_OPEN.delete(h); setHash('systems'); renderSystems(); return; }
+  SITE_OPEN.add(h); setHash('systems/'+h); renderSystems(); loadSite(h);
+}
+async function loadSite(h){
+  try{ SITE[h]=await api('/systems/'+encodeURIComponent(h)); }
+  catch(e){ SITE[h]={host:h,error:e.message}; }
+  renderSystems();
+}
+async function runTriage(h){
+  if(!confirm(`Run a triage of ${h} now? It connects to the site and only reads (the same check the bot runs for a question). It takes up to a minute or two.`))return;
+  SITE_BUSY.add(h); renderSystems();
+  try{ const r=await api('/systems/'+encodeURIComponent(h)+'/triage',{method:'POST',body:{}});
+    SITE[h]={...r.site, run:{ok:r.ok, tail:r.output_tail}}; }
+  catch(e){ SITE[h]={...(SITE[h]||{host:h}), run:{ok:false, tail:e.message}}; }
+  SITE_BUSY.delete(h); renderSystems();
+}
+// What a sensor's address did at the triage: ping when it was run, else the neighbour cache
+// (REACHABLE = answered lately, STALE = seen before but not lately, FAILED/INCOMPLETE = no answer).
+function reach(p){
+  if(!p) return '<span class="dim">—</span>';
+  const tail=`<div class="dim mono" style="font-size:11px">${esc(p.route)}${p.neigh?' · neigh '+esc(p.neigh):''}</div>`;
+  if(p.hijack) return '<span class="badge bad">routed via the tailnet</span>'+tail;
+  if(p.ping==='OK') return '<span class="badge ok">answers (ping)</span>'+tail;
+  if(p.ping==='DOWN') return '<span class="badge bad">no answer (ping)</span>'+tail;
+  const n=p.neigh.toUpperCase();
+  if(n==='REACHABLE') return '<span class="badge ok">reachable</span>'+tail;
+  if(['STALE','DELAY','PROBE'].includes(n)) return '<span class="badge warn">seen earlier, not lately</span>'+tail;
+  if(['FAILED','INCOMPLETE'].includes(n)) return '<span class="badge bad">no answer</span>'+tail;
+  return '<span class="badge warn">never seen from the machine</span>'+tail;
+}
+function renderSite(h,row){
+  const d=SITE[h], busy=SITE_BUSY.has(h);
+  const btn=`<button class="sm" onclick="event.stopPropagation();runTriage('${jsq(h)}')" ${busy||row.state!=='online'?'disabled':''}
+      title="${row.state!=='online'?'The site is offline':''}">${busy?'Running the triage…':'Run triage now'}</button>`;
+  if(!d) return '<p class="note">Loading…</p>';
+  if(d.error) return `<p class="alert">${esc(d.error)}</p>`;
+  const run=d.run?`<p class="alert ${d.run.ok?'ok':''}">${d.run.ok?'Triage finished.':'The triage did not finish:'} <span class="mono">${d.run.ok?'':esc(d.run.tail)}</span></p>`:'';
+  const t=d.triage;
+  if(!t) return `${run}<div class="row"><span class="note">No triage of this site is saved yet, so its sensors aren't known here.</span>${btn}</div>`;
+  const c=t.config, sensorGroups=c.groups.filter(g=>g.nodes.some(n=>n.addresses.length)),
+        softGroups=c.groups.filter(g=>!g.nodes.some(n=>n.addresses.length));
+  return `${run}
+    <div class="row" style="margin-bottom:8px"><span class="note" style="margin:0">From the triage of <b>${fmtTime(t.ts)}</b>${t.count>1?` (newest of ${t.count})`:''}.
+      ${c.file?`Config: <code>${esc(c.file)}</code>`:''}</span><span class="grow">${btn}</span></div>
+    ${t.unreachable?'<p class="alert warn">That triage could not reach the site, so it has no sensor list. Run a new one when the site is online.</p>':''}
+    ${sensorGroups.map(g=>`<div class="hint" style="font-family:var(--mono)">${esc(g.platform||'(no platform)')}</div>
+      <div class="scroll"><table><tr><th>sensor</th><th>type</th><th>address</th><th>at the triage</th></tr>
+      ${g.nodes.map(n=>(n.addresses.length?n.addresses:[null]).map((a,i)=>`<tr>
+        <td class="mono">${i?'':esc(n.name)}${!i&&n.status?`<div class="dim" style="font-size:11px">${esc(n.status)}</div>`:''}</td>
+        <td class="mono">${i?'':esc(n.type)}</td>
+        <td class="mono">${a?`${esc(a.value)} <span class="dim">${esc(a.key)}</span>${a.note?`<div class="dim" style="font-size:11px">${esc(a.note)}</div>`:''}`:'<span class="dim">—</span>'}</td>
+        <td>${a?reach(a.path):''}</td></tr>`).join('')).join('')}</table></div>`).join('')
+      ||(t.unreachable?'':'<p class="note">The triage found no sensor addresses in the site config.</p>')}
+    ${t.other_paths.length?`<div class="hint">Also checked (not a config entry)</div><div class="scroll"><table>
+      <tr><th>address</th><th>what</th><th>at the triage</th></tr>
+      ${t.other_paths.map(p=>`<tr><td class="mono">${esc(p.ip)}</td><td>${esc(p.label||'an address in the resolved config')}</td><td>${reach(p)}</td></tr>`).join('')}</table></div>`:''}
+    ${softGroups.length?`<div class="hint">Software nodes</div>${softGroups.map(g=>`<div style="margin-bottom:4px"><span class="mono dim">${esc(g.platform)}</span>
+      ${g.nodes.map(n=>`<span class="tchip" title="${esc(n.type)}">${esc(n.name)}</span>`).join('')}</div>`).join('')}`:''}
+    ${c.notes.map(n=>`<p class="note">${esc(n)}</p>`).join('')}
+    <details><summary class="dim" style="cursor:pointer;font-size:12px">The triage's own text for these sections</summary>
+      ${Object.entries(t.raw).map(([k,v])=>`<div class="hint mono">=== ${esc(k)} ===</div><pre>${esc(v)}</pre>`).join('')}</details>`;
 }
 
 // ================================================================== Bot config
@@ -725,10 +800,11 @@ async function loadBot(){
 (()=>{ const [t,...rest]=decodeURIComponent(location.hash.slice(1)).split('/'), arg=rest.join('/');
   if(t==='convos'&&arg) CV.open=arg;
   if(t==='cases'&&arg) CASE={slug:arg,loading:true};
+  if(t==='systems'&&arg) SITE_OPEN.add(arg);
   showTab(['convos','cases','docs','stats','systems','bot'].includes(t)?t:'convos');
   if(t==='cases'&&arg) openCase(arg);
 })();
 Object.assign(window,{showTab,runSelftest,openDeploy,startDeploy,loadConvos,openThread,openCase,closeCase,newCase,
   previewSlug,toggleTopic,addTopic,setMode,renderSyms,addSym,renderSigs,moveSec,rmSec,addSec,saveCase,renameCase,
-  deleteCase,openDoc,renderDoc,saveDoc,loadStats,loadSystems,loadBot});
+  deleteCase,openDoc,renderDoc,saveDoc,loadStats,loadSystems,toggleSite,runTriage,loadBot});
 </script></body></html>

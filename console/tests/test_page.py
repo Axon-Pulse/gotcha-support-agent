@@ -11,6 +11,7 @@ import pytest
 from console.server import app
 from console.settings import S
 from console.tests.conftest import SID, stub, write_transcript, write_turns
+from console.tests.test_sites import TRIAGE
 
 HERE = Path(__file__).resolve().parent
 PAGE = (HERE.parent / "index.html").read_text()
@@ -58,6 +59,9 @@ def _capture(client, env) -> dict:
          "axon-gotcha-4 axon-gotcha-4 100.0.0.4 online tailscale\\n'\n")
     get("/systems")
     real.write_text(saved)
+    (S.triage_dirs[0]).mkdir(parents=True, exist_ok=True)
+    (S.triage_dirs[0] / "axon-gotcha-4-20261001-100000.txt").write_text(TRIAGE)
+    get("/systems/axon-gotcha-4")
     for p in ["/meta", "/selftest", "/deploy", "/conversations", "/conversations/C1:100.1", "/cases",
               "/cases/radar-transmitter-off", "/docs", "/docs/glossary", "/docs/skill", "/stats",
               "/bot", "/audit"]:

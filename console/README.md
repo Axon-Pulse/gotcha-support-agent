@@ -8,7 +8,7 @@ A web page for the Slack support bot (`../slack-bridge/` + `../support-agent-ski
 | **Cases** | The KB cases as a form: topics, symptoms, title, intro, sections in any order. On the same screen, the case's **SKILL.md index row** and its **log signatures**. Create, rename, delete. A file whose layout the form can't reproduce exactly opens as markdown. | `support-agent-skill/kb/cases/*.md`, `SKILL.md` §3, `scripts/signatures.txt` |
 | **Reference docs** | `system-model.md`, `glossary.md`, `escalation.md` and all of `signatures.txt`, as text with a preview. `SKILL.md` is shown read-only. | `support-agent-skill/kb/`, `scripts/` |
 | **Stats** | Questions, cost, time to answer, timeouts, per day; the cases read most. | the same as Conversations |
-| **Systems** | The sites the bot can reach, how (Tailscale SSH or plain ssh), and what each ran when last triaged. | `list_systems.sh`, `~/.local/state/gotcha-support/systems.tsv` |
+| **Systems** | The sites the bot can reach, how (Tailscale SSH or plain ssh), and what each ran when last triaged. Click a site for its **sensors**: each platform's nodes with type and address, from the site's own config, and whether each address answered at that triage. The radar's own IP, which isn't in the config, is shown too. **Run triage now** runs the same read-only triage the bot runs for a question. | `list_systems.sh`, `systems.tsv`, saved triages (`slack-bridge/state/triage/`, `/tmp/gotcha-triage/`) |
 | **Bot config** | The container, the bot's settings from `slack-bridge/.env` (tokens and keys are named, never shown), its permissions and guard, and who changed what here. | read-only |
 
 The header shows whether `selftest.sh` passes and whether the running bot has the files on
@@ -159,6 +159,7 @@ Slack users show as IDs (`U0…`): the bot's Slack app has no `users:read` scope
 | `kb.py` | Cases ↔ parts, SKILL.md index rows, signatures, reference docs, `selftest.sh`. |
 | `conversations.py` | Transcripts + turn log → threads, steps and stats. |
 | `ops.py` | Bot config (allowlisted `.env` names), the container, Systems, Deploy. |
+| `sites.py` | A site's sensors from its newest saved triage; running a triage on demand. |
 | `settings.py` | Paths and access, from `CONSOLE_*` variables with this checkout as the default. |
 | `index.html` | The whole page: one file, no build step, no external scripts. |
 | `tests/` | Every test runs on a copy of the skill. `page_harness.js` runs the page's script under node against answers captured from the real server and drives every tab. |

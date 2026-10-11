@@ -37,7 +37,7 @@ check:  ## Check .env and what the container borrows from this host
 	if [ ! -f state/.migrated ] && docker volume inspect slack-bridge_claude >/dev/null 2>&1; then
 	  fail "the bot's sessions are still in the old Docker volumes. Run: make migrate"
 	fi
-	mkdir -p state/claude
+	mkdir -p state/claude state/triage
 	echo "check: ok"
 
 build: check  ## Build the image from the current files
