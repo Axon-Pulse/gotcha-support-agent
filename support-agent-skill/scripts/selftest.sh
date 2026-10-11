@@ -79,5 +79,8 @@ for f in "$SKILL"/kb/cases/*.md; do
   grep -q "\`$b\`" "$SKILL/SKILL.md" && ok "indexed: $b" || bad "case not in the SKILL.md index: $b"
 done
 grep -q 'Platform .\* repositioned' "$HERE/signatures.txt" && bad "signatures.txt tags a routine platform reposition" || ok "no routine-activity signature"
+# run_triage.sh sends this file to the site inside a heredoc ending at this marker: a line
+# holding it would end the heredoc early, and the rest of the file would run as shell there.
+grep -q '__GOTCHA_SIGS__' "$HERE/signatures.txt" && bad "signatures.txt contains the heredoc marker __GOTCHA_SIGS__" || ok "no heredoc marker in signatures.txt"
 
 [ $fail = 0 ] && echo "all checks passed" || { echo "SOME CHECKS FAILED"; exit 1; }

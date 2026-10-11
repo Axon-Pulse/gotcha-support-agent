@@ -20,3 +20,7 @@ config_audit.jsonl
 
 # Evaluation table for the support bot: kept local for now
 evals/
+
+# Console: venv and its audit log of who changed what
+/console/.venv/
+/console/state/

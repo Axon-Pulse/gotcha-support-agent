@@ -44,8 +44,10 @@ an answer built on what was already found. A new top-level message starts fresh.
 | `tests/` | The guard's allow/deny table, and the bridge without Slack or Claude. `GOTCHA_LIVE_CLAUDE=1 pytest tests/test_live_permissions.py` also runs the real `claude` against canary files, to check the read allow-list (about ten model calls). |
 | `skill_hash.sh` | Fingerprint of the skill and bridge files. `make build`/`update` stamp it on the image, so the console can tell whether an edit is deployed. |
 | `state/threads.json` | Slack thread → Claude session (created at run time, gitignored). |
-| `state/turns.jsonl` | One line when a turn starts, one when it ends: who asked, in which thread, outcome, time, cost. No message text; that is in Claude's transcript. |
+| `state/turns.jsonl` | One line when a turn starts, one when it ends: who asked, in which thread, outcome, time, cost. No message text; that is in Claude's transcript. Read by the console. |
 | `state/claude/` | Claude Code's config directory in the container: its session transcripts are under `projects/-app-slack-bridge-workspace/`. |
+
+The console that shows the conversations, edits the KB and deploys it is `../console/`.
 
 ## Setup
 
@@ -207,7 +209,8 @@ make logs       # expect "bridge up: …"
 ```
 
 After a code or KB change (or a `git pull`): `make update`. The skill, KB and guard are copied
-into the image, so a KB change needs it too. After editing `.env`: `make restart`. Also
+into the image, so a KB change needs it too. The console's **Deploy** button runs the same
+`make update`. After editing `.env`: `make restart`. Also
 `make stop`, `make status`, `make shell`, `make test`, and `make dev` (the foreground run with
 `.env`, no Docker). `make` alone lists them.
 
@@ -385,9 +388,9 @@ The Slack tokens are stripped from the environment Claude runs in.
 
 Every fix goes into the answer as a step **for the PM**. The bot never runs one.
 
-## Compared with the LangGraph bot on `main`
+## Compared with the retired LangGraph bot (`../legacy/`)
 
-| | This bridge + skill | LangGraph bot (`slack_app.py`, `graph.py`) |
+| | This bridge + skill | LangGraph bot (`legacy/slack_app.py`, `legacy/graph.py`) |
 |---|---|---|
 | Code to own | ~300-line bridge + ~300-line guard; the skill is markdown + bash | ~8k lines: graph, agents, tools, console, Slack gateway |
 | How it diagnoses | Claude follows the skill: one triage bundle, KB cases, gotcha30 source **at the site's exact version** | Fixed agents calling fixed tools; only what's been coded as a tool |
@@ -396,7 +399,7 @@ Every fix goes into the answer as a step **for the PM**. The bot never runs one.
 | PM answer shape | In the bridge prompt (`SLACK_PROMPT`) | Needs `REPORT_SCHEMA` + Slack formatting changes (not done) |
 | Speed | One Claude session; the skill's fast path; effort configurable | ~15 sequential model calls today (routing + agents + synthesis + rewrite) |
 | Follow-ups in a thread | Resumes the same session | `conversation.py` routes follow-up vs new run |
-| Console, approvals, KB editor | None: the KB is files in git | Web console with approvals, traces, inventory editor |
+| Console | `../console/`: conversations with each step, KB editor (cases, index rows, signatures), stats, Deploy | Web console with approvals, traces, inventory editor |
 | Same either way | Slack app, a tailnet host, SSH access to each site, a read-only account on the gotcha machines | ← |
 
 ## Status
@@ -418,6 +421,6 @@ matches the `<x>` in an echo string in `triage_remote.sh`, not a real write.
 
 **Known follow-ups:**
 - **Reply shape location:** move it from `SLACK_PROMPT` into `SKILL.md` §8, so the skill answers the same way inside and outside Slack.
-- **`signatures.txt` injection:** `run_triage.sh` pastes `signatures.txt` into a heredoc that runs on the site. A line equal to its end marker would run as shell there. Validate the file, or send it base64-encoded.
+- **`signatures.txt` injection:** `run_triage.sh` pastes `signatures.txt` into a heredoc that runs on the site, so a line holding its end marker would run as shell there. `selftest.sh` now fails on the marker and the console refuses it (and checks every pattern), so neither a console edit nor a deploy can carry one. Sending the file base64-encoded would close it for hand edits too.
 - **Rate limiting:** there's no per-user limit yet. The LangGraph gateway has one; add it if the channel gets busy.
 - **Thread store:** `state/threads.json` grows without bound. Prune it by age.

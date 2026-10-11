@@ -1,0 +1,734 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gotcha support console</title>
+<style>
+:root{--bg:#fbfbfa;--fg:#1a1a18;--dim:#6b6b66;--line:#e2e2dd;--card:#fff;--sunk:#f4f4f1;
+      --ok:#1f7a4d;--warn:#9a6a00;--bad:#a32b2b;--accent:#2f5fd0;--mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+      --r:10px;--r-sm:7px;--t:170ms cubic-bezier(.2,.7,.3,1);
+      --sh1:0 1px 2px rgba(20,20,18,.06),0 1px 3px rgba(20,20,18,.05);
+      --sh2:0 6px 16px rgba(20,20,18,.10),0 2px 5px rgba(20,20,18,.07);
+      --tint:rgba(47,95,208,.09);--tint-w:rgba(154,106,0,.11);--ring:rgba(47,95,208,.28);
+      --bar:#2f5fd0;--grid:#ececE8}
+@media(prefers-color-scheme:dark){:root{--bg:#16171a;--fg:#e8e8e4;--dim:#9a9a94;--line:#2c2e33;
+      --card:#1d1f23;--sunk:#141518;--ok:#5fd39b;--warn:#e0b050;--bad:#f08a8a;--accent:#7aa2f7;
+      --sh1:0 1px 2px rgba(0,0,0,.4);--sh2:0 6px 18px rgba(0,0,0,.5);
+      --tint:rgba(122,162,247,.14);--tint-w:rgba(224,176,80,.14);--ring:rgba(122,162,247,.4);
+      --bar:#7aa2f7;--grid:#26282d}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:14px/1.55 system-ui,-apple-system,sans-serif;
+     margin:0;padding:0 16px 48px}
+.wrap{max-width:1120px;margin:0 auto}
+header.top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:18px 0 12px;border-bottom:1px solid var(--line)}
+h1{font-size:17px;margin:0 8px 0 0;font-weight:650;letter-spacing:-.01em}
+.pill{font:11px/1 var(--mono);padding:5px 9px;border-radius:99px;border:1px solid var(--line);color:var(--dim);
+  background:none;cursor:default;white-space:nowrap}
+button.pill{cursor:pointer}
+.pill.ok{color:var(--ok);border-color:var(--ok)}
+.pill.warn{color:var(--warn);border-color:var(--warn)}
+.pill.bad{color:var(--bad);border-color:var(--bad)}
+.grow{margin-left:auto}
+nav{display:flex;gap:2px;margin:14px 0 18px;flex-wrap:wrap}
+nav button{background:none;border:1px solid transparent;border-radius:var(--r-sm);padding:6px 12px;
+  font:inherit;color:var(--dim);cursor:pointer;transition:background var(--t),color var(--t),border-color var(--t)}
+nav button:hover{color:var(--fg);background:var(--tint)}
+nav button[aria-selected=true]{background:var(--card);border-color:var(--line);color:var(--fg);
+  font-weight:600;box-shadow:var(--sh1)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+  padding:14px 16px;margin-bottom:12px;box-shadow:var(--sh1);min-width:0}
+.card h3{margin:0 0 8px;font-size:13px;font-weight:650;letter-spacing:.01em;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+input[type=text],input[type=search],textarea,select{
+  background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:var(--r-sm);
+  padding:8px 10px;font:inherit;transition:border-color var(--t),box-shadow var(--t);min-width:0}
+input[type=text],input[type=search]{flex:1}
+input:focus-visible,textarea:focus-visible,select:focus-visible,button:focus-visible{outline:none;
+  border-color:var(--accent);box-shadow:0 0 0 3px var(--ring)}
+textarea{font:12.5px/1.5 var(--mono);width:100%;min-height:120px;resize:vertical}
+textarea.prose{font:13.5px/1.6 system-ui,-apple-system,sans-serif}
+textarea.tall{min-height:520px}
+button.go{background:var(--accent);color:#fff;border:0;border-radius:var(--r-sm);padding:8px 15px;
+  font:inherit;font-weight:600;cursor:pointer;box-shadow:var(--sh1);transition:filter var(--t)}
+button.go:hover:not(:disabled){filter:brightness(1.08)}
+button.go:disabled{opacity:.45;cursor:not-allowed}
+button.sm{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;
+  padding:4px 10px;font:inherit;font-size:13px;cursor:pointer;transition:background var(--t),border-color var(--t)}
+button.sm:hover:not(:disabled){background:var(--tint);border-color:var(--accent)}
+button.sm:disabled{opacity:.45;cursor:not-allowed}
+button.sm.yes{border-color:var(--ok);color:var(--ok)}
+button.sm.no{border-color:var(--bad);color:var(--bad)}
+code,pre{font-family:var(--mono)}
+pre{background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:10px;
+  overflow:auto;font-size:12px;margin:6px 0;max-height:420px;white-space:pre-wrap;overflow-wrap:anywhere}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--dim);font-weight:600}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+tr.click{cursor:pointer;transition:background var(--t)}
+tr.click:hover,tr.click.open{background:var(--tint)}
+.scroll{overflow-x:auto}
+.mono{font-family:var(--mono);font-size:12.5px}
+.dim{color:var(--dim)}
+.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}
+.note{font-size:12.5px;color:var(--dim);margin:6px 0}
+.hint{font-size:12px;color:var(--dim);margin:8px 0 4px}
+.saved{font-size:12px;margin-left:8px}
+.tchip{display:inline-block;font:11px var(--mono);padding:3px 8px;border-radius:20px;
+  border:1px solid var(--line);color:var(--dim);margin:0 5px 5px 0;white-space:nowrap;background:none}
+.tchip.on{border-color:var(--accent);color:var(--accent)}
+button.tchip{cursor:pointer;transition:border-color var(--t),color var(--t),background var(--t)}
+button.tchip:hover{border-color:var(--accent);color:var(--accent);background:var(--tint)}
+.badge{font:10.5px/1 var(--mono);padding:3px 6px;border-radius:5px;border:1px solid var(--line);color:var(--dim);white-space:nowrap}
+.badge.ok{border-color:var(--ok);color:var(--ok)}
+.badge.warn{border-color:var(--warn);color:var(--warn)}
+.badge.bad{border-color:var(--bad);color:var(--bad)}
+.badge.run{border-color:var(--accent);color:var(--accent)}
+fieldset{border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;margin:0 0 10px;min-width:0}
+fieldset>input[type=text]{width:100%}
+legend{font:11px/1 var(--mono);color:var(--dim);padding:0 6px;text-transform:uppercase;letter-spacing:.06em}
+.sym{display:flex;gap:6px;margin-bottom:6px;align-items:center}
+.alert{border:1px solid var(--bad);background:color-mix(in srgb,var(--bad) 8%,transparent);
+  border-radius:var(--r-sm);padding:9px 12px;margin:10px 0;font-size:12.5px}
+.alert.warn{border-color:var(--warn);background:var(--tint-w)}
+.alert.ok{border-color:var(--ok);background:color-mix(in srgb,var(--ok) 8%,transparent)}
+.split{display:grid;grid-template-columns:200px minmax(0,1fr);gap:12px}
+.side button{display:block;width:100%;text-align:left;margin-bottom:4px}
+.side button.on{border-color:var(--accent);background:var(--tint)}
+@media(max-width:720px){.split{grid-template-columns:1fr}}
+/* conversations */
+.turn{border-top:1px solid var(--line);padding:12px 0}
+.turn:first-of-type{border-top:0}
+.turn>header{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--dim)}
+.q{background:var(--sunk);border-radius:var(--r-sm);padding:9px 12px;margin:8px 0;white-space:pre-wrap;overflow-wrap:anywhere}
+.a{border-left:3px solid var(--accent);padding:4px 12px;margin:8px 0;overflow-wrap:anywhere}
+.a pre{max-height:none}
+.steps{margin-top:6px}
+.steps>summary{cursor:pointer;font-size:12.5px;color:var(--dim)}
+.step{border:1px solid var(--line);border-radius:var(--r-sm);padding:7px 10px;margin:6px 0;background:var(--bg)}
+.step.denied{border-color:var(--warn)}
+.step.err{border-color:var(--bad)}
+.step>.h{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.step>.h b{font:12px var(--mono);font-weight:650}
+.step code.in{font-size:12px;overflow-wrap:anywhere}
+.step details>summary{cursor:pointer;font-size:12px;color:var(--dim);margin-top:4px}
+.step.text{border-style:dashed;font-size:13px;color:var(--dim)}
+.clip{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:420px}
+/* sections editor */
+.secrow{border:1px solid var(--line);border-radius:var(--r);padding:10px 12px;margin-bottom:9px;background:var(--card)}
+.secrow>.row{margin-bottom:6px}
+.secrow>.row input{font-weight:600}
+/* markdown preview */
+.md h1{font-size:18px}.md h2{font-size:15px;margin-top:20px}.md h3{font-size:14px}
+.md table{margin:8px 0}.md pre{max-height:none}
+/* stats */
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:12px}
+.tile{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;box-shadow:var(--sh1)}
+.tile .l{font-size:12px;color:var(--dim)}
+.tile .v{font-size:24px;font-weight:620;margin-top:2px}
+.tile.hero .v{font-size:48px;line-height:1.1}
+.tile .s{font-size:12px;color:var(--dim)}
+svg.chart{width:100%;height:auto;display:block;overflow:visible}
+svg.chart text{font:11px system-ui,sans-serif;fill:var(--dim);font-variant-numeric:tabular-nums}
+svg.chart .grid{stroke:var(--grid);stroke-width:1}
+svg.chart .base{stroke:var(--line);stroke-width:1}
+svg.chart .mark{fill:var(--bar)}
+svg.chart .hit{fill:transparent;cursor:default}
+svg.chart g.col:hover .mark{filter:brightness(1.15)}
+svg.chart g.col:hover .hit{fill:var(--tint)}
+.chartbox{position:relative}
+.tip{position:absolute;pointer-events:none;background:var(--card);border:1px solid var(--line);box-shadow:var(--sh2);
+  border-radius:var(--r-sm);padding:7px 10px;font-size:12px;white-space:nowrap;z-index:5;transform:translate(-50%,-100%)}
+.tip b{font-weight:650}
+.hbar{display:grid;grid-template-columns:minmax(0,260px) minmax(0,1fr) 40px;gap:4px 10px;align-items:center;font-size:12.5px}
+.hbar .track{height:14px}
+.hbar .fill{height:14px;background:var(--bar);border-radius:0 4px 4px 0;min-width:2px}
+</style></head><body><div class="wrap">
+
+<header class="top">
+  <h1>Gotcha support console</h1>
+  <span class="pill" id="who">…</span>
+  <button class="pill" id="selftest" title="support-agent-skill/scripts/selftest.sh" onclick="runSelftest()">selftest …</button>
+  <button class="pill grow" id="deploypill" onclick="openDeploy()">deploy …</button>
+</header>
+
+<div id="deploy"></div>
+
+<nav id="tabs">
+  <button data-t="convos" aria-selected="true">Conversations</button>
+  <button data-t="cases" aria-selected="false">Cases</button>
+  <button data-t="docs" aria-selected="false">Reference docs</button>
+  <button data-t="stats" aria-selected="false">Stats</button>
+  <button data-t="systems" aria-selected="false">Systems</button>
+  <button data-t="bot" aria-selected="false">Bot config</button>
+</nav>
+
+<section id="convos"></section>
+<section id="cases" hidden></section>
+<section id="docs" hidden></section>
+<section id="stats" hidden></section>
+<section id="systems" hidden></section>
+<section id="bot" hidden></section>
+
+</div><script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// For a value inside an inline handler's single-quoted JS string, inside an HTML attribute.
+const jsq=s=>esc(String(s??'').replace(/\\/g,'\\\\').replace(/'/g,"\\'"));
+const api=(p,o={})=>{
+  if(o.body!==undefined&&typeof o.body!=='string'){
+    o={...o,body:JSON.stringify(o.body),headers:{'content-type':'application/json','x-console':'1',...(o.headers||{})}};
+  }else if(o.method&&o.method!=='GET'){
+    o={...o,headers:{'content-type':'application/json','x-console':'1',...(o.headers||{})}};
+  }
+  return fetch('/api'+p,o).then(async r=>{if(!r.ok)throw new Error((await r.json().catch(()=>({}))).detail||r.status);return r.json()});
+};
+const flash=(id,msg,bad)=>{const e=$('#'+id); if(!e)return; e.textContent=msg;
+  e.className='saved '+(bad?'bad':'ok'); if(!bad)setTimeout(()=>{if(e.textContent===msg)e.textContent=''},3500)};
+const fmtTime=ts=>ts?new Date(ts*1000).toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'—';
+const fmtIso=s=>s?new Date(s).toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'—';
+const fmtCost=c=>typeof c==='number'?'$'+c.toFixed(2):'—';
+const fmtSecs=s=>typeof s==='number'?(s>=60?Math.floor(s/60)+'m '+(s%60)+'s':s+'s'):'—';
+const OUTCOME={ok:['ok','answered'],timeout:['warn','timed out'],error:['bad','error'],
+  running:['run','running'],lost:['bad','no answer (bot stopped)'],unknown:['','unknown']};
+const outcomeBadge=o=>{const [c,l]=OUTCOME[o]||['',o];return `<span class="badge ${c}">${esc(l)}</span>`};
+var TAB='convos', POLL=null;
+
+document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>showTab(b.dataset.t));
+// The address says what is open (#convos/<thread>, #cases/<slug>, #stats), so a link to one
+// conversation or one case can be sent to a teammate.
+const setHash=h=>{ if(location.hash!=='#'+h) history.replaceState(null,'','#'+h); };
+function showTab(t){
+  TAB=t;
+  if(decodeURIComponent(location.hash.slice(1)).split('/')[0]!==t) setHash(t);
+  document.querySelectorAll('#tabs button').forEach(x=>x.setAttribute('aria-selected',x.dataset.t===t));
+  ['convos','cases','docs','stats','systems','bot'].forEach(s=>$('#'+s).hidden=(s!==t));
+  ({convos:loadConvos,cases:loadCases,docs:loadDocs,stats:loadStats,systems:loadSystems,bot:loadBot}[t])();
+}
+
+// ------------------------------------------------------------------ Slack mrkdwn, minimal
+function mrkdwn(t){
+  const parts=String(t||'').split('```');
+  return parts.map((p,i)=>{
+    if(i%2) return `<pre dir="ltr">${esc(p.replace(/^\n/,''))}</pre>`;
+    return p.split('\n').map(line=>{
+      let h=esc(line)
+        .replace(/`([^`]+)`/g,'<code>$1</code>')
+        .replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s).,:;!?]|$)/g,'$1<b>$2</b>')
+        .replace(/(^|[\s(])_([^_\n]+)_(?=[\s).,:;!?]|$)/g,'$1<i>$2</i>');
+      return `<div dir="auto">${h||'&nbsp;'}</div>`;
+    }).join('');
+  }).join('');
+}
+
+// ------------------------------------------------------------------ a small markdown preview
+function mdPreview(t){
+  const out=[]; let inCode=false, buf=[], table=[];
+  const inline=s=>esc(s).replace(/`([^`]+)`/g,'<code>$1</code>').replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>')
+    .replace(/(^|\s)\*([^*\s][^*]*)\*/g,'$1<i>$2</i>');
+  const flushTable=()=>{ if(!table.length)return;
+    const rows=table.filter(r=>!/^\|\s*-/.test(r)).map(r=>r.replace(/^\||\|$/g,'').split('|'));
+    out.push('<div class="scroll"><table>'+rows.map((r,i)=>'<tr>'+r.map(c=>`<${i?'td':'th'}>${inline(c.trim())}</${i?'td':'th'}>`).join('')+'</tr>').join('')+'</table></div>');
+    table=[]; };
+  for(const line of String(t||'').split('\n')){
+    if(/^\s*(```|~~~)/.test(line)){ if(inCode){out.push(`<pre>${esc(buf.join('\n'))}</pre>`);buf=[];} flushTable(); inCode=!inCode; continue; }
+    if(inCode){buf.push(line);continue;}
+    if(line.startsWith('|')){table.push(line);continue;} flushTable();
+    let m;
+    if((m=line.match(/^(#{1,4}) (.*)/))) out.push(`<h${m[1].length}>${inline(m[2])}</h${m[1].length}>`);
+    else if((m=line.match(/^\s*[-*] (.*)/))) out.push(`<div>• ${inline(m[1])}</div>`);
+    else if((m=line.match(/^\s*(\d+)\. (.*)/))) out.push(`<div>${m[1]}. ${inline(m[2])}</div>`);
+    else if(/^    /.test(line)) out.push(`<pre>${esc(line.slice(4))}</pre>`);
+    else if(!line.trim()) out.push('<div style="height:8px"></div>');
+    else out.push(`<p style="margin:2px 0">${inline(line)}</p>`);
+  }
+  if(inCode) out.push(`<pre>${esc(buf.join('\n'))}</pre>`);
+  flushTable();
+  return `<div class="md">${out.join('')}</div>`;
+}
+
+// ================================================================== header: who, selftest, deploy
+api('/meta').then(m=>{ $('#who').textContent=m.who==='local'?'local':m.who; });
+
+function showSelftest(t){
+  const b=$('#selftest'); if(!b||!t)return;
+  b.textContent=t.ok?'selftest ✓':`selftest ✗ ${t.failures.length}`;
+  b.className='pill '+(t.ok?'ok':'bad');
+  b.title=t.ok?'support-agent-skill/scripts/selftest.sh passes':t.failures.join('\n');
+}
+async function runSelftest(){ const t=await api('/selftest'); showSelftest(t);
+  if(!t.ok) alert('selftest.sh fails:\n\n'+t.failures.join('\n')); }
+
+var DEPLOY=null, DEPLOY_OPEN=false, DEPLOY_TIMER=null;
+async function refreshDeploy(){
+  try{ DEPLOY=await api('/deploy'); }catch(e){ return; }
+  const p=$('#deploypill'), d=DEPLOY;
+  const map={deployed:['ok','bot is up to date'],
+    changed:['warn',`${d.changed.length||'some'} change${d.changed.length===1?'':'s'} not deployed`],
+    unknown:['warn','deployed version unknown'],'no-container':['bad','bot container not found']};
+  let [cls,label]=map[d.state]||['',d.state];
+  if(d.deploy.running){cls='warn';label='deploying…';}
+  p.className='pill grow '+cls; p.textContent=label;
+  if(DEPLOY_OPEN) renderDeploy();
+  clearTimeout(DEPLOY_TIMER);
+  DEPLOY_TIMER=setTimeout(refreshDeploy, d.deploy.running?2000:30000);
+}
+function openDeploy(){ DEPLOY_OPEN=!DEPLOY_OPEN; DEPLOY_OPEN?renderDeploy():($('#deploy').innerHTML=''); }
+function renderDeploy(){
+  const d=DEPLOY; if(!d)return;
+  const c=d.container||{};
+  const dep=d.deploy||{};
+  $('#deploy').innerHTML=`<div class="card"><h3>Deploy to the bot
+      <span class="dim" style="font-weight:400">— rebuilds the image with the current files and restarts it (<code>make -C slack-bridge update</code>)</span>
+      <button class="sm grow" onclick="openDeploy()">Close</button></h3>
+    <p class="note">The KB is copied into the bot's image, so an edit here reaches Slack only after a
+      deploy. A deploy is refused while selftest.sh fails or while a question is being answered.
+      It takes about a minute; questions asked meanwhile wait for the bot to come back.</p>
+    <table><tr><th>Running image</th><td class="mono">${c.found?`${esc(c.status)} · built ${fmtIso(c.image_created)} · hash ${esc(d.image_hash||'none')}`:esc(c.error||'not found')}</td></tr>
+      <tr><th>Files on disk</th><td class="mono">hash ${esc(d.disk_hash||'?')} ${d.state==='deployed'?'<span class="badge ok">same as running</span>':'<span class="badge warn">differs</span>'}</td></tr>
+      ${d.changed.length?`<tr><th>Changed since the build</th><td class="mono">${d.changed.map(esc).join('<br>')}</td></tr>`:''}
+      ${d.git.length?`<tr><th>Not committed to git</th><td class="mono">${d.git.map(esc).join('<br>')}
+        <div class="note">A deploy uses the files as they are now, committed or not. Commit them so the next person to pull has them too.</div></td></tr>`:''}
+    </table>
+    <div class="row" style="margin-top:10px">
+      <button class="go" onclick="startDeploy()" ${dep.running?'disabled':''}>${dep.running?'Deploying…':'Deploy now'}</button>
+      <span id="dv"></span>
+      ${dep.started?`<span class="note">last deploy ${fmtTime(dep.started)} by ${esc(dep.by||'?')}${dep.running?'':dep.exit_code===0?' · <span class="ok">succeeded</span>':` · <span class="bad">failed (exit ${esc(dep.exit_code)})</span>`}</span>`:''}
+    </div>
+    ${dep.log?`<pre id="deploylog" style="max-height:320px">${esc(dep.log)}</pre>`:''}
+  </div>`;
+  const lg=$('#deploylog'); if(lg) lg.scrollTop=lg.scrollHeight;
+}
+async function startDeploy(){
+  if(!confirm('Rebuild and restart the Slack bot with the files as they are now?'))return;
+  try{ await api('/deploy',{method:'POST',body:{}}); DEPLOY_OPEN=true; refreshDeploy(); }
+  catch(e){ flash('dv',e.message,true); }
+}
+refreshDeploy();
+api('/selftest').then(showSelftest);
+
+// ================================================================== Conversations
+var CV={q:'',outcome:'',channel:'',open:null}, CV_TIMER=null;
+async function loadConvos(){
+  const qs=new URLSearchParams({q:CV.q,outcome:CV.outcome,channel:CV.channel});
+  const r=await api('/conversations?'+qs);
+  const rows=r.threads.map(t=>`<tr class="click ${CV.open===t.key?'open':''}" onclick="openThread('${jsq(t.key)}')">
+      <td class="mono" style="white-space:nowrap">${fmtTime(t.last)}</td>
+      <td class="mono dim">${esc(t.users.join(', ')||'—')}</td>
+      <td><div class="clip" dir="auto" title="${esc(t.question)}">${esc(t.question)}</div></td>
+      <td class="num">${t.count}</td>
+      <td>${[...new Set(t.outcomes)].map(outcomeBadge).join(' ')}</td>
+      <td class="num">${fmtCost(t.cost_usd)}</td></tr>`).join('');
+  $('#convos').innerHTML=`
+    <div class="card">
+      <div class="row">
+        <input type="search" id="cv-q" placeholder="search questions, answers, users" value="${esc(CV.q)}"
+          onkeydown="if(event.key==='Enter'){CV.q=this.value;loadConvos()}">
+        <select id="cv-o" onchange="CV.outcome=this.value;loadConvos()">
+          ${['','ok','timeout','error','running','lost'].map(o=>`<option value="${o}" ${CV.outcome===o?'selected':''}>${o?OUTCOME[o][1]:'any outcome'}</option>`).join('')}
+        </select>
+        <select id="cv-c" onchange="CV.channel=this.value;loadConvos()">
+          <option value="">any channel</option>
+          ${r.channels.map(c=>`<option ${CV.channel===c?'selected':''}>${esc(c)}</option>`).join('')}
+        </select>
+        <button class="sm" onclick="CV.q=$('#cv-q').value;loadConvos()">Search</button>
+      </div>
+      ${r.turn_log?'':`<p class="alert warn">No turn log yet (<code>slack-bridge/state/turns.jsonl</code>), so the threads below come from
+        Claude's transcripts alone: who asked in Slack, and turns that timed out, aren't known. The log starts with the next deploy of the bridge.</p>`}
+    </div>
+    <div class="card"><h3>Threads <span class="dim" style="font-weight:400">— ${r.threads.length}, newest first</span></h3>
+      <div class="scroll"><table>
+        <tr><th>last</th><th>asked by</th><th>first question</th><th class="num">turns</th><th>outcome</th><th class="num">cost</th></tr>
+        ${rows||'<tr><td colspan="6" class="dim">No conversations match.</td></tr>'}
+      </table></div>
+    </div>
+    <div id="cv-detail"></div>`;
+  if(CV.open) renderThread(CV.open, false);
+  clearTimeout(CV_TIMER);
+  if(r.threads.some(t=>t.running)) CV_TIMER=setTimeout(()=>{ if(TAB==='convos') loadConvos(); },8000);
+}
+function openThread(key){
+  if(CV.open===key){ CV.open=null; $('#cv-detail').innerHTML=''; setHash('convos'); loadConvos(); return; }
+  CV.open=key; setHash('convos/'+key); loadConvos().then(()=>$('#cv-detail').scrollIntoView({behavior:'smooth',block:'start'}));
+}
+async function renderThread(key){
+  let t;
+  try{ t=await api('/conversations/'+encodeURIComponent(key)); }
+  catch(e){ $('#cv-detail').innerHTML=`<div class="card bad">${esc(e.message)}</div>`; return; }
+  const turns=t.turns.map((u,i)=>`<div class="turn">
+      <header><b style="color:var(--fg)">Turn ${i+1}</b> ${fmtTime(u.ts)} ${u.user?`· <span class="mono">${esc(u.user)}</span>`:''}
+        ${outcomeBadge(u.outcome)} · ${fmtSecs(u.seconds)} · ${fmtCost(u.cost_usd)}
+        ${u.turns?`· ${u.turns} steps`:''} ${u.resumed?'· resumed':''}
+        ${u.session_id?`<span class="mono grow" title="Claude session">${esc(u.session_id.slice(0,8))}</span>`:''}</header>
+      <div class="q" dir="auto">${u.question!=null?esc(u.question):'<span class="dim">The question isn\'t in a transcript on this host yet.</span>'}</div>
+      ${u.answer!=null?`<div class="a">${mrkdwn(u.answer)}</div>`:`<p class="note">${{running:'Still working on it…',
+        timeout:`No answer: the turn was stopped at the time limit, and the bot posted its "no answer within …s" notice.`,
+        error:'No answer: the turn failed, and the bot posted an error notice.',
+        lost:'No answer: the bot stopped (a restart or deploy) before it finished.'}[u.outcome]||'No answer in the transcript.'}</p>`}
+      ${u.error?`<p class="note bad mono">${esc(u.error)}</p>`:''}
+      ${u.cases_read&&u.cases_read.length?`<div class="note">Cases read: ${u.cases_read.map(c=>`<button class="tchip on" onclick="openCase('${jsq(c)}')">${esc(c)}</button>`).join('')}</div>`:''}
+      ${u.steps?renderSteps(u.steps):`<p class="note">${t.transcript_found?'No transcript turn matches this question.':'Transcript not found on this host.'}</p>`}
+    </div>`).join('');
+  $('#cv-detail').innerHTML=`<div class="card"><h3>Thread <span class="mono dim" style="font-weight:400">${esc(t.channel)} · ${esc(t.thread_ts)}</span>
+      <button class="sm grow" onclick="openThread('${jsq(key)}')">Close</button></h3>${turns}</div>`;
+}
+function renderSteps(steps){
+  const tools=steps.filter(s=>s.kind==='tool');
+  const denied=tools.filter(s=>s.denied).length;
+  return `<details class="steps"><summary>What the bot did — ${tools.length} tool call${tools.length===1?'':'s'}${denied?`, <span class="warn">${denied} blocked by the guard</span>`:''}</summary>
+    ${steps.map(s=>s.kind==='text'?`<div class="step text" dir="auto">${esc(s.text.length>600?s.text.slice(0,600)+'…':s.text)}</div>`
+      :`<div class="step ${s.denied?'denied':s.error?'err':''}">
+        <div class="h"><b>${esc(s.name)}</b>${s.denied?'<span class="badge warn">blocked</span>':s.error?'<span class="badge bad">failed</span>':''}</div>
+        <code class="in">${esc(s.input)}</code>
+        ${s.result!=null?`<details><summary>output · ${s.result.split('\n').length} lines${s.truncated?' · <span class="warn">the bot saw it cut short</span>':''}</summary><pre>${esc(s.result)}</pre></details>`:''}
+      </div>`).join('')}
+  </details>`;
+}
+
+// ================================================================== Cases
+var CASE=null, CASE_TOPICS=[], NEWTOPICS=[];
+// Mirrors kb.slugify in console/kb.py; the server is authoritative, this previews it.
+// console/tests/test_cases.py runs both over the same inputs.
+function slugify(raw){
+  return (raw||'').normalize('NFKD').replace(/[^\x00-\x7F]/g,'').toLowerCase()
+    .replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,64).replace(/-+$/,'');
+}
+function previewSlug(){
+  const el=$('#case-new-slug'); if(!el)return;
+  const raw=$('#case-new').value.trim(), s=slugify(raw);
+  el.innerHTML=!raw?'':s?`Saved as <code>kb/cases/${esc(s)}.md</code>`:'<span class="warn">Needs at least one letter or digit.</span>';
+}
+const yes=v=>v?'<span class="ok">✓</span>':'<span class="bad">✗</span>';
+
+async function loadCases(){
+  const r=await api('/cases');
+  CASE_TOPICS=r.topics;
+  const rows=r.cases.map(c=>`<tr class="click ${CASE&&CASE.slug===c.slug?'open':''}" onclick="openCase('${jsq(c.slug)}')">
+      <td><div class="mono">${esc(c.slug)}</div><div class="dim" style="font-size:12.5px">${esc(c.title)}</div></td>
+      <td>${c.topics.map(t=>`<span class="tchip on">${esc(t)}</span>`).join('')||'<span class="dim">—</span>'}</td>
+      <td class="num ${c.symptoms?'':'warn'}">${c.symptoms}</td>
+      <td title="row in the SKILL.md case index">${yes(c.indexed)}</td>
+      <td title="line in scripts/signatures.txt">${c.signatures?'<span class="ok">✓</span>':'<span class="dim">—</span>'}</td>
+      <td class="dim">${fmtTime(c.mtime)}</td></tr>`).join('');
+  $('#cases').innerHTML=`
+    <div class="card"><h3>New case</h3>
+      <p class="note">Describe the fault, not the ticket. This creates the file with the usual sections and opens it below.</p>
+      <div class="row"><input type="text" id="case-new" oninput="previewSlug()" placeholder="e.g. Radar WebSocket keeps flapping">
+        <button class="sm yes" onclick="newCase()">Create</button></div>
+      <p class="note" id="case-new-slug"></p>
+      <div id="newtopics"></div>
+    </div>
+    <div id="case-ed"></div>
+    <div class="card"><h3>Cases <span class="dim" style="font-weight:400">— ${r.cases.length} in <code>support-agent-skill/kb/cases/</code></span></h3>
+      <p class="note">The bot matches the triage against the SKILL.md index (one row per case), then reads the case.
+        A signature tags matching log lines on the site with <code>[case]</code>, the strongest lead it has.</p>
+      <div class="scroll"><table><tr><th>case</th><th>topics</th><th class="num">symptoms</th><th>index</th><th>signature</th><th>changed</th></tr>
+        ${rows}</table></div></div>`;
+  NEWTOPICS=[]; renderTopicPicker('newtopics',NEWTOPICS);
+  previewSlug();
+  if(CASE) renderCase();
+}
+
+function renderTopicPicker(id,sel){
+  const box=$('#'+id); if(!box)return;
+  const all=[...new Set([...CASE_TOPICS,...sel])].sort();
+  box.innerHTML=(id==='newtopics'?`<div class="hint">Topics</div>`:'')+all.map(t=>`<button type="button" class="tchip ${sel.includes(t)?'on':''}"
+      onclick="toggleTopic('${id}','${jsq(t)}')">${sel.includes(t)?'✓ ':''}${esc(t)}</button>`).join('')+
+    `<span class="row" style="display:inline-flex;gap:4px"><input type="text" id="${id}-add" placeholder="new topic" style="max-width:150px;flex:none;padding:4px 8px"
+       onkeydown="if(event.key==='Enter'){event.preventDefault();addTopic('${id}')}"><button class="sm" type="button" onclick="addTopic('${id}')">+</button></span>`;
+}
+const topicSel=id=>id==='newtopics'?NEWTOPICS:CASE.topics;
+function toggleTopic(id,t){ const s=topicSel(id), i=s.indexOf(t); i<0?s.push(t):s.splice(i,1); renderTopicPicker(id,s); }
+function addTopic(id){ const el=$('#'+id+'-add'), t=(el.value||'').trim().toLowerCase(); if(!t)return;
+  if(!/^[a-z][a-z0-9_-]{0,31}$/.test(t)){ alert('A topic is lowercase letters, digits, - and _, starting with a letter.'); return; }
+  const s=topicSel(id); if(!s.includes(t))s.push(t); renderTopicPicker(id,s); }
+
+async function newCase(){
+  const n=$('#case-new').value.trim(); if(!n)return;
+  try{ const r=await api('/cases',{method:'POST',body:{name:n,topics:NEWTOPICS}});
+    showSelftest(r.selftest); $('#case-new').value=''; await openCase(r.slug); }
+  catch(e){ alert(e.message); }
+}
+
+async function openCase(slug){
+  if(TAB!=='cases'){ CASE={slug,loading:true}; showTab('cases'); }
+  try{ CASE=await api('/cases/'+encodeURIComponent(slug)); }
+  catch(e){ alert(e.message); return; }
+  CASE.mode=CASE.structured?'form':'raw';
+  CASE.index=CASE.index||{says:'',evidence:'',missing:true};
+  CASE.sigs=[...CASE.signatures];
+  setHash('cases/'+slug);
+  renderCase();
+  document.querySelectorAll('#cases tr.click').forEach(tr=>tr.classList.toggle('open',tr.getAttribute('onclick').includes(`'${slug}'`)));
+  $('#case-ed')?.scrollIntoView({behavior:'smooth',block:'start'});
+}
+function closeCase(){ setHash('cases'); CASE=null; $('#case-ed').innerHTML=''; document.querySelectorAll('#cases tr.click.open').forEach(t=>t.classList.remove('open')); }
+
+function renderCase(){
+  const d=CASE; if(!d||d.loading||!$('#case-ed'))return;
+  const secs=d.sections.map((s,i)=>`<div class="secrow">
+      <div class="row"><input type="text" value="${esc(s.heading)}" oninput="CASE.sections[${i}].heading=this.value" aria-label="Section heading">
+        <button class="sm" onclick="moveSec(${i},-1)" ${i?'':'disabled'} title="Move up">↑</button>
+        <button class="sm" onclick="moveSec(${i},1)" ${i<d.sections.length-1?'':'disabled'} title="Move down">↓</button>
+        <button class="sm no" onclick="rmSec(${i})">remove</button></div>
+      <textarea class="${/check|evidence|verify/i.test(s.heading)?'':'prose'}" style="min-height:${Math.min(360,90+18*s.body.split('\n').length)}px"
+        oninput="CASE.sections[${i}].body=this.value">${esc(s.body)}</textarea></div>`).join('');
+  const unusedSeeds=d.seeded_sections.filter(h=>!d.sections.some(s=>s.heading.toLowerCase()===h.toLowerCase()));
+  $('#case-ed').innerHTML=`<div class="card">
+    <h3><span class="mono">kb/cases/${esc(d.slug)}.md</span>
+      <button class="sm" onclick="setMode('${d.mode==='form'?'raw':'form'}')">${d.mode==='form'?'Edit as markdown':'Edit as form'}</button>
+      <button class="sm" onclick="renameCase()">Rename</button>
+      <button class="sm no" onclick="deleteCase()">Delete</button>
+      <button class="sm grow" onclick="closeCase()">Close</button></h3>
+    ${d.references.length?`<p class="note">Mentioned by name in: ${d.references.map(r=>`<code>${esc(r)}</code>`).join(', ')}</p>`:''}
+    ${d.mode==='raw'?`
+      ${d.structured?'':`<p class="alert warn">This file's layout doesn't map exactly onto the form (spacing or a missing title),
+        so it opens as markdown. Saving from the form would normalise its blank lines.</p>`}
+      <textarea id="case-raw" class="tall" oninput="CASE.raw=this.value">${esc(d.raw)}</textarea>`:`
+      <fieldset><legend>Topics</legend><div id="casetopics"></div></fieldset>
+      <fieldset><legend>Symptoms</legend><div id="case-syms"></div>
+        <button class="sm" onclick="addSym()">+ Add symptom</button>
+        <p class="note">One per line, in the words a PM would use ("the map is empty"). The bot greps these when no index row fits.</p></fieldset>
+      <fieldset><legend>Title</legend><input type="text" value="${esc(d.title)}" oninput="CASE.title=this.value"></fieldset>
+      <fieldset><legend>Intro <span class="dim">— where and when it was seen</span></legend>
+        <textarea class="prose" style="min-height:${Math.min(240,70+18*d.intro.split('\n').length)}px" oninput="CASE.intro=this.value">${esc(d.intro)}</textarea></fieldset>
+      <fieldset><legend>Sections</legend>${secs||'<p class="note">No sections.</p>'}
+        <div class="row"><select id="sec-add">${unusedSeeds.map(h=>`<option>${esc(h)}</option>`).join('')}<option value="">other…</option></select>
+          <button class="sm" onclick="addSec()">+ Add section</button></div>
+        <p class="note">Commands go in indented or fenced blocks. "Checks" must be read-only: the bot gives them to the PM, it never runs them.</p></fieldset>`}
+    <fieldset><legend>SKILL.md index row</legend>
+      ${d.index.missing?'<p class="alert warn">Not in the SKILL.md case index yet. selftest.sh fails until it is, and the bot only finds this case by grep.</p>':''}
+      <div class="hint">What the PM usually says</div>
+      <input type="text" style="width:100%" value="${esc(d.index.says)}" oninput="CASE.index.says=this.value" placeholder='"map is empty", "page loads, no data"'>
+      <div class="hint">Decisive triage evidence</div>
+      <input type="text" style="width:100%" value="${esc(d.index.evidence)}" oninput="CASE.index.evidence=this.value" placeholder="what in the triage output proves it">
+    </fieldset>
+    <fieldset><legend>Log signatures</legend>
+      <div id="case-sigs"></div>
+      <button class="sm" onclick="CASE.sigs.push('');renderSigs()">+ Add pattern</button>
+      <p class="note">Extended regex, matched case-insensitively against the site's logs; a hit is tagged
+        <code>[${esc(d.slug)}]</code> in the triage. Only a line that is a fault on its own: nothing that also appears in normal operation.</p>
+    </fieldset>
+    <div class="row"><button class="go" onclick="saveCase()">Save</button>
+      <button class="sm" onclick="openCase('${jsq(d.slug)}')">Revert</button>
+      <span id="cv"></span>
+      <span class="note">Saved to the files at once; the bot sees it after a deploy.</span></div>
+  </div>`;
+  if(d.mode==='form'){ renderTopicPicker('casetopics',d.topics); renderSyms(); }
+  renderSigs();
+}
+function setMode(m){
+  if(!confirm(m==='raw'?'Switch to markdown? Unsaved form changes are dropped; save first to keep them.'
+                       :'Switch to the form? Unsaved markdown changes are dropped; save first to keep them.'))return;
+  openCase(CASE.slug).then(()=>{ CASE.mode=m; renderCase(); });
+}
+function renderSyms(){
+  const box=$('#case-syms'); if(!box)return;
+  box.innerHTML=CASE.symptoms.map((v,i)=>`<div class="sym"><input type="text" dir="auto" value="${esc(v)}"
+      oninput="CASE.symptoms[${i}]=this.value"><button class="sm no" onclick="CASE.symptoms.splice(${i},1);renderSyms()">remove</button></div>`).join('')
+    ||'<p class="note">None yet.</p>';
+}
+function addSym(){ CASE.symptoms.push(''); renderSyms(); const ins=document.querySelectorAll('#case-syms input'); ins[ins.length-1]?.focus(); }
+function renderSigs(){
+  const box=$('#case-sigs'); if(!box)return;
+  box.innerHTML=CASE.sigs.map((v,i)=>`<div class="sym"><input type="text" class="mono" value="${esc(v)}"
+      oninput="CASE.sigs[${i}]=this.value"><button class="sm no" onclick="CASE.sigs.splice(${i},1);renderSigs()">remove</button></div>`).join('')
+    ||'<p class="note">No signature: this fault leaves nothing distinctive in the logs, or none has been written yet.</p>';
+}
+function moveSec(i,d){ const s=CASE.sections, j=i+d; [s[i],s[j]]=[s[j],s[i]]; renderCase(); }
+function rmSec(i){ if(CASE.sections[i].body.trim()&&!confirm(`Remove the section "${CASE.sections[i].heading}" and its text?`))return;
+  CASE.sections.splice(i,1); renderCase(); }
+function addSec(){ let h=$('#sec-add').value; if(!h){ h=prompt('Section heading'); if(!h)return; }
+  CASE.sections.push({heading:h.trim(),body:''}); renderCase(); }
+
+async function saveCase(){
+  const d=CASE;
+  const body={base:d.etag, signatures:d.sigs.map(s=>s.trim()).filter(Boolean)};
+  if(d.index.says.trim()||d.index.evidence.trim()||!d.index.missing) body.index={says:d.index.says,evidence:d.index.evidence};
+  if(d.mode==='raw') body.raw=d.raw;
+  else Object.assign(body,{topics:d.topics,symptoms:d.symptoms.map(s=>s.trim()).filter(Boolean),
+    title:d.title,intro:d.intro,sections:d.sections});
+  try{
+    const r=await api('/cases/'+encodeURIComponent(d.slug),{method:'PUT',body});
+    showSelftest(r.selftest); refreshDeploy();
+    const mode=d.mode;
+    await loadCases(); await openCase(d.slug); CASE.mode=mode; renderCase();
+    flash('cv', r.selftest.ok?'Saved. selftest passes.':'Saved, but selftest fails: '+r.selftest.failures.join('; '), !r.selftest.ok);
+  }catch(e){ flash('cv',e.message,true); }
+}
+async function renameCase(){
+  const n=prompt(`Rename ${CASE.slug} to:`,CASE.slug); if(!n||slugify(n)===CASE.slug)return;
+  try{ const r=await api('/cases/'+encodeURIComponent(CASE.slug)+'/rename',{method:'POST',body:{name:n}});
+    showSelftest(r.selftest); refreshDeploy();
+    if(r.references.length) alert(`Renamed to ${r.slug}. The index row and signature moved with it.\n\nStill mentioning the old name (edit them by hand):\n${r.references.join('\n')}`);
+    CASE=null; await loadCases(); await openCase(r.slug); }
+  catch(e){ alert(e.message); }
+}
+async function deleteCase(){
+  const d=CASE;
+  const extra=[d.index.missing?'':'its SKILL.md index row', d.signatures.length?'its line in signatures.txt':''].filter(Boolean);
+  if(!confirm(`Delete kb/cases/${d.slug}.md${extra.length?' and '+extra.join(' and '):''}?`+
+      (d.references.length?`\n\nIt is mentioned in ${d.references.join(', ')}; those mentions stay.`:'')))return;
+  try{ const r=await api('/cases/'+encodeURIComponent(d.slug),{method:'DELETE',body:{}});
+    showSelftest(r.selftest); refreshDeploy(); closeCase(); loadCases(); }
+  catch(e){ alert(e.message); }
+}
+
+// ================================================================== Reference docs
+var DOC=null;
+async function loadDocs(){
+  const r=await api('/docs');
+  $('#docs').innerHTML=`<div class="split">
+    <div class="side">${r.docs.map(d=>`<button class="sm ${DOC&&DOC.name===d.name?'on':''}" onclick="openDoc('${jsq(d.name)}')">
+      <div class="mono">${esc(d.path)}</div>${d.read_only?'<span class="dim" style="font-size:11px">read-only</span>':''}</button>`).join('')}
+      <p class="note">The case files are edited on the Cases tab.</p></div>
+    <div id="doc-ed"><div class="card"><p class="note">Pick a file. <b>system-model.md</b> is how the system works,
+      <b>glossary.md</b> the words PMs and sites use, <b>escalation.md</b> when the bot hands over,
+      <b>signatures.txt</b> every log signature at once.</p></div></div></div>`;
+  if(DOC) openDoc(DOC.name);
+}
+async function openDoc(name){
+  DOC={...(await api('/docs/'+name)),preview:false};
+  document.querySelectorAll('#docs .side button').forEach(b=>b.classList.toggle('on',b.getAttribute('onclick').includes(`'${name}'`)));
+  renderDoc();
+}
+function renderDoc(){
+  const d=DOC;
+  $('#doc-ed').innerHTML=`<div class="card"><h3><span class="mono">support-agent-skill/${esc(d.path)}</span>
+      ${d.read_only?'<span class="badge">read-only</span>':''}
+      ${d.name==='signatures'?'':`<button class="sm grow" onclick="DOC.preview=!DOC.preview;renderDoc()">${d.preview?'Edit':'Preview'}</button>`}</h3>
+    ${d.name==='skill'?'<p class="note">SKILL.md is the skill itself. Its case index rows are edited with each case; anything else in it is a code change, made in git.</p>':''}
+    ${d.name==='signatures'?'<p class="note">One line per case: <code>case-slug|regex</code>, alternatives joined with <code>|</code>. Each pattern is checked before saving.</p>':''}
+    ${d.preview?mdPreview(d.text):`<textarea class="tall" ${d.read_only?'readonly':''} oninput="DOC.text=this.value">${esc(d.text)}</textarea>`}
+    ${d.read_only?'':`<div class="row" style="margin-top:8px"><button class="go" onclick="saveDoc()">Save</button>
+      <button class="sm" onclick="openDoc('${jsq(d.name)}')">Revert</button><span id="dv2"></span></div>`}</div>`;
+}
+async function saveDoc(){
+  try{ const r=await api('/docs/'+DOC.name,{method:'PUT',body:{text:DOC.text,base:DOC.etag}});
+    DOC.etag=r.etag; showSelftest(r.selftest); refreshDeploy();
+    flash('dv2', r.selftest.ok?'Saved. selftest passes.':'Saved, but selftest fails: '+r.selftest.failures.join('; '), !r.selftest.ok); }
+  catch(e){ flash('dv2',e.message,true); }
+}
+
+// ================================================================== Stats
+var STATS_DAYS=30;
+async function loadStats(){
+  const s=await api('/stats?days='+STATS_DAYS);
+  const oc=s.outcomes||{}, failed=(oc.timeout||0)+(oc.error||0)+(oc.lost||0);
+  const tile=(l,v,sub,hero)=>`<div class="tile ${hero?'hero':''}"><div class="l">${l}</div><div class="v">${v}</div>${sub?`<div class="s">${sub}</div>`:''}</div>`;
+  const maxCase=Math.max(1,...s.cases_read.map(c=>c.count));
+  $('#stats').innerHTML=`
+    <div class="row" style="margin-bottom:10px"><span class="dim">Last</span>
+      <select onchange="STATS_DAYS=+this.value;loadStats()">${[7,30,90].map(d=>`<option value="${d}" ${d===STATS_DAYS?'selected':''}>${d} days</option>`).join('')}</select></div>
+    <div class="tiles">
+      ${tile('Questions',s.questions.toLocaleString(),`${s.threads} threads · ${s.users} people`,true)}
+      ${tile('Cost',fmtCost(s.cost_usd),s.cost_per_question!=null?`$${s.cost_per_question.toFixed(2)} a question`:'')}
+      ${tile('Time to answer',s.p50_s!=null?fmtSecs(s.p50_s):'—',s.p90_s!=null?`median · 90% within ${fmtSecs(s.p90_s)}`:'median')}
+      ${tile('Not answered',failed.toLocaleString(),s.questions?`${Math.round(100*failed/s.questions)}% · ${oc.timeout||0} timed out, ${oc.error||0} errors`:'')}
+    </div>
+    <div class="card"><h3>Questions per day</h3>${columnChart(s.per_day,'questions',v=>String(v),'cq')}</div>
+    <div class="card"><h3>Cost per day</h3>${columnChart(s.per_day,'cost_usd',v=>'$'+v.toFixed(2),'cc')}</div>
+    <div class="card"><h3>Cases the bot read most</h3>
+      ${s.cases_read.length?`<div class="hbar">${s.cases_read.map(c=>`
+        <button class="tchip on" style="justify-self:start" onclick="openCase('${jsq(c.slug)}')">${esc(c.slug)}</button>
+        <div class="track"><div class="fill" style="width:${100*c.count/maxCase}%"></div></div>
+        <div class="num">${c.count}</div>`).join('')}</div>`:'<p class="note">No transcripts in this period.</p>'}
+      <p class="note">Counted from the transcripts: each turn that opened the case file.</p></div>
+    <details class="card"><summary class="dim">Table view</summary><div class="scroll"><table>
+      <tr><th>day</th><th class="num">questions</th><th class="num">answered</th><th class="num">timed out</th><th class="num">errors</th><th class="num">cost</th></tr>
+      ${s.per_day.slice().reverse().map(d=>`<tr><td class="mono">${d.day}</td><td class="num">${d.questions}</td><td class="num">${d.ok}</td>
+        <td class="num">${d.timeout}</td><td class="num">${d.error}</td><td class="num">${fmtCost(d.cost_usd)}</td></tr>`).join('')}</table></div></details>`;
+  wireTips();
+}
+// One series, so no legend: the card title names it. Columns with a 4px rounded top, square on
+// the baseline; a full-height hit band per day carries the tooltip.
+function niceMax(v){ if(v<=0)return 1; const p=Math.pow(10,Math.floor(Math.log10(v))); for(const m of [1,2,2.5,5,10]) if(m*p>=v) return m*p; return 10*p; }
+function columnChart(days,key,fmt,id){
+  const W=720,H=180,L=40,B=22,T=10, n=days.length, max=niceMax(Math.max(...days.map(d=>d[key]||0)));
+  const band=(W-L)/n, bw=Math.min(24,Math.max(2,band-2)), y=v=>T+(H-T-B)*(1-v/max);
+  const ticks=[0,max/2,max].map(v=>`<line class="grid" x1="${L}" x2="${W}" y1="${y(v)}" y2="${y(v)}"/>
+    <text x="${L-6}" y="${y(v)+4}" text-anchor="end">${key==='cost_usd'?'$'+(+v.toFixed(2)):Math.round(v)}</text>`).join('');
+  const every=Math.ceil(n/8);
+  const cols=days.map((d,i)=>{
+    const v=d[key]||0, x=L+i*band+(band-bw)/2, top=y(v), h=(H-B)-top, r=Math.min(4,h,bw/2);
+    const path=h>0?`M${x},${H-B} V${top+r} Q${x},${top} ${x+r},${top} H${x+bw-r} Q${x+bw},${top} ${x+bw},${top+r} V${H-B} Z`:'';
+    const tip=`<b>${d.day}</b><br>${fmt(v)}${key==='questions'&&d.questions?` · ${d.ok} answered${d.timeout?`, ${d.timeout} timed out`:''}${d.error?`, ${d.error} errors`:''}`:''}`;
+    return `<g class="col" data-tip="${esc(tip)}"><rect class="hit" x="${L+i*band}" y="${T}" width="${band}" height="${H-B-T}"/>
+      ${path?`<path class="mark" d="${path}"/>`:''}
+      ${i%every===0?`<text x="${L+i*band+band/2}" y="${H-6}" text-anchor="middle">${d.day.slice(5)}</text>`:''}</g>`;
+  }).join('');
+  return `<div class="chartbox" id="${id}"><svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${key} per day">
+    ${ticks}<line class="base" x1="${L}" x2="${W}" y1="${H-B}" y2="${H-B}"/>${cols}</svg><div class="tip" hidden></div></div>`;
+}
+function wireTips(){
+  document.querySelectorAll('.chartbox').forEach(box=>{
+    const tip=box.querySelector('.tip');
+    box.querySelectorAll('g.col').forEach(g=>{
+      g.addEventListener('mouseenter',()=>{
+        const r=g.querySelector('.hit').getBoundingClientRect(), b=box.getBoundingClientRect();
+        tip.innerHTML=g.dataset.tip; tip.hidden=false;
+        tip.style.left=Math.min(Math.max(r.left-b.left+r.width/2,60),b.width-60)+'px'; tip.style.top=(r.top-b.top+6)+'px';
+      });
+      g.addEventListener('mouseleave',()=>{tip.hidden=true;});
+    });
+  });
+}
+
+// ================================================================== Systems
+async function loadSystems(){
+  $('#systems').innerHTML='<div class="card"><p class="note">Asking the tailnet…</p></div>';
+  const s=await api('/systems');
+  const last=l=>l?`<span class="mono">${esc(l.release)}</span><div class="dim" style="font-size:12px">triaged ${esc(l.triaged.replace('T',' ').slice(0,16))}${l.config?' · '+esc(l.config):''}</div>`:'<span class="dim">never triaged from here</span>';
+  $('#systems').innerHTML=`<div class="card"><h3>Sites the bot can reach
+      <span class="dim" style="font-weight:400">— tailnet names matching <code>${esc(s.allowed)}</code></span>
+      <button class="sm grow" onclick="loadSystems()">Refresh</button></h3>
+    ${s.error?`<p class="alert">${esc(s.error)}</p>`:''}
+    <div class="scroll"><table><tr><th>site</th><th>state</th><th>via</th><th>ip</th><th>last known version</th></tr>
+      ${s.systems.map(r=>`<tr><td class="mono">${esc(r.name)}</td>
+        <td>${r.state==='online'?'<span class="badge ok">online</span>':`<span class="badge">offline</span> <span class="dim" style="font-size:12px">${esc(r.last_seen)}</span>`}</td>
+        <td class="mono">${esc(r.via)}</td><td class="mono dim">${esc(r.ip)}</td><td>${last(r.last)}</td></tr>`).join('')
+        ||'<tr><td colspan="5" class="dim">No sites.</td></tr>'}</table></div>
+    <p class="note">From <code>list_systems.sh</code>. <b>via tailscale</b> sites are reached with Tailscale SSH, <b>via ssh</b> ones with
+      plain ssh over the tailnet name. The version is what the last triage from this host found.</p></div>
+    ${s.unlisted.length?`<div class="card"><h3>Triaged before, not on the tailnet now</h3><table>
+      ${s.unlisted.map(u=>`<tr><td class="mono">${esc(u.name)}</td><td>${last(u.last)}</td></tr>`).join('')}</table></div>`:''}`;
+}
+
+// ================================================================== Bot config
+async function loadBot(){
+  const [b,a]=await Promise.all([api('/bot'),api('/audit?limit=100')]);
+  const c=b.container||{};
+  $('#bot').innerHTML=`
+    <div class="card"><h3>Container</h3>
+      ${c.found?`<table><tr><th>status</th><td>${c.running?'<span class="badge ok">running</span>':`<span class="badge bad">${esc(c.status)}</span>`}
+        since ${fmtIso(c.started)} · ${esc(c.restarts)} restarts</td></tr>
+        <tr><th>image</th><td class="mono">${esc(c.image_id)} · built ${fmtIso(c.image_created)} · skill hash ${esc(c.skill_hash||'none')}</td></tr></table>`
+        :`<p class="alert">${esc(c.error||'not found')}</p>`}</div>
+    <div class="card"><h3>Settings <span class="dim" style="font-weight:400">— <code>slack-bridge/.env</code>, read-only here</span></h3>
+      ${b.env_file?'':'<p class="alert warn">No slack-bridge/.env on this host.</p>'}
+      <div class="scroll"><table><tr><th>name</th><th>value</th><th>default</th></tr>
+      ${b.settings.map(s=>`<tr><td class="mono">${esc(s.name)}</td><td class="mono">${s.set?esc(s.value):'<span class="dim">default</span>'}</td>
+        <td class="mono dim">${esc(s.default)}</td></tr>`).join('')}</table></div>
+      <p class="note">Also set, not shown: ${b.secrets_set.map(n=>`<code>${esc(n)}</code>`).join(', ')||'nothing'}.
+        Change any of these in <code>slack-bridge/.env</code>, then <code>make -C slack-bridge restart</code>.</p></div>
+    <div class="card"><h3>What the bot may do</h3>
+      <p class="note">Claude Code's permissions in <code>slack-bridge/workspace/.claude/settings.json</code>: anything not allowed is refused, nobody is asked.</p>
+      ${b.permissions?`<pre>${esc(JSON.stringify(b.permissions.permissions,null,1))}</pre>`:'<p class="alert">settings.json is missing</p>'}
+      <details><summary class="dim">The Bash guard (<code>slack-bridge/bash_guard.py</code>)</summary><pre>${esc(b.guard)}</pre></details></div>
+    <div class="card"><h3>Recent changes made here</h3>
+      <div class="scroll"><table><tr><th>when</th><th>who</th><th>what</th></tr>
+      ${a.entries.map(e=>`<tr><td class="mono" style="white-space:nowrap">${fmtTime(e.ts)}</td><td class="mono">${esc(e.who)}</td>
+        <td>${esc(e.action)} <span class="mono">${esc(e.target)}</span>${e.to?` → <span class="mono">${esc(e.to)}</span>`:''}</td></tr>`).join('')
+        ||'<tr><td colspan="3" class="dim">Nothing yet.</td></tr>'}</table></div></div>`;
+}
+
+(()=>{ const [t,...rest]=decodeURIComponent(location.hash.slice(1)).split('/'), arg=rest.join('/');
+  if(t==='convos'&&arg) CV.open=arg;
+  if(t==='cases'&&arg) CASE={slug:arg,loading:true};
+  showTab(['convos','cases','docs','stats','systems','bot'].includes(t)?t:'convos');
+  if(t==='cases'&&arg) openCase(arg);
+})();
+Object.assign(window,{showTab,runSelftest,openDeploy,startDeploy,loadConvos,openThread,openCase,closeCase,newCase,
+  previewSlug,toggleTopic,addTopic,setMode,renderSyms,addSym,renderSigs,moveSec,rmSec,addSec,saveCase,renameCase,
+  deleteCase,openDoc,renderDoc,saveDoc,loadStats,loadSystems,loadBot});
+</script></body></html>
