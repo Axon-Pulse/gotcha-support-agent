@@ -109,6 +109,7 @@ def _hashed_files() -> list[Path]:
     roots = [S.skill_dir / "SKILL.md", S.skill_dir / "kb", S.skill_dir / "scripts",
              S.bridge_dir / "bridge.py", S.bridge_dir / "bash_guard.py",
              S.bridge_dir / "requirements.txt", S.bridge_dir / "Dockerfile",
+             S.bridge_dir / "docker-compose.yml",
              S.bridge_dir / "workspace"]
     out = []
     for r in roots:

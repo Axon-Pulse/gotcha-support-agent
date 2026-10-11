@@ -186,6 +186,21 @@ def test_deploy_status_compares_the_image_label_with_the_files(client, monkeypat
     assert client.get("/api/deploy").json()["state"] == "no-container"
 
 
+def test_a_change_to_the_compose_file_counts_as_not_deployed(tmp_path):
+    """Its mounts reach the bot only when the container is recreated, like any other change."""
+    import shutil
+    import subprocess
+    for d in ("support-agent-skill", "slack-bridge"):
+        shutil.copytree(ROOT / d, tmp_path / d, symlinks=True,
+                        ignore=shutil.ignore_patterns("state", ".venv", "__pycache__", ".env"))
+    script = tmp_path / "slack-bridge" / "skill_hash.sh"
+    before = subprocess.run([str(script)], capture_output=True, text=True).stdout
+    compose = tmp_path / "slack-bridge" / "docker-compose.yml"
+    compose.write_text(compose.read_text() + "# a new mount\n")
+    after = subprocess.run([str(script)], capture_output=True, text=True).stdout
+    assert before and after and before != after
+
+
 def test_the_hash_script_ignores_the_directory_it_is_run_from():
     import subprocess
     script = ROOT / "slack-bridge" / "skill_hash.sh"
