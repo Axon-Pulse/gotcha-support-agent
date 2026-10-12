@@ -34,7 +34,7 @@ def test_the_page_has_a_title_and_a_dark_mode():
     assert "prefers-color-scheme:dark" in PAGE
 
 
-def _capture(client, env) -> dict:
+def _capture(client, env, monkeypatch) -> dict:
     """The answers the harness replays, captured from the real server in the order it asks."""
     t0 = time.time() - 3600
     write_transcript(env, SID, [
@@ -62,6 +62,31 @@ def _capture(client, env) -> dict:
     (S.triage_dirs[0]).mkdir(parents=True, exist_ok=True)
     (S.triage_dirs[0] / "axon-gotcha-4-20261001-100000.txt").write_text(TRIAGE)
     get("/systems/axon-gotcha-4")
+    # Secrets, as an admin: the list, a step-up, a reveal and a save (its restart is a no-op).
+    from console import auth, ops
+    ADMIN = {"tailscale-user-login": "admin@example.com"}
+    auth.enroll("admin@example.com")
+    monkeypatch.setattr(S, "restart_cmd", ["true"])
+    get("/auth/status")
+    r["/secrets"] = client.get("/api/secrets", headers=ADMIN).json()
+    r["POST /auth/stepup"] = client.post("/api/auth/stepup", headers=ADMIN, json={
+        "code": auth._now.code("admin@example.com")}).json()
+    r["POST /secrets/SLACK_BOT_TOKEN/reveal"] = client.post(
+        "/api/secrets/SLACK_BOT_TOKEN/reveal", headers=ADMIN, json={}).json()
+    r["PUT /secrets/SLACK_BOT_TOKEN"] = client.put("/api/secrets/SLACK_BOT_TOKEN", headers=ADMIN, json={
+        "value": "xoxb-y", "code": auth._now.code("admin@example.com")}).json()
+    S.inventory_file.write_text("systems:\n  gotcha5:\n    site: Test\n    components:\n"
+                                "      1: {type: node, address: 10.0.0.1, access: {ssh: {user: admin, password_env: NODE_1_SSH_PW}}}\n")
+    S.device_secrets_file.write_text("NODE_1_SSH_PW=pw\n")
+    r["/access"] = client.get("/api/access", headers=ADMIN).json()
+    r["POST /access/gotcha5/1/reveal"] = client.post("/api/access/gotcha5/1/reveal", headers=ADMIN, json={}).json()
+    r["PUT /access/gotcha5/1"] = client.put("/api/access/gotcha5/1", headers=ADMIN, json={
+        "address": "10.0.0.2", "code": auth._now.code("admin@example.com")}).json()
+    get("/passkeys")
+    for _ in range(200):
+        if not ops.DEPLOY.running:
+            break
+        time.sleep(0.01)
     for p in ["/meta", "/selftest", "/deploy", "/conversations", "/conversations/C1:100.1", "/cases",
               "/cases/radar-transmitter-off", "/docs", "/docs/glossary", "/docs/skill", "/stats",
               "/bot", "/audit"]:
@@ -81,9 +106,9 @@ def _capture(client, env) -> dict:
 
 
 @pytest.mark.skipif(not shutil.which("node"), reason="node is not installed")
-def test_every_tab_and_editor_renders(client, env, tmp_path):
+def test_every_tab_and_editor_renders(client, env, tmp_path, monkeypatch):
     f = tmp_path / "responses.json"
-    f.write_text(json.dumps(_capture(client, env)))
+    f.write_text(json.dumps(_capture(client, env, monkeypatch)))
     out = subprocess.run(["node", str(HERE / "page_harness.js"), "render", str(f)],
                          capture_output=True, text=True, timeout=60)
     assert out.returncode == 0, out.stderr

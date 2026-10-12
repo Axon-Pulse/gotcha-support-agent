@@ -144,27 +144,37 @@ def git_changes() -> list[str]:
 # Deploy
 # --------------------------------------------------------------------------
 
+# How long a restart after a secret change waits for questions being answered to finish.
+RESTART_WAIT_S = 600
+RESTART_POLL_S = 5
+
+
 class Deploy:
-    """One `make update` at a time, run in the background, its output kept for the page."""
+    """One job on the bot at a time, run in the background, its output kept for the page:
+    a deploy (`make update`), or a restart (`make restart`) after a secret changed."""
 
     def __init__(self):
         self.lock = threading.Lock()
         self.running = False
+        self.waiting = False
+        self.kind = None
         self.log: list[str] = []
         self.started = self.finished = None
         self.exit_code = None
         self.by = None
+        self.pending_restart = None  # who asked for a restart while another job ran
 
     def snapshot(self) -> dict:
         return {"running": self.running, "log": "".join(self.log)[-40000:],
                 "started": self.started, "finished": self.finished,
-                "exit_code": self.exit_code, "by": self.by}
+                "exit_code": self.exit_code, "by": self.by, "kind": self.kind,
+                "waiting": self.waiting, "restart_queued": self.pending_restart is not None}
 
     def start(self, by: str) -> None:
         from console import conversations, kb
         with self.lock:
             if self.running:
-                raise RuntimeError("a deploy is already running")
+                raise RuntimeError(f"a {self.kind or 'deploy'} is already running")
             busy = conversations.in_flight()
             if busy:
                 raise RuntimeError(f"{len(busy)} question(s) are being answered right now; a "
@@ -174,24 +184,65 @@ class Deploy:
             if not t["ok"]:
                 raise RuntimeError("selftest.sh fails, so this KB is not deployed: "
                                    + "; ".join(t["failures"][:5]))
-            self.running, self.log, self.exit_code, self.by = True, [], None, by
-            self.started, self.finished = time.time(), None
-        threading.Thread(target=self._run, daemon=True).start()
+            self._begin("deploy", by)
+        threading.Thread(target=self._run, args=(S.deploy_cmd, False), daemon=True).start()
 
-    def _run(self) -> None:
+    def restart(self, by: str) -> str | None:
+        """Recreate the container so it reads .env again. Never refuses: behind a running job
+        it is queued, and it waits for questions being answered. Returns a note for the page,
+        or None when it started straight away."""
+        with self.lock:
+            if self.running:
+                self.pending_restart = by
+                return f"queued after the {self.kind} that is running now"
+            self._begin("restart", by)
+        threading.Thread(target=self._run, args=(S.restart_cmd, True), daemon=True).start()
+        return None
+
+    def _begin(self, kind: str, by: str) -> None:
+        self.running, self.kind, self.log, self.exit_code, self.by = True, kind, [], None, by
+        self.started, self.finished = time.time(), None
+
+    def _wait_for_questions(self) -> None:
+        from console import conversations
+        deadline = time.time() + RESTART_WAIT_S
+        said = None
+        while time.time() < deadline:
+            busy = len(conversations.in_flight())
+            if not busy:
+                break
+            if busy != said:
+                self.log.append(f"waiting for {busy} question(s) being answered to finish…\n")
+                said = busy
+            self.waiting = True
+            time.sleep(RESTART_POLL_S)
+        else:
+            self.log.append("still busy after the wait; restarting anyway\n")
+        self.waiting = False
+
+    def _run(self, cmd: list[str], wait: bool) -> None:
         code = None
         try:
+            if wait:
+                self._wait_for_questions()
             env = {**os.environ, "TERM": "dumb"}
-            p = subprocess.Popen(S.deploy_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                  text=True, env=env, cwd=S.bridge_dir)
             for line in p.stdout:
                 self.log.append(line)
             code = p.wait()
         except OSError as e:
-            self.log.append(f"could not run {' '.join(S.deploy_cmd)}: {e}\n")
+            self.log.append(f"could not run {' '.join(cmd)}: {e}\n")
             code = -1
         finally:
-            self.exit_code, self.finished, self.running = code, time.time(), False
+            with self.lock:
+                self.exit_code, self.finished, self.running = code, time.time(), False
+                self.waiting = False
+                nxt, self.pending_restart = self.pending_restart, None
+                if nxt is not None:
+                    self._begin("restart", nxt)
+            if nxt is not None:
+                threading.Thread(target=self._run, args=(S.restart_cmd, True), daemon=True).start()
 
 
 DEPLOY = Deploy()

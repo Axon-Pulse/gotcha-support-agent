@@ -82,11 +82,75 @@ can't post to it.
 After `make serve`, check the second point from another tailnet device:
 
 ```sh
-curl -s -H 'Tailscale-User-Login: someone@else.com' http://gotcha-server:8765/api/meta
+curl -s -H 'Tailscale-User-Login: someone@else.com' http://gotcha-server:8765/api/auth/status
 ```
 
 The answer must name *your* login, or say that you aren't allowed. It must not say
 `someone@else.com`.
+
+### Sign-in, roles and the bot's secrets
+
+Being on `CONSOLE_ALLOWED_USERS` gets you to the sign-in form. To get past it you enter a
+6-digit code from an authenticator app (Google Authenticator, Authy, 1Password, …).
+
+| | viewer | admin (`CONSOLE_ADMINS`) |
+|---|:-:|:-:|
+| Use the console as before (conversations, cases, triage, deploy) | ✅ | ✅ |
+| See which secrets are set, and who changed them when | ✅ | ✅ |
+| **Reveal** a secret | | ✅ after a code; one code is good for 30 minutes, each value shows for 30 s |
+| **Change or add** a secret | | ✅ with a code on every save |
+
+The secrets are the entries of `slack-bridge/.env` that the Bot tab doesn't show: the Slack
+tokens, the Anthropic key, and anything else put there. Saving one rewrites only that line
+(the file stays `chmod 600`), then restarts the bot (`make -C slack-bridge restart`, which
+recreates the container so it reads `.env` again). If questions are being answered, the
+restart waits for them, up to 10 minutes. Every sign-in, reveal, change and refusal goes in
+the audit log, never with a value.
+
+**Setting someone up** (on this machine, with them next to you or on a call):
+
+```sh
+make -C console totp-enroll EMAIL=name@company.com
+```
+
+It prints a QR code to scan, and 8 one-use recovery codes to keep somewhere safe, then asks
+for the first code from the app to confirm. Enrolment is only done here, never from the page:
+any process on this host can send a `Tailscale-User-Login` header, so enrolling from the page
+would let it enrol as someone who hasn't yet.
+
+**Passkeys: no code to type.** Signed in, click **passkeys** in the header, then **Register a
+passkey** (it asks for your app code first). The browser keeps it on this computer
+(fingerprint, Windows Hello, Touch ID), on your phone (scan the QR code it shows) or on a
+security key. After that: **Sign in with passkey** on the sign-in screen, **Use passkey** in the
+code dialog when revealing, and an empty code field when saving uses the passkey. The app
+code and recovery codes keep working as the fallback; `totp-reset` removes the passkeys too.
+
+Browsers allow passkeys only on `https://` addresses or `localhost`, never on an IP address:
+on the tailnet that means `tailscale serve --https` (enable HTTPS certificates for the tailnet
+first). A passkey is bound to the host name it was made on (`CONSOLE_RP_ID` to fix one).
+
+**Out of recovery codes:** `make -C console totp-recovery EMAIL=...` gives a fresh set (the
+old ones stop working; the app entry stays).
+
+**A lost phone:** sign in with a recovery code, or `make -C console totp-reset EMAIL=...`
+(ends their sessions at once) and enrol again. `make -C console totp-list` shows who is set up.
+
+Who is an admin is set in `console/.env` and takes effect when the console restarts. It is
+not editable from the page, so a session someone has taken over can't make itself an admin.
+Signing in lasts 12 hours (2 idle); restarting the console signs everyone out.
+
+**Secrets tab, second part — system access: how to reach each system.** For every system and component in
+`systems_inventory.yaml` (repo root): address, port and SSH user, which everyone signed in can
+see, and the SSH password, which only an admin can reveal (same code and 30-minute window as
+Secrets) or change (a code on every save). Addresses, ports and users are written to the YAML;
+a password goes only to `secrets.local.env`, under the component's `password_env` name (given
+one like `GOTCHA5_CAM_SSH_PW` if it had none). The page can't change `password_env`, so it
+can't be pointed at another entry of that file, such as the Anthropic key. Both files are
+gitignored and rewritten `chmod 600`. Point elsewhere with `CONSOLE_INVENTORY_FILE` and
+`CONSOLE_DEVICE_SECRETS_FILE`.
+
+**What this doesn't do:** `slack-bridge/.env`, `secrets.local.env` and `console/state/totp.json` stay plain text on
+disk, owner-only. Anyone with a shell as this user can read both.
 
 ### Keeping it running
 
@@ -155,10 +219,14 @@ Slack users show as IDs (`U0…`): the bot's Slack app has no `users:read` scope
 
 | Path | What it is |
 |---|---|
-| `server.py` | The FastAPI app: routes, the tailnet login check, the audit log. |
+| `server.py` | The FastAPI app: routes, the tailnet login check, sign-in, the audit log. |
+| `auth.py` | Roles, authenticator codes (TOTP), sessions; `python -m console.auth` enrols people. |
+| `secrets_env.py` | The hidden entries of `slack-bridge/.env`: names for all, values for admins. |
+| `passkeys.py` | Passkeys (WebAuthn): register, sign in, unlock reveals, confirm saves. |
+| `access.py` | Each system's addresses, SSH users and passwords (`systems_inventory.yaml`, `secrets.local.env`). |
 | `kb.py` | Cases ↔ parts, SKILL.md index rows, signatures, reference docs, `selftest.sh`. |
 | `conversations.py` | Transcripts + turn log → threads, steps and stats. |
-| `ops.py` | Bot config (allowlisted `.env` names), the container, Systems, Deploy. |
+| `ops.py` | Bot config (allowlisted `.env` names), the container, Systems, Deploy and restart. |
 | `sites.py` | A site's sensors from its newest saved triage; running a triage on demand. |
 | `settings.py` | Paths and access, from `CONSOLE_*` variables with this checkout as the default. |
 | `index.html` | The whole page: one file, no build step, no external scripts. |
