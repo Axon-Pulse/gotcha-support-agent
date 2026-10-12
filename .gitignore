@@ -27,3 +27,7 @@ evals/
 # Console: venv and its audit log of who changed what
 /console/.venv/
 /console/state/
+
+# Systems' addresses and SSH passwords, edited from the console's Secrets tab. Never commit.
+/systems_inventory.yaml
+/secrets.local.env

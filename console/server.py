@@ -6,7 +6,9 @@
 It binds to 127.0.0.1 only. Teammates reach it over the tailnet through `tailscale serve`,
 which puts the caller's Tailscale login in the Tailscale-User-Login header; only logins in
 CONSOLE_ALLOWED_USERS get in. A request without that header came from this machine, and is
-refused unless CONSOLE_ALLOW_LOCAL=1.
+refused unless CONSOLE_ALLOW_LOCAL=1. On top of that, everyone signs in with a code from
+their authenticator app, and only CONSOLE_ADMINS may reveal or change the bot's secrets
+(see console/auth.py).
 
 The console never imports the bot (slack-bridge/) or the retired bot (legacy/). It reads
 and writes their files: support-agent-skill/ for the KB, slack-bridge/state/ for the turns.
@@ -16,17 +18,19 @@ import re
 import time
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
-from console import conversations, kb, ops, sites
+from console import access, auth, conversations, kb, ops, passkeys, secrets_env, sites
 from console.settings import S
 
 HERE = Path(__file__).resolve().parent
 app = FastAPI(title="gotcha support console", docs_url=None, redoc_url=None, openapi_url=None)
 
 WRITES = {"POST", "PUT", "PATCH", "DELETE"}
+# Reachable before signing in: the page itself, and what it needs to show the sign-in form.
+NO_SESSION = {"/", "/api/auth/status", "/api/auth/login", "/api/passkeys/options"}
 
 
 # --------------------------------------------------------------------------
@@ -58,12 +62,18 @@ async def gate(request: Request, call_next):
             return JSONResponse({"detail": "writes need X-Console: 1 and a JSON body"},
                                 status_code=403)
     request.state.who = who
+    request.state.role = auth.role(who)
+    request.state.session = auth.get_session(request.cookies.get(auth.COOKIE), who)
+    if request.state.session is None and request.url.path not in NO_SESSION:
+        return JSONResponse({"detail": "login"}, status_code=401)
     return await call_next(request)
 
 
 def audit(request: Request, action: str, target: str, **detail) -> None:
+    """One line per change, who made it and in what role. Never pass a secret's value."""
     S.state_dir.mkdir(parents=True, exist_ok=True)
-    line = {"ts": round(time.time(), 3), "who": request.state.who, "action": action,
+    line = {"ts": round(time.time(), 3), "who": request.state.who,
+            "role": getattr(request.state, "role", None), "action": action,
             "target": target, **detail}
     with open(S.state_dir / "audit.jsonl", "a", encoding="utf-8") as f:
         f.write(json.dumps(line, ensure_ascii=False) + "\n")
@@ -80,6 +90,255 @@ def _kb_call(fn, *a, **kw):
         raise HTTPException(409, f"already exists: {e}")
 
 
+def require_admin(request: Request, what: str) -> None:
+    if request.state.role != "admin":
+        audit(request, "refused", what)
+        raise HTTPException(403, "only an admin (CONSOLE_ADMINS) may do this")
+
+
+def check_code(request: Request, code: str | None, action: str, target: str,
+               passkey: dict | None = None, purpose: str = "confirm") -> str:
+    """The second factor for one action: a passkey's signed answer to the challenge issued
+    for `purpose`, or else a code from the authenticator app. Returns which one it was."""
+    try:
+        if passkey:
+            passkeys.authenticate(request.state.who, purpose, passkey)
+            return "passkey"
+        auth.verify(request.state.who, code or "")
+        return "code"
+    except auth.AuthError as e:
+        audit(request, f"{action}-failed", target)
+        raise HTTPException(401, str(e))
+
+
+# --------------------------------------------------------------------------
+# Signing in, and the second code for secrets
+# --------------------------------------------------------------------------
+
+class Code(BaseModel):
+    code: str = ""
+    passkey: dict | None = None
+
+
+def _auth_status(request: Request) -> dict:
+    s = request.state.session
+    return {"who": request.state.who, "role": request.state.role,
+            "enrolled": auth.enrolled(request.state.who), "logged_in": s is not None,
+            "stepup_until": s["stepup_until"] if s and auth.stepup_ok(s) else None,
+            "stepup_seconds": S.stepup_seconds, "passkeys": passkeys.count(request.state.who)}
+
+
+@app.get("/api/auth/status")
+def auth_status(request: Request):
+    return _auth_status(request)
+
+
+@app.post("/api/auth/login")
+def login(req: Code, request: Request, response: Response):
+    how = check_code(request, req.code, "login", request.state.who, req.passkey, "login")
+    token = auth.new_session(request.state.who)
+    https = request.url.scheme == "https" or \
+        request.headers.get("x-forwarded-proto") == "https"
+    response.set_cookie(auth.COOKIE, token, httponly=True, samesite="strict", path="/",
+                        secure=https, max_age=int(S.session_hours * 3600))
+    request.state.session = auth.get_session(token, request.state.who)
+    audit(request, "login", request.state.who, method=how)
+    return _auth_status(request)
+
+
+@app.post("/api/auth/logout")
+def logout(request: Request, response: Response):
+    auth.drop_session(request.cookies.get(auth.COOKIE))
+    response.delete_cookie(auth.COOKIE, path="/")
+    audit(request, "logout", request.state.who)
+    return {"logged_in": False}
+
+
+@app.post("/api/auth/stepup")
+def stepup(req: Code, request: Request):
+    require_admin(request, "step-up")
+    how = check_code(request, req.code, "step-up", request.state.who, req.passkey, "stepup")
+    until = auth.grant_stepup(request.state.session)
+    audit(request, "step-up", request.state.who, method=how)
+    return {"stepup_until": until}
+
+
+# --------------------------------------------------------------------------
+# Passkeys
+# --------------------------------------------------------------------------
+
+class PasskeyOptions(BaseModel):
+    purpose: str = "login"
+
+
+class PasskeyAdd(BaseModel):
+    credential: dict
+    name: str = ""
+
+
+def _json(text: str) -> Response:
+    return Response(content=text, media_type="application/json",
+                    headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/passkeys/options")
+def passkey_options(req: PasskeyOptions, request: Request):
+    """A challenge for signing in (no session needed), or for unlocking reveals or confirming
+    a save (an admin's session)."""
+    if req.purpose != "login":
+        if request.state.session is None:
+            return JSONResponse({"detail": "login"}, status_code=401)
+        require_admin(request, f"passkey {req.purpose}")
+    try:
+        return _json(passkeys.authentication_options(request.state.who, req.purpose, request))
+    except auth.AuthError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/passkeys")
+def list_passkeys(request: Request):
+    return {"passkeys": passkeys.listing(request.state.who)}
+
+
+@app.post("/api/passkeys/register/options")
+def passkey_register_options(req: Code, request: Request):
+    # A code from the app first: the tailnet header alone must not be enough to add a passkey.
+    check_code(request, req.code, "passkey-add", request.state.who)
+    return _json(passkeys.registration_options(request.state.who, request))
+
+
+@app.post("/api/passkeys/register")
+def passkey_register(req: PasskeyAdd, request: Request):
+    try:
+        row = passkeys.register(request.state.who, req.credential, req.name)
+    except auth.AuthError as e:
+        audit(request, "passkey-add-failed", request.state.who)
+        raise HTTPException(400, str(e))
+    audit(request, "passkey-added", request.state.who, name=row["name"])
+    return {"passkey": row, "passkeys": passkeys.listing(request.state.who)}
+
+
+@app.delete("/api/passkeys/{cred_id}")
+def passkey_remove(cred_id: str, request: Request):
+    if not passkeys.remove(request.state.who, cred_id):
+        raise HTTPException(404, "no such passkey")
+    audit(request, "passkey-removed", request.state.who)
+    return {"passkeys": passkeys.listing(request.state.who)}
+
+
+# --------------------------------------------------------------------------
+# The bot's secrets (the hidden entries of slack-bridge/.env)
+# --------------------------------------------------------------------------
+
+class SecretSave(BaseModel):
+    value: str
+    code: str = ""
+    passkey: dict | None = None
+
+
+@app.get("/api/secrets")
+def list_secrets(request: Request):
+    return {"secrets": secrets_env.listing(), "can_edit": request.state.role == "admin",
+            "env_file": (S.bridge_dir / ".env").exists()}
+
+
+@app.post("/api/secrets/{name}/reveal")
+def reveal_secret(name: str, request: Request):
+    require_admin(request, f"reveal {name}")
+    if not auth.stepup_ok(request.state.session):
+        raise HTTPException(403, "stepup")
+    try:
+        val = secrets_env.value(name)
+    except KeyError:
+        raise HTTPException(404, f"{name} is not a secret in slack-bridge/.env")
+    audit(request, "reveal-secret", name)
+    return JSONResponse({"name": name, "value": val},
+                        headers={"Cache-Control": "no-store", "Pragma": "no-cache"})
+
+
+@app.put("/api/secrets/{name}")
+def save_secret(name: str, req: SecretSave, request: Request):
+    require_admin(request, f"set {name}")
+    # A code on every save, even inside the step-up window: a change is the one thing here
+    # that can lock the bot out of Slack or Anthropic.
+    check_code(request, req.code, "set-secret", name, req.passkey)
+    try:
+        row = secrets_env.put(name, req.value, request.state.who)
+    except secrets_env.SecretError as e:
+        raise HTTPException(400, str(e))
+    audit(request, "set-secret", name)
+    out = {"status": "saved", "secret": row}
+    try:
+        note = ops.DEPLOY.restart(request.state.who)
+        out["restart_triggered"] = True
+        if note:
+            out["restart_note"] = note
+        audit(request, "restart-bot", S.container, reason=f"set {name}")
+    except Exception as e:  # the save stands; the page offers "Restart now"
+        out["restart_triggered"], out["restart_error"] = False, str(e)
+    return out
+
+
+@app.post("/api/bot/restart")
+def restart_bot(request: Request):
+    require_admin(request, "restart-bot")
+    note = ops.DEPLOY.restart(request.state.who)
+    audit(request, "restart-bot", S.container)
+    return {"restart_triggered": True, "restart_note": note, **ops.DEPLOY.snapshot()}
+
+
+# --------------------------------------------------------------------------
+# Access: each system's addresses, SSH users and SSH passwords
+# --------------------------------------------------------------------------
+
+class AccessSave(BaseModel):
+    address: str | None = None
+    port: int | None = None
+    user: str | None = None
+    password: str | None = None
+    clear_password: bool = False
+    code: str = ""
+    passkey: dict | None = None
+
+
+@app.get("/api/access")
+def list_access(request: Request):
+    return {**access.listing(), "can_edit": request.state.role == "admin"}
+
+
+@app.post("/api/access/{system}/{component}/reveal")
+def reveal_password(system: str, component: str, request: Request):
+    target = f"{system}/{component}"
+    require_admin(request, f"reveal {target}")
+    if not auth.stepup_ok(request.state.session):
+        raise HTTPException(403, "stepup")
+    try:
+        pw = access.password(system, component)
+    except KeyError:
+        raise HTTPException(404, f"no component {target}")
+    if pw is None:
+        raise HTTPException(404, f"{target} has no password set")
+    audit(request, "reveal-password", target)
+    return JSONResponse({"system": system, "component": component, "password": pw},
+                        headers={"Cache-Control": "no-store", "Pragma": "no-cache"})
+
+
+@app.put("/api/access/{system}/{component}")
+def save_access(system: str, component: str, req: AccessSave, request: Request):
+    target = f"{system}/{component}"
+    require_admin(request, f"set {target}")
+    check_code(request, req.code, "set-access", target, req.passkey)
+    try:
+        changed = access.update(system, component, request.state.who, address=req.address,
+                                port=req.port, user=req.user, password=req.password,
+                                clear_password=req.clear_password)
+    except access.AccessError as e:
+        raise HTTPException(400, str(e))
+    if changed:
+        audit(request, "set-access", target, fields=changed)
+    return {"status": "saved" if changed else "unchanged", "changed": changed, **access.listing()}
+
+
 # --------------------------------------------------------------------------
 # Page and header
 # --------------------------------------------------------------------------
@@ -91,7 +350,7 @@ def index():
 
 @app.get("/api/meta")
 def meta(request: Request):
-    return {"who": request.state.who, "skill_dir": str(S.skill_dir),
+    return {"who": request.state.who, "role": request.state.role, "skill_dir": str(S.skill_dir),
             "bridge_dir": str(S.bridge_dir)}
 
 

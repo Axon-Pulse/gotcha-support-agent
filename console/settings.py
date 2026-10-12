@@ -42,10 +42,40 @@ class Settings:
         # `tailscale serve` sets); a request without one is local, and refused unless asked for.
         self.allowed_users = _csv("CONSOLE_ALLOWED_USERS")
         self.allow_local = env("CONSOLE_ALLOW_LOCAL") == "1"
+        # Who may see and change secrets. Everyone else let in is a viewer. Kept in .env, not
+        # in the page, so a session that has been taken over can't make itself an admin.
+        self.admins = _csv("CONSOLE_ADMINS")
+        self.local_role = env("CONSOLE_LOCAL_ROLE") or "viewer"
+        self.session_hours = float(env("CONSOLE_SESSION_HOURS") or 12)
+        self.stepup_seconds = int(env("CONSOLE_STEPUP_SECONDS") or 1800)
+        # After a secret changes: recreate the container so it reads .env again. A plain
+        # `docker compose restart` would keep the old environment.
+        self.restart_cmd = ["make", "-C", str(self.bridge_dir), "restart"]
+        # How to reach each system's machines (the Secrets tab's system access part): the retired bot's two files.
+        # Passkeys: the host name they are bound to; by default the one the page is opened on.
+        self.rp_id = env("CONSOLE_RP_ID") or ""
+        self.inventory_file = Path(env("CONSOLE_INVENTORY_FILE") or ROOT / "systems_inventory.yaml")
+        self.device_secrets_file = Path(env("CONSOLE_DEVICE_SECRETS_FILE") or ROOT / "secrets.local.env")
 
     @property
     def cases_dir(self) -> Path:
         return self.skill_dir / "kb" / "cases"
+
+    @property
+    def totp_file(self) -> Path:
+        return self.state_dir / "totp.json"
+
+    @property
+    def secrets_meta_file(self) -> Path:
+        return self.state_dir / "secrets_meta.json"
+
+    @property
+    def passkeys_file(self) -> Path:
+        return self.state_dir / "passkeys.json"
+
+    @property
+    def access_meta_file(self) -> Path:
+        return self.state_dir / "access_meta.json"
 
     @property
     def turns_file(self) -> Path:

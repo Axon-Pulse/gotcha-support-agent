@@ -11,7 +11,7 @@ ROOT := $(abspath ..)
 PY := $(CURDIR)/.venv/bin/python
 UVICORN := $(PY) -m uvicorn console.server:app --host 127.0.0.1 --port $(PORT)
 
-.PHONY: help install dev run serve test
+.PHONY: help install dev run serve test totp-enroll totp-reset totp-recovery totp-list
 
 help:  ## List the targets
 	@grep -E '^[a-z]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-8s %s\n", $$1, $$2}'
@@ -31,6 +31,23 @@ run:  ## Run as the service does: only tailnet users in CONSOLE_ALLOWED_USERS ge
 serve:  ## Put it on the tailnet at http://<this host>:8765 (once, as root; tailscale keeps it)
 	tailscale serve --bg --http 8765 http://127.0.0.1:$(PORT)
 	tailscale serve status
+
+totp-enroll:  ## Set up someone's authenticator app: make totp-enroll EMAIL=name@company.com
+	@[ -n "$(EMAIL)" ] || { echo "usage: make totp-enroll EMAIL=name@company.com" >&2; exit 2; }
+	[ -f .env ] && { set -a; . ./.env; set +a; }
+	cd $(ROOT) && $(PY) -m console.auth enroll "$(EMAIL)" $(if $(FORCE),--force)
+
+totp-reset:  ## Remove someone's authenticator (lost phone): make totp-reset EMAIL=...
+	@[ -n "$(EMAIL)" ] || { echo "usage: make totp-reset EMAIL=name@company.com" >&2; exit 2; }
+	cd $(ROOT) && $(PY) -m console.auth reset "$(EMAIL)"
+
+totp-recovery:  ## A fresh set of recovery codes, same authenticator: make totp-recovery EMAIL=...
+	@[ -n "$(EMAIL)" ] || { echo "usage: make totp-recovery EMAIL=name@company.com" >&2; exit 2; }
+	cd $(ROOT) && $(PY) -m console.auth recovery "$(EMAIL)"
+
+totp-list:  ## Who has an authenticator set up, and their role
+	[ -f .env ] && { set -a; . ./.env; set +a; }
+	cd $(ROOT) && $(PY) -m console.auth list
 
 test:  ## The console's tests (node runs the page's script, if installed)
 	cd $(ROOT) && $(PY) -m pytest console/tests -q

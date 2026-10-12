@@ -37,13 +37,79 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(S, "systems_tsv", tmp_path / "systems.tsv")
     monkeypatch.setattr(S, "triage_dirs", [bridge / "state" / "triage"])
     monkeypatch.setattr(S, "container", "no-such-container-for-tests")
-    monkeypatch.setattr(S, "allowed_users", {"pm@example.com"})
+    monkeypatch.setattr(S, "allowed_users", {"pm@example.com", "admin@example.com"})
     monkeypatch.setattr(S, "allow_local", True)
+    monkeypatch.setattr(S, "admins", {"admin@example.com"})
+    monkeypatch.setattr(S, "local_role", "viewer")
+    monkeypatch.setattr(S, "inventory_file", tmp_path / "systems_inventory.yaml")
+    monkeypatch.setattr(S, "device_secrets_file", tmp_path / "secrets.local.env")
+    from console import auth
+    monkeypatch.setattr(auth, "SESSIONS", {})
+    from console import passkeys
+    passkeys.reset_challenges()
     return tmp_path
 
 
+class Clock:
+    """auth's clock, moved by hand: each code() steps it on, as a real authenticator's
+    codes do, so two codes in one test are never the same (which auth refuses)."""
+
+    def __init__(self, t: float = 1_800_000_000.0):
+        self.t = t
+
+    def __call__(self) -> float:
+        return self.t
+
+    def code(self, who: str) -> str:
+        import pyotp
+        from console import auth
+        self.t += 30
+        return pyotp.TOTP(auth._load()[who]["secret"]).at(self.t)
+
+
 @pytest.fixture
-def client(env):
+def clock(env, monkeypatch):
+    from console import auth
+    c = Clock()
+    monkeypatch.setattr(auth, "_now", c)
+    return c
+
+
+def _signed_in_client():
+    """A client already signed in as whoever its headers say it is, so the tests written
+    before sign-in existed run unchanged. Sessions are made directly, not through
+    /api/auth/login, so they leave no line in the audit log."""
+    import httpx
+    from fastapi.testclient import TestClient
+    from console import auth
+    from console.server import app
+
+    class SignedIn(TestClient):
+        tokens: dict[str, str] = {}
+
+        def request(self, method, url, **kw):
+            h = httpx.Headers(self.headers)
+            h.update(kw.get("headers") or {})
+            who = (h.get("tailscale-user-login") or "").strip().lower() or "local"
+            if who not in self.tokens:
+                self.tokens[who] = auth.new_session(who)
+            self.cookies.set(auth.COOKIE, self.tokens[who])
+            return super().request(method, url, **kw)
+
+    c = SignedIn(app)
+    c.tokens = {}
+    c.headers.update({"x-console": "1"})
+    return c
+
+
+@pytest.fixture
+def client(env, clock):
+    return _signed_in_client()
+
+
+@pytest.fixture
+def raw_client(env, clock):
+    """Not signed in: for the sign-in tests themselves."""
     from fastapi.testclient import TestClient
     from console.server import app
     c = TestClient(app)

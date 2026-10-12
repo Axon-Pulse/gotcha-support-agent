@@ -146,16 +146,33 @@ svg.chart g.col:hover .hit{fill:var(--tint)}
 .hbar{display:grid;grid-template-columns:minmax(0,260px) minmax(0,1fr) 40px;gap:4px 10px;align-items:center;font-size:12.5px}
 .hbar .track{height:14px}
 .hbar .fill{height:14px;background:var(--bar);border-radius:0 4px 4px 0;min-width:2px}
+/* sign-in, the code prompt, toasts, secrets */
+.overlay{position:fixed;inset:0;z-index:40;display:flex;align-items:center;justify-content:center;padding:16px;
+  background:color-mix(in srgb,var(--bg) 70%,transparent)}
+.overlay[hidden]{display:none}
+.overlay.solid{background:var(--bg);z-index:60}
+.overlay .card{width:100%;max-width:400px;box-shadow:var(--sh2)}
+.codein{font:600 22px/1 var(--mono);letter-spacing:.3em;text-align:center;width:100%;padding:10px}
+.toasts{position:fixed;right:16px;bottom:16px;left:16px;display:flex;flex-direction:column;align-items:flex-end;gap:8px;z-index:50;pointer-events:none}
+.toast{pointer-events:auto;max-width:420px;background:var(--card);border:1px solid var(--line);border-left:3px solid var(--accent);
+  border-radius:var(--r-sm);box-shadow:var(--sh2);padding:9px 12px;font-size:13px;display:flex;gap:10px;align-items:center}
+.toast.ok{border-left-color:var(--ok)}.toast.warn{border-left-color:var(--warn)}.toast.bad{border-left-color:var(--bad)}
+.secretval{font-family:var(--mono);font-size:12.5px;word-break:break-all;user-select:all;background:var(--sunk);
+  border-radius:5px;padding:2px 6px}
+.masked{font-family:var(--mono);color:var(--dim);letter-spacing:.1em}
 </style></head><body><div class="wrap">
 
 <header class="top">
   <h1>Gotcha support console</h1>
   <span class="pill" id="who">…</span>
+  <button class="pill" id="pkbtn" onclick="togglePasskeys()" hidden>passkeys</button>
+  <button class="pill" id="logout" onclick="logout()" hidden>log out</button>
   <button class="pill" id="selftest" title="support-agent-skill/scripts/selftest.sh" onclick="runSelftest()">selftest …</button>
   <button class="pill grow" id="deploypill" onclick="openDeploy()">deploy …</button>
 </header>
 
 <div id="deploy"></div>
+<div id="pkpanel"></div>
 
 <nav id="tabs">
   <button data-t="convos" aria-selected="true">Conversations</button>
@@ -164,6 +181,7 @@ svg.chart g.col:hover .hit{fill:var(--tint)}
   <button data-t="stats" aria-selected="false">Stats</button>
   <button data-t="systems" aria-selected="false">Systems</button>
   <button data-t="bot" aria-selected="false">Bot config</button>
+  <button data-t="secrets" aria-selected="false">Secrets</button>
 </nav>
 
 <section id="convos"></section>
@@ -172,6 +190,31 @@ svg.chart g.col:hover .hit{fill:var(--tint)}
 <section id="stats" hidden></section>
 <section id="systems" hidden></section>
 <section id="bot" hidden></section>
+<section id="secrets" hidden><div id="sec-bot"></div><div id="sec-access"></div></section>
+
+<div class="overlay solid" id="login" hidden><div class="card">
+  <h3>Sign in</h3>
+  <p class="note" id="login-who"></p>
+  <div id="login-form">
+    <p class="note">Enter the 6-digit code from your authenticator app (or a recovery code).</p>
+    <input class="codein" id="login-code" inputmode="numeric" autocomplete="one-time-code" maxlength="9"
+      onkeydown="if(event.key==='Enter')doLogin()">
+    <div class="row" style="margin-top:10px"><button class="go" onclick="doLogin()">Sign in</button>
+      <button class="sm" id="login-pk" onclick="loginPasskey()" hidden>Sign in with passkey</button>
+      <span class="saved bad" id="login-msg"></span></div>
+  </div>
+</div></div>
+
+<div class="overlay" id="codedlg" hidden><div class="card">
+  <h3>Confirm with your code</h3>
+  <p class="note" id="codemsg"></p>
+  <input class="codein" id="codein" inputmode="numeric" autocomplete="one-time-code" maxlength="9">
+  <div class="row" style="margin-top:10px"><button class="go" id="codeok">Confirm</button>
+    <button class="sm" id="codepk" hidden>Use passkey</button>
+    <button class="sm" id="codecancel">Cancel</button></div>
+</div></div>
+
+<div class="toasts" id="toasts"></div>
 
 </div><script>
 const $=s=>document.querySelector(s);
@@ -184,7 +227,11 @@ const api=(p,o={})=>{
   }else if(o.method&&o.method!=='GET'){
     o={...o,headers:{'content-type':'application/json','x-console':'1',...(o.headers||{})}};
   }
-  return fetch('/api'+p,o).then(async r=>{if(!r.ok)throw new Error((await r.json().catch(()=>({}))).detail||r.status);return r.json()});
+  return fetch('/api'+p,o).then(async r=>{
+    if(!r.ok){ const d=(await r.json().catch(()=>({}))).detail||r.status;
+      if(r.status===401&&d==='login'){ showLogin(AUTH); }
+      throw new Error(d); }
+    return r.json()});
 };
 const flash=(id,msg,bad)=>{const e=$('#'+id); if(!e)return; e.textContent=msg;
   e.className='saved '+(bad?'bad':'ok'); if(!bad)setTimeout(()=>{if(e.textContent===msg)e.textContent=''},3500)};
@@ -196,6 +243,7 @@ const OUTCOME={ok:['ok','answered'],timeout:['warn','timed out'],error:['bad','e
   running:['run','running'],lost:['bad','no answer (bot stopped)'],unknown:['','unknown']};
 const outcomeBadge=o=>{const [c,l]=OUTCOME[o]||['',o];return `<span class="badge ${c}">${esc(l)}</span>`};
 var TAB='convos', POLL=null;
+const TABS=['convos','cases','docs','stats','systems','bot','secrets'];
 
 document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>showTab(b.dataset.t));
 // The address says what is open (#convos/<thread>, #cases/<slug>, #stats), so a link to one
@@ -205,8 +253,10 @@ function showTab(t){
   TAB=t;
   if(decodeURIComponent(location.hash.slice(1)).split('/')[0]!==t) setHash(t);
   document.querySelectorAll('#tabs button').forEach(x=>x.setAttribute('aria-selected',x.dataset.t===t));
-  ['convos','cases','docs','stats','systems','bot'].forEach(s=>$('#'+s).hidden=(s!==t));
-  ({convos:loadConvos,cases:loadCases,docs:loadDocs,stats:loadStats,systems:loadSystems,bot:loadBot}[t])();
+  clearReveals();
+  TABS.forEach(s=>$('#'+s).hidden=(s!==t));
+  ({convos:loadConvos,cases:loadCases,docs:loadDocs,stats:loadStats,systems:loadSystems,bot:loadBot,
+    secrets:loadSecrets}[t])();
 }
 
 // ------------------------------------------------------------------ Slack mrkdwn, minimal
@@ -251,7 +301,144 @@ function mdPreview(t){
 }
 
 // ================================================================== header: who, selftest, deploy
-api('/meta').then(m=>{ $('#who').textContent=m.who==='local'?'local':m.who; });
+// Signing in. The page asks who it is talking to; until a code has been entered it shows only
+// the sign-in form, and any call that comes back 401 "login" brings that form back.
+var AUTH=null;
+function showLogin(st){
+  $('#login').hidden=false;
+  $('#login-who').textContent=st?`Signed in to the tailnet as ${st.who}.`:'';
+  $('#login-form').hidden=!!(st&&!st.enrolled);
+  $('#login-pk').hidden=!(PK_OK&&st&&st.passkeys);
+  if(st&&!st.enrolled) $('#login-who').innerHTML=`${esc(st.who)} has no authenticator set up yet.<br>
+    Ask an admin to run <code>make -C console totp-enroll EMAIL=${esc(st.who)}</code> on the server.`;
+  setTimeout(()=>$('#login-code').focus(),0);
+}
+async function doLogin(){
+  const i=$('#login-code'), code=i.value.trim(); i.value='';
+  try{ await api('/auth/login',{method:'POST',body:{code}}); location.reload(); }
+  catch(e){ $('#login-msg').textContent=e.message; i.focus(); }
+}
+async function logout(){
+  clearReveals();
+  try{ await api('/auth/logout',{method:'POST',body:{}}); }catch(e){}
+  location.reload();
+}
+function stepupActive(){ return !!(AUTH&&AUTH.stepup_until&&AUTH.stepup_until*1000>Date.now()); }
+
+// A code for one action, asked in a small dialog. Resolves to the code, or null if cancelled.
+function askCode(msg){
+  return new Promise(res=>{
+    const d=$('#codedlg'), i=$('#codein');
+    $('#codemsg').textContent=msg; i.value=''; d.hidden=false; setTimeout(()=>i.focus(),0);
+    const done=v=>{ d.hidden=true; i.value=''; $('#codeok').onclick=$('#codecancel').onclick=i.onkeydown=null; res(v); };
+    $('#codeok').onclick=()=>done(i.value.trim());
+    $('#codecancel').onclick=()=>done(null);
+    i.onkeydown=e=>{ if(e.key==='Enter')done(i.value.trim()); if(e.key==='Escape')done(null); };
+  });
+}
+
+// ------------------------------------------------------------------ passkeys (WebAuthn)
+// Browsers allow them only on https:// or localhost; the server checks every answer.
+const PK_OK=!!(window.isSecureContext&&window.PublicKeyCredential&&navigator.credentials);
+const b64u={
+  enc:b=>btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''),
+  dec:s=>Uint8Array.from(atob(s.replace(/-/g,'+').replace(/_/g,'/')+'='.repeat((4-s.length%4)%4)),c=>c.charCodeAt(0)).buffer};
+function credJSON(c){
+  if(c.toJSON) return c.toJSON();
+  const r=c.response, out={id:c.id,rawId:b64u.enc(c.rawId),type:c.type,
+    clientExtensionResults:c.getClientExtensionResults?c.getClientExtensionResults():{},
+    response:{clientDataJSON:b64u.enc(r.clientDataJSON)}};
+  if(r.attestationObject){ out.response.attestationObject=b64u.enc(r.attestationObject);
+    if(r.getTransports) out.response.transports=r.getTransports(); }
+  if(r.authenticatorData){ out.response.authenticatorData=b64u.enc(r.authenticatorData);
+    out.response.signature=b64u.enc(r.signature); if(r.userHandle) out.response.userHandle=b64u.enc(r.userHandle); }
+  if(c.authenticatorAttachment) out.authenticatorAttachment=c.authenticatorAttachment;
+  return out;
+}
+// Ask the browser for a passkey answering a fresh challenge for `purpose` (login, stepup, confirm).
+async function passkeyAnswer(purpose){
+  const o=await api('/passkeys/options',{method:'POST',body:{purpose}});
+  o.challenge=b64u.dec(o.challenge);
+  (o.allowCredentials||[]).forEach(c=>c.id=b64u.dec(c.id));
+  const c=await navigator.credentials.get({publicKey:o});
+  if(!c) throw new Error('no passkey chosen');
+  return credJSON(c);
+}
+async function loginPasskey(){
+  try{ const passkey=await passkeyAnswer('login');
+    await api('/auth/login',{method:'POST',body:{passkey}}); location.reload(); }
+  catch(e){ $('#login-msg').textContent=e.name==='NotAllowedError'?'Cancelled.':e.message; }
+}
+// A second factor for one action: {code}, {passkey}, or null if cancelled. The code dialog,
+// with a "Use passkey" button when this user has one and the page allows it.
+function askFactor(msg,purpose){
+  const usePk=PK_OK&&AUTH&&AUTH.passkeys>0;
+  return new Promise(res=>{
+    let viaPk=false;
+    $('#codepk').hidden=!usePk;
+    $('#codepk').onclick=async()=>{
+      viaPk=true; $('#codecancel').onclick();   // closes the dialog
+      try{ res({passkey:await passkeyAnswer(purpose)}); }
+      catch(e){ toast(e.name==='NotAllowedError'?'Passkey cancelled.':e.message,'warn'); res(null); }
+    };
+    askCode(msg).then(code=>{ if(!viaPk) res(code===null?null:{code}); });
+  });
+}
+
+// The passkeys panel: what you have registered here, and registering this device.
+var PK_OPEN=false;
+function togglePasskeys(){ PK_OPEN=!PK_OPEN; PK_OPEN?renderPasskeys():($('#pkpanel').innerHTML=''); }
+async function renderPasskeys(){
+  const r=await api('/passkeys');
+  $('#pkpanel').innerHTML=`<div class="card"><h3>Your passkeys
+      <span class="dim" style="font-weight:400">— sign in, reveal and save with your fingerprint, face or phone</span>
+      <button class="sm grow" onclick="togglePasskeys()">Close</button></h3>
+    ${PK_OK?'':`<p class="alert warn">This page isn't secure enough for passkeys. Browsers allow them only on
+      <code>https://</code> addresses or <code>localhost</code>: open <code>http://localhost:${esc(location.port||'')}</code>
+      instead of an IP address, or the console's https:// tailnet address.</p>`}
+    <div class="scroll"><table><tr><th>name</th><th>added</th><th>last used</th><th></th></tr>
+      ${r.passkeys.map(k=>`<tr><td>${esc(k.name)}</td><td class="mono dim">${fmtTime(k.created)}</td>
+        <td class="mono dim">${k.last_used?fmtTime(k.last_used):'never'}</td>
+        <td><button class="sm no" onclick="removePasskey('${jsq(k.id)}')">remove</button></td></tr>`).join('')
+        ||'<tr><td colspan="4" class="dim">None yet.</td></tr>'}</table></div>
+    ${PK_OK?`<div class="row" style="margin-top:10px">
+      <input id="pk-name" placeholder="name, e.g. my phone" autocomplete="off" style="width:200px">
+      <button class="go" onclick="registerPasskey()">Register a passkey</button></div>
+      <p class="hint">Your browser offers to keep it on this computer (fingerprint, Windows Hello, Touch ID),
+      on your phone (scan the QR code it shows), or on a security key. It asks for your app code first.</p>`:''}
+  </div>`;
+}
+async function registerPasskey(){
+  const name=$('#pk-name').value.trim();
+  const code=await askCode('Enter the code from your authenticator app to add a passkey.');
+  if(code===null) return;
+  try{
+    const o=await api('/passkeys/register/options',{method:'POST',body:{code}});
+    o.challenge=b64u.dec(o.challenge); o.user.id=b64u.dec(o.user.id);
+    (o.excludeCredentials||[]).forEach(c=>c.id=b64u.dec(c.id));
+    const c=await navigator.credentials.create({publicKey:o});
+    await api('/passkeys/register',{method:'POST',body:{credential:credJSON(c),name}});
+    AUTH.passkeys=(AUTH.passkeys||0)+1;
+    toast('Passkey added. Next time choose "Sign in with passkey".','ok');
+    renderPasskeys();
+  }catch(e){ toast(e.name==='NotAllowedError'?'Cancelled.':e.name==='InvalidStateError'?'This device already has a passkey here.':e.message,'bad'); }
+}
+async function removePasskey(id){
+  if(!confirm('Remove this passkey? You can still sign in with your app code.')) return;
+  try{ const r=await api(`/passkeys/${encodeURIComponent(id)}`,{method:'DELETE',body:{}});
+    AUTH.passkeys=r.passkeys.length; renderPasskeys(); }
+  catch(e){ toast(e.message,'bad'); }
+}
+
+// Toasts: a line at the bottom right that goes away by itself, with an optional button.
+function toast(msg,kind='',action=null){
+  const box=$('#toasts'); if(!box||!box.appendChild){ return; }
+  const t=document.createElement('div'); t.className='toast '+kind;
+  t.innerHTML=`<span>${esc(msg)}</span>`;
+  if(action){ const b=document.createElement('button'); b.className='sm'; b.textContent=action.label;
+    b.onclick=()=>{ t.remove(); action.fn(); }; t.appendChild(b); }
+  box.appendChild(t); setTimeout(()=>t.remove(), action?15000:6000);
+}
 
 function showSelftest(t){
   const b=$('#selftest'); if(!b||!t)return;
@@ -262,7 +449,7 @@ function showSelftest(t){
 async function runSelftest(){ const t=await api('/selftest'); showSelftest(t);
   if(!t.ok) alert('selftest.sh fails:\n\n'+t.failures.join('\n')); }
 
-var DEPLOY=null, DEPLOY_OPEN=false, DEPLOY_TIMER=null;
+var DEPLOY=null, DEPLOY_OPEN=false, DEPLOY_TIMER=null, RESTART_WATCH=false;
 async function refreshDeploy(){
   try{ DEPLOY=await api('/deploy'); }catch(e){ return; }
   const p=$('#deploypill'), d=DEPLOY;
@@ -270,11 +457,17 @@ async function refreshDeploy(){
     changed:['warn',`${d.changed.length||'some'} change${d.changed.length===1?'':'s'} not deployed`],
     unknown:['warn','deployed version unknown'],'no-container':['bad','bot container not found']};
   let [cls,label]=map[d.state]||['',d.state];
-  if(d.deploy.running){cls='warn';label='deploying…';}
+  if(d.deploy.running){cls='warn';label=d.deploy.kind!=='restart'?'deploying…':
+    d.deploy.waiting?'restart waits for questions…':'restarting bot…';}
+  if(RESTART_WATCH&&!d.deploy.running&&!d.deploy.restart_queued&&d.deploy.kind==='restart'&&d.deploy.finished){
+    RESTART_WATCH=false;
+    d.deploy.exit_code===0?toast('Bot restarted with the new settings.','ok')
+      :toast('The bot restart failed — open the deploy panel for its log.','bad',{label:'Show log',fn:()=>{DEPLOY_OPEN=false;openDeploy();}});
+  }
   p.className='pill grow '+cls; p.textContent=label;
   if(DEPLOY_OPEN) renderDeploy();
   clearTimeout(DEPLOY_TIMER);
-  DEPLOY_TIMER=setTimeout(refreshDeploy, d.deploy.running?2000:30000);
+  DEPLOY_TIMER=setTimeout(refreshDeploy, d.deploy.running||d.deploy.restart_queued?2000:30000);
 }
 function openDeploy(){ DEPLOY_OPEN=!DEPLOY_OPEN; DEPLOY_OPEN?renderDeploy():($('#deploy').innerHTML=''); }
 function renderDeploy(){
@@ -307,8 +500,6 @@ async function startDeploy(){
   try{ await api('/deploy',{method:'POST',body:{}}); DEPLOY_OPEN=true; refreshDeploy(); }
   catch(e){ flash('dv',e.message,true); }
 }
-refreshDeploy();
-api('/selftest').then(showSelftest);
 
 // ================================================================== Conversations
 var CV={q:'',outcome:'',channel:'',open:null}, CV_TIMER=null;
@@ -784,8 +975,8 @@ async function loadBot(){
       <div class="scroll"><table><tr><th>name</th><th>value</th><th>default</th></tr>
       ${b.settings.map(s=>`<tr><td class="mono">${esc(s.name)}</td><td class="mono">${s.set?esc(s.value):'<span class="dim">default</span>'}</td>
         <td class="mono dim">${esc(s.default)}</td></tr>`).join('')}</table></div>
-      <p class="note">Also set, not shown: ${b.secrets_set.map(n=>`<code>${esc(n)}</code>`).join(', ')||'nothing'}.
-        Change any of these in <code>slack-bridge/.env</code>, then <code>make -C slack-bridge restart</code>.</p></div>
+      <p class="note">Hidden values: ${b.secrets_set.length} ·
+        <a href="#secrets" onclick="showTab('secrets');return false">open Secrets</a> to see or change them.</p></div>
     <div class="card"><h3>What the bot may do</h3>
       <p class="note">Claude Code's permissions in <code>slack-bridge/workspace/.claude/settings.json</code>: anything not allowed is refused, nobody is asked.</p>
       ${b.permissions?`<pre>${esc(JSON.stringify(b.permissions.permissions,null,1))}</pre>`:'<p class="alert">settings.json is missing</p>'}
@@ -797,14 +988,224 @@ async function loadBot(){
         ||'<tr><td colspan="3" class="dim">Nothing yet.</td></tr>'}</table></div></div>`;
 }
 
-(()=>{ const [t,...rest]=decodeURIComponent(location.hash.slice(1)).split('/'), arg=rest.join('/');
+// ================================================================== Secrets
+// The hidden entries of slack-bridge/.env. Everyone sees the names; an admin reveals a value
+// after a code (good for AUTH.stepup_seconds), and every save takes a code of its own.
+// A revealed value lives only in SEC.reveal, for 30 seconds at most.
+var SEC={list:[],can_edit:false,env_file:true,reveal:{},timers:{},edit:null,adding:false};
+const REVEAL_MS=30000;
+function clearReveals(){
+  Object.values(SEC.timers).forEach(clearTimeout);
+  SEC.reveal={}; SEC.timers={};
+  if(TAB==='secrets'&&$('#sec-bot').innerHTML) renderSecrets();
+  if(typeof ACC!=='undefined'){ Object.values(ACC.timers).forEach(clearTimeout); ACC.reveal={}; ACC.timers={};
+    if(TAB==='secrets'&&$('#sec-access').innerHTML) renderAccess(); }
+}
+// One tab, two parts: the bot's secrets (#sec-bot) and how to reach each system (#sec-access).
+async function loadSecrets(){
+  const [r,a,st]=await Promise.all([api('/secrets'),api('/access'),api('/auth/status')]);
+  AUTH=st; SEC.list=r.secrets; SEC.can_edit=r.can_edit; SEC.env_file=r.env_file;
+  ACC.systems=a.systems; ACC.can_edit=a.can_edit; ACC.inventory_file=a.inventory_file;
+  renderSecrets(); renderAccess();
+}
+function renderSecrets(){
+  const mins=Math.max(1,Math.round(((AUTH&&AUTH.stepup_until||0)*1000-Date.now())/60000));
+  const editRow=(name,isNew)=>`<tr><td colspan="4">
+      <div class="row">
+        ${isNew?'<input id="sv-name" placeholder="NAME_OF_SECRET" autocomplete="off" style="text-transform:uppercase">':''}
+        <input type="password" id="sv-val" placeholder="new value" autocomplete="new-password" style="min-width:260px">
+        <button class="sm" onclick="togglePwField()">show</button>
+        <input id="sv-code" class="mono" placeholder="${PK_OK&&AUTH&&AUTH.passkeys?'code, or empty = passkey':'6-digit code'}" inputmode="numeric" autocomplete="one-time-code" maxlength="9" style="width:170px">
+        <button class="go" onclick="saveSecret('${jsq(name)}',${isNew})">Save</button>
+        <button class="sm" onclick="cancelEdit()">Cancel</button>
+      </div>
+      <p class="hint">Saving writes <code>slack-bridge/.env</code> and restarts the bot so it uses the new value.</p></td></tr>`;
+  const rows=SEC.list.map(s=>{
+    const shown=SEC.reveal[s.name];
+    const val=shown!==undefined?`<span class="secretval">${esc(shown)}</span>
+        <button class="sm" onclick="copySecret('${jsq(s.name)}')">copy</button>
+        <button class="sm" onclick="hideSecret('${jsq(s.name)}')">hide</button>`
+      :s.set?'<span class="masked">••••••••</span>':'<span class="dim">empty</span>';
+    const changed=s.updated_at?`${fmtTime(s.updated_at)} by ${esc(s.updated_by||'?')}`:'<span class="dim">not changed here</span>';
+    const acts=SEC.can_edit?`<button class="sm" onclick="revealSecret('${jsq(s.name)}')" ${shown!==undefined?'disabled':''}>reveal</button>
+        <button class="sm" onclick="editSecret('${jsq(s.name)}')">change</button>`:'';
+    return `<tr><td class="mono">${esc(s.name)}</td><td>${val}</td><td class="mono dim">${changed}</td><td style="white-space:nowrap">${acts}</td></tr>`
+      +(SEC.edit===s.name?editRow(s.name,false):'');
+  }).join('');
+  $('#sec-bot').innerHTML=`<div class="card"><h3>Bot secrets <span class="dim" style="font-weight:400">— hidden entries of <code>slack-bridge/.env</code></span>
+      ${SEC.can_edit&&stepupActive()?`<span class="badge ok">verified for ${mins} more minute${mins===1?'':'s'}</span>`:''}</h3>
+    ${SEC.env_file?'':'<p class="alert warn">There is no slack-bridge/.env on this host yet.</p>'}
+    ${SEC.can_edit?'<p class="note">Values are hidden. Reveal asks for a code from your authenticator, then shows each value for 30 seconds; every save asks for a code. Each reveal and change is in the audit log.</p>'
+      :'<p class="note">You can see which secrets are set. Ask an admin to view or change them.</p>'}
+    <div class="scroll"><table><tr><th>name</th><th>value</th><th>last changed</th><th></th></tr>
+      ${rows||'<tr><td colspan="4" class="dim">No secrets in slack-bridge/.env.</td></tr>'}
+      ${SEC.adding?editRow('',true):''}</table></div>
+    ${SEC.can_edit&&!SEC.adding?'<div class="row" style="margin-top:8px"><button class="sm" onclick="addSecret()">+ add a secret</button></div>':''}
+  </div>`;
+}
+// One code unlocks revealing (Secrets and Access) for AUTH.stepup_seconds. False if cancelled.
+async function ensureStepup(){
+  if(stepupActive()) return true;
+  const f=await askFactor(`Enter your code (or use your passkey) to reveal secrets and passwords for the next ${Math.round((AUTH&&AUTH.stepup_seconds||1800)/60)} minutes.`,'stepup');
+  if(f===null) return false;
+  try{ const r=await api('/auth/stepup',{method:'POST',body:f});
+    AUTH.stepup_until=r.stepup_until;
+    setTimeout(clearReveals, Math.max(0,r.stepup_until*1000-Date.now()));
+    return true; }
+  catch(e){ toast(e.message,'bad'); return false; }
+}
+async function revealSecret(name,retried){
+  if(!await ensureStepup()) return;
+  try{
+    const r=await api(`/secrets/${encodeURIComponent(name)}/reveal`,{method:'POST',body:{}});
+    SEC.reveal[name]=r.value;
+    clearTimeout(SEC.timers[name]); SEC.timers[name]=setTimeout(()=>hideSecret(name),REVEAL_MS);
+    renderSecrets();
+  }catch(e){
+    if(e.message==='stepup'&&!retried){ AUTH.stepup_until=null; return revealSecret(name,true); }
+    toast(e.message,'bad');
+  }
+}
+function hideSecret(name){ clearTimeout(SEC.timers[name]); delete SEC.timers[name]; delete SEC.reveal[name]; renderSecrets(); }
+async function copySecret(name){
+  try{ await navigator.clipboard.writeText(SEC.reveal[name]); toast('Copied.','ok'); }
+  catch(e){ toast('Copy failed; select the value and copy it by hand.','warn'); }
+}
+function editSecret(name){ SEC.edit=name; SEC.adding=false; renderSecrets(); setTimeout(()=>$('#sv-val').focus(),0); }
+function addSecret(){ SEC.adding=true; SEC.edit=null; renderSecrets(); setTimeout(()=>$('#sv-name').focus(),0); }
+function cancelEdit(){ SEC.edit=null; SEC.adding=false; renderSecrets(); }
+function togglePwField(){ const i=$('#sv-val'); i.type=i.type==='password'?'text':'password'; }
+async function saveSecret(name,isNew){
+  if(isNew) name=$('#sv-name').value.trim().toUpperCase();
+  const value=$('#sv-val').value, code=$('#sv-code').value.trim();
+  $('#sv-val').value=''; $('#sv-code').value='';   // never left in the page, whatever happens
+  if(!name||!value){ toast('A name and a value are both needed.','warn'); return; }
+  try{
+    const f=await saveFactor(code); if(!f) return;
+    const r=await api(`/secrets/${encodeURIComponent(name)}`,{method:'PUT',body:{value,...f}});
+    SEC.edit=null; SEC.adding=false; delete SEC.reveal[name];
+    await loadSecrets();
+    restartToast(r,name);
+  }catch(e){ toast(e.message,'bad'); }
+}
+// The factor for a save: the code typed in the form, or else the passkey if there is one.
+async function saveFactor(code){
+  if(code) return {code};
+  if(PK_OK&&AUTH&&AUTH.passkeys>0){
+    try{ return {passkey:await passkeyAnswer('confirm')}; }
+    catch(e){ toast(e.name==='NotAllowedError'?'Passkey cancelled.':e.message,'warn'); return null; }
+  }
+  toast('Enter the code from your authenticator app to save.','warn'); return null;
+}
+function restartToast(r,name){
+  if(r.restart_triggered){
+    toast(r.restart_note?`Saved ${name||''}. Bot restart ${r.restart_note}.`:`Saved ${name||''}. Restarting the bot to apply it…`,'ok');
+    RESTART_WATCH=true; refreshDeploy();
+  }else{
+    toast(`Saved ${name||''}, but the bot was not restarted: ${r.restart_error||'unknown error'}`,'warn',{label:'Restart now',fn:restartNow});
+  }
+}
+async function restartNow(){
+  try{ restartToast(await api('/bot/restart',{method:'POST',body:{}}),''); }
+  catch(e){ toast(e.message,'bad'); }
+}
+
+// ================================================================== Access
+// Each system's machines: address, port and SSH user for everyone; the SSH password for an
+// admin, revealed after a code and saved with one. Written to systems_inventory.yaml and
+// secrets.local.env at the repo root.
+var ACC={systems:[],can_edit:false,inventory_file:true,reveal:{},timers:{},edit:null};
+const akey=(s,c)=>s+'/'+c;
+function renderAccess(){
+  const editRow=(s,c)=>`<tr><td colspan="7">
+      <div class="row">
+        <input id="ac-addr" class="mono" placeholder="address" value="${esc(c.address||'')}" style="width:160px">
+        <input id="ac-port" class="mono" placeholder="port" inputmode="numeric" value="${esc(c.port??'')}" style="width:80px">
+        <input id="ac-user" class="mono" placeholder="SSH user" value="${esc(c.user||'')}" style="width:120px" autocomplete="off">
+        <input type="password" id="ac-pw" placeholder="${c.has_password?'new password (empty = keep)':'SSH password'}" autocomplete="new-password" style="width:200px">
+        <button class="sm" onclick="const i=$('#ac-pw');i.type=i.type==='password'?'text':'password'">show</button>
+        ${c.has_password?'<label class="note"><input type="checkbox" id="ac-clear"> remove password</label>':''}
+      </div>
+      <div class="row" style="margin-top:6px">
+        <input id="ac-code" class="mono" placeholder="${PK_OK&&AUTH&&AUTH.passkeys?'code, or empty = passkey':'6-digit code'}" inputmode="numeric" autocomplete="one-time-code" maxlength="9" style="width:170px">
+        <button class="go" onclick="saveAccess('${jsq(s.name)}','${jsq(c.name)}')">Save</button>
+        <button class="sm" onclick="ACC.edit=null;renderAccess()">Cancel</button>
+      </div></td></tr>`;
+  const cards=ACC.systems.map(s=>`<div class="card"><h3>${esc(s.name)}
+        ${s.site?`<span class="dim" style="font-weight:400">— ${esc(s.site)}</span>`:''}</h3>
+      ${s.description?`<p class="note">${esc(s.description)}</p>`:''}
+      <div class="scroll"><table><tr><th>component</th><th>type</th><th>address</th><th>SSH user</th><th>SSH password</th><th>last changed</th><th></th></tr>
+      ${s.components.map(c=>{
+        const k=akey(s.name,c.name), shown=ACC.reveal[k];
+        const pw=shown!==undefined?`<span class="secretval">${esc(shown)}</span>
+            <button class="sm" onclick="hideAccess('${jsq(k)}')">hide</button>`
+          :c.has_password?'<span class="masked">••••••••</span>':'<span class="dim">—</span>';
+        const addr=c.address?`${c.scheme?esc(c.scheme)+'://':''}${esc(c.address)}${c.port?':'+esc(c.port):''}`:'<span class="dim">—</span>';
+        const acts=ACC.can_edit?`${c.has_password?`<button class="sm" onclick="revealAccess('${jsq(s.name)}','${jsq(c.name)}')" ${shown!==undefined?'disabled':''}>reveal</button>`:''}
+            <button class="sm" onclick="ACC.edit='${jsq(k)}';renderAccess()">edit</button>`:'';
+        return `<tr><td class="mono">${esc(c.name)}</td><td class="dim">${esc(c.type||'')}</td><td class="mono">${addr}</td>
+          <td class="mono">${esc(c.user||'—')}</td><td>${pw}</td>
+          <td class="mono dim">${c.updated_at?`${fmtTime(c.updated_at)} by ${esc(c.updated_by||'?')}`:''}</td>
+          <td style="white-space:nowrap">${acts}</td></tr>`+(ACC.edit===k?editRow(s,c):'');
+      }).join('')||'<tr><td colspan="7" class="dim">No components.</td></tr>'}</table></div></div>`).join('');
+  $('#sec-access').innerHTML=`<div class="card"><h3>System access <span class="dim" style="font-weight:400">— how to reach each system's machines (<code>systems_inventory.yaml</code>)</span></h3>
+    ${ACC.inventory_file?'':'<p class="alert warn">There is no systems_inventory.yaml at the repo root.</p>'}
+    <p class="note">${ACC.can_edit?'Passwords are hidden: reveal asks for a code from your authenticator and shows one for 30 seconds; every save asks for a code. Each reveal and change is in the audit log.'
+      :'Addresses and users are shown; ask an admin for a password.'}</p></div>${cards}`;
+}
+async function revealAccess(sys,comp,retried){
+  if(!await ensureStepup()) return;
+  const k=akey(sys,comp);
+  try{
+    const r=await api(`/access/${encodeURIComponent(sys)}/${encodeURIComponent(comp)}/reveal`,{method:'POST',body:{}});
+    ACC.reveal[k]=r.password;
+    clearTimeout(ACC.timers[k]); ACC.timers[k]=setTimeout(()=>hideAccess(k),REVEAL_MS);
+    renderAccess();
+  }catch(e){
+    if(e.message==='stepup'&&!retried){ AUTH.stepup_until=null; return revealAccess(sys,comp,true); }
+    toast(e.message,'bad');
+  }
+}
+function hideAccess(k){ clearTimeout(ACC.timers[k]); delete ACC.timers[k]; delete ACC.reveal[k]; renderAccess(); }
+async function saveAccess(sys,comp){
+  const body={address:$('#ac-addr').value.trim(), user:$('#ac-user').value.trim(), code:$('#ac-code').value.trim()};
+  const port=$('#ac-port').value.trim(); if(port) body.port=Number(port);
+  const pw=$('#ac-pw').value; if(pw) body.password=pw;
+  const clr=$('#ac-clear'); if(clr&&clr.checked) body.clear_password=true;
+  $('#ac-pw').value=''; $('#ac-code').value='';   // never left in the page
+  try{
+    const f=await saveFactor(body.code); delete body.code; if(!f) return; Object.assign(body,f);
+    const r=await api(`/access/${encodeURIComponent(sys)}/${encodeURIComponent(comp)}`,{method:'PUT',body});
+    ACC.edit=null; delete ACC.reveal[akey(sys,comp)];
+    ACC.systems=r.systems; renderAccess();
+    toast(r.changed.length?`Saved ${sys}/${comp}: ${r.changed.join(', ')}.`:'Nothing changed.', r.changed.length?'ok':'');
+  }catch(e){ toast(e.message,'bad'); }
+}
+
+// ================================================================== start
+function route(){
+  const [t,...rest]=decodeURIComponent(location.hash.slice(1)).split('/'), arg=rest.join('/');
   if(t==='convos'&&arg) CV.open=arg;
   if(t==='cases'&&arg) CASE={slug:arg,loading:true};
   if(t==='systems'&&arg) SITE_OPEN.add(arg);
-  showTab(['convos','cases','docs','stats','systems','bot'].includes(t)?t:'convos');
+  showTab(t==='access'?'secrets':TABS.includes(t)?t:'convos');
   if(t==='cases'&&arg) openCase(arg);
-})();
+}
+async function boot(){
+  try{ AUTH=await api('/auth/status'); }
+  catch(e){ if(e.message!=='login') document.body.innerHTML=`<p class="alert" style="margin:24px">${esc(e.message)}</p>`; return; }
+  if(!AUTH.logged_in) return showLogin(AUTH);
+  $('#who').textContent=`${AUTH.who} · ${AUTH.role}`;
+  $('#logout').hidden=false; $('#pkbtn').hidden=false;
+  refreshDeploy();
+  api('/selftest').then(showSelftest);
+  route();
+}
+boot();
 Object.assign(window,{showTab,runSelftest,openDeploy,startDeploy,loadConvos,openThread,openCase,closeCase,newCase,
   previewSlug,toggleTopic,addTopic,setMode,renderSyms,addSym,renderSigs,moveSec,rmSec,addSec,saveCase,renameCase,
-  deleteCase,openDoc,renderDoc,saveDoc,loadStats,loadSystems,toggleSite,runTriage,loadBot});
+  deleteCase,openDoc,renderDoc,saveDoc,loadStats,loadSystems,toggleSite,runTriage,loadBot,
+  doLogin,logout,loadSecrets,renderSecrets,revealSecret,hideSecret,copySecret,editSecret,addSecret,cancelEdit,
+  togglePwField,saveSecret,restartNow,refreshDeploy,SEC,renderAccess,revealAccess,hideAccess,saveAccess,ACC,
+  loginPasskey,togglePasskeys,renderPasskeys,registerPasskey,removePasskey});
 </script></body></html>
