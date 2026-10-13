@@ -303,7 +303,7 @@ A dedicated service user (e.g. `support-bot`) works too, but then do steps 3 and
 | "This channel is not approved for the support bot." | Asked in a channel not on the list | Add its ID, comma-separated |
 | No reply at all | Bot not invited, or the process isn't running | `/invite @gotcha-support`; check `docker compose logs` (or `journalctl -u gotcha-support-bot`) |
 | Docker: `Permission denied (publickey)` or git "dubious ownership" | Container uid differs from the owner of `~/.ssh` / the clone | Set `BOT_UID`/`BOT_GID` in `.env` to `id -u`/`id -g`, rebuild |
-| "No answer within 90s" | Slow site link, or a site waiting for a password or browser approval, or `BRIDGE_TIMEOUT_S` too low | Run check 5.2 for that site by hand; raise `BRIDGE_TIMEOUT_S` |
+| "No answer within 180s" | Slow site link, or a site waiting for a password or browser approval, or `BRIDGE_TIMEOUT_S` too low | Run check 5.2 for that site by hand; raise `BRIDGE_TIMEOUT_S` |
 | `tailscale ssh`: "Host key verification failed" | That site doesn't run Tailscale SSH | Expected. Use plain ssh (check 5.2); the skill does this by itself. |
 | Service fails: `claude` not found | `CLAUDE_BIN` missing | Add it to `/etc/gotcha-support-bot.env` |
 | Answer says a check was blocked | The guard refused a command the model wrote | Expected. The answer gives the PM that check as a step. |
@@ -319,7 +319,7 @@ A dedicated service user (e.g. `support-bot`) works too, but then do steps 3 and
 | `SLACK_ALLOW_DMS` | `0` | `1` to answer DMs from allowed users. |
 | `BRIDGE_EFFORT` | `medium` | Claude Code effort: `low` is faster, `high` is more thorough. |
 | `BRIDGE_MODEL` | `claude-sonnet-5-5` | e.g. `claude-opus-5-5`; empty uses Claude Code's own default. |
-| `BRIDGE_TIMEOUT_S` | `90` | One answer's wall-clock cap; the ssh sessions die with it, and a turn that hits it posts no answer. The triage's own limit is set 12s below it (`GOTCHA_TRIAGE_TIMEOUT`). |
+| `BRIDGE_TIMEOUT_S` | `180` | One answer's wall-clock cap; the ssh sessions die with it, and a turn that hits it posts no answer. The triage's own limit is set 12s below it (`GOTCHA_TRIAGE_TIMEOUT`). |
 | `BRIDGE_RTL_MARKS` | `1` | Wraps each Hebrew line of an answer in invisible direction marks so Hebrew mixed with English or code keeps its word order in Slack. Set `0` to post the model's text untouched. |
 | `BRIDGE_MAX_CONCURRENT` | `2` | Questions answered at once. |
 | `BRIDGE_ALLOWED_HOSTS` | `axon-gotcha-[0-9]+` | Regex (whole name) for the machines the bot may reach. The guard refuses any other host, and `list_systems.sh` lists only these. |
@@ -331,8 +331,13 @@ A dedicated service user (e.g. `support-bot`) works too, but then do steps 3 and
 
 The bot runs the skill's scripts (`run_triage.sh`, `remote_logs.sh`, `list_systems.sh`,
 `code.sh`) and nothing it composed itself: no `ssh`, no `tailscale ssh`. `remote_logs.sh <host>
-<container> [lines] [--grep REGEX]` is the one way it reads a container's log: a fixed
-`docker logs --tail`, at most 5000 whole lines (`--grep` searches the newest 200000), redacted like the triage, never following. When the
+<container> [lines|all] [--grep 'REGEX']` is the one way it reads a container's log: a fixed
+`docker logs --tail`, any number of whole lines or `all` (`--grep` searches the whole log), redacted
+like the triage, never following. Only the time limit bounds it; the bot cuts the output down
+itself with a local pipe (`| grep`, `| tail`). A whole-log read (`all` or `--grep`) fetches the log
+once and keeps a redacted copy in the container's `/tmp/gotcha-logs` for 3 minutes
+(`GOTCHA_LOG_CACHE_TTL`, `0` = off), so the bot's next searches of that log don't read a
+million-line log over ssh again; a read cut short is marked PARTIAL and not kept. When the
 triage doesn't settle a question, the answer names the one next check as a step for the PM, with
 its exact command.
 
@@ -357,6 +362,11 @@ to read-only users, before customer access.
      a read is judged on the path it resolves to, so the bridge adds the skill's absolute path
      with `--settings` (`bridge.permission_overlay`), plus absolute denies for secret file names
      inside it;
+   - a command's output comes back whole up to `bashOutputMaxChars` (128,000 characters, the
+     documented maximum). A bigger one comes back as a short preview plus the path of a file
+     Claude Code saved under `~/.claude/projects/<workspace>/<session>/tool-results/`, and the
+     bot may read those folders (and only those: `~/.claude`'s config, credentials and
+     transcripts are denied by name; a wholesale `~/.claude/**` deny would beat the allow);
    - the Slack message goes to `claude` on **stdin**, never as an argument. As an argument, a
      message such as `--allowedTools=Bash` would be parsed as a flag.
 
@@ -366,7 +376,16 @@ to read-only users, before customer access.
    - the skill's `run_triage.sh`, `list_systems.sh` and `code.sh` (not `clone`; the version,
      file and line range it is given must be plain names and numbers, because `code.sh` puts
      them into a `sed` script and sed's `e` command runs a shell command);
-   - `tailscale ping <site>`, `tailscale ip [<site>]`, `tailscale version`.
+   - `tailscale ping <site>`, `tailscale ip [<site>]`, `tailscale version`;
+   - read-only text tools, to cut output down or read a KB or saved triage file: `grep`,
+     `head`, `tail`, `wc`, `sort`, `uniq`, `cut`, `cat`, `ls`, `echo`, each with a list of
+     allowed flags (no `tail -f`, `sort -o`, `grep -f`), and every file they name inside the
+     skill, the workspace or `/tmp/gotcha-triage`, never a secret-looking name;
+   - `cd <dir>` inside those, at the start of the command.
+
+   One call may chain several of these with `&&`, `||`, `;`, a newline or `|`; the command is
+   split and every part is checked on its own, so `run_triage.sh h 2>&1 | grep -iE 'a|b' | head`
+   passes and `run_triage.sh h | sh` does not.
 
    Every host named must match `BRIDGE_ALLOWED_HOSTS` (`axon-gotcha-<number>`): not a laptop,
    a server, or any other machine on the tailnet, and never a name that starts with `-`.
@@ -375,13 +394,16 @@ to read-only users, before customer access.
    `GOTCHA_CONFIG` (a `configs/…` path), `GOTCHA_SSH` and `GOTCHA_TRIAGE_TIMEOUT`, with those
    shapes.
 
-   Denied: `ssh`, `tailscale ssh`, restarts, `make`, `sudo`, `;` `&&` `>` `$(…)`, `--ping` when
-   switched off (`BRIDGE_ALLOW_PING=0`), and anything it can't parse.
+   Denied: `ssh`, `tailscale ssh`, restarts, `make`, `sudo`, `sed`, `awk`, `xargs`, `tee`,
+   redirects to files (`>`), `&`, subshells, `$(…)`, `$VARIABLES`, unquoted globs, braces and `~`
+   (bash would expand them into words the guard never saw), `--ping` when switched off
+   (`BRIDGE_ALLOW_PING=0`), and anything it can't parse.
 
    **If the guard can't run, the command is blocked, not allowed.** Claude Code runs a command
    when a hook exits with anything but 2, so `settings.json` runs the guard as
    `python3 bash_guard.py || exit 2`, and the bridge checks at start that the hook blocks
-   `rm -rf /` and passes the skill's own scripts. It refuses to start otherwise.
+   `touch /tmp/gotcha-guard-probe` (shown to the guard, never run) and passes the skill's own
+   scripts. It refuses to start otherwise.
 3. **The remote account** is read-only by its own permissions, once the logins are
    switched (see [Reaching the sites](#reaching-the-sites-without-a-person)).
 

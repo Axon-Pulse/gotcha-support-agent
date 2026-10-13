@@ -1,12 +1,17 @@
 {
-  "$comment": "The Slack bot's whole permission surface. The bridge runs `claude -p --permission-mode dontAsk --setting-sources project` in this directory, so only this file (and managed settings) applies, plus the absolute-path read rules the bridge adds with --settings (bridge.py permission_overlay): anything not allowed is refused without asking, and every Bash call is vetted by ../bash_guard.py. Reads are an ALLOW-LIST: this workspace, the real skill directory (added by the bridge) and the saved triage files. A deny list can't do that job: its `**/.env` style patterns only match under this directory, so a .env anywhere else on the host stayed readable.",
+  "$comment": "The Slack bot's whole permission surface. The bridge runs `claude -p --permission-mode dontAsk --setting-sources project` in this directory, so only this file (and managed settings) applies, plus the absolute-path read rules the bridge adds with --settings (bridge.py permission_overlay): anything not allowed is refused without asking, and every Bash call is vetted by ../bash_guard.py. Reads are an ALLOW-LIST: this workspace, the real skill directory and the bot's own oversized command outputs under ~/.claude/projects/<workspace>/<session>/tool-results (both added by the bridge), and the saved triage files. A deny list can't do that job: its `**/.env` style patterns only match under this directory, so a .env anywhere else on the host stayed readable. ~/.claude is not denied wholesale, because a deny beats any allow and would hide those outputs; its config, credentials and transcripts are denied by name instead. bashOutputMaxChars is the documented maximum: an output up to it comes back whole, a bigger one as a preview plus that tool-results file.",
+  "bashOutputMaxChars": 128000,
   "permissions": {
     "defaultMode": "dontAsk",
     "allow": ["Skill(gotcha-support)", "Bash", "TodoWrite", "Read(./**)", "Read(//tmp/gotcha-triage/**)"],
     "deny": [
       "Write", "Edit", "NotebookEdit", "WebFetch", "WebSearch", "Agent",
       "Read(~/.ssh/**)",
-      "Read(~/.claude/**)",
+      "Read(~/.claude.json)",
+      "Read(~/.claude/*.json)",
+      "Read(~/.claude/projects/**/*.jsonl)",
+      "Read(~/.claude/session-env/**)",
+      "Read(~/.claude/shell-snapshots/**)",
       "Read(~/.config/**)",
       "Read(~/.aws/**)",
       "Read(~/.netrc)",

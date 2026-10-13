@@ -60,7 +60,7 @@ ALLOW_DMS = os.environ.get("SLACK_ALLOW_DMS") == "1"
 CLAUDE = os.environ.get("CLAUDE_BIN", "claude")
 MODEL = os.environ.get("BRIDGE_MODEL", "claude-sonnet-5-5")       # empty = Claude Code's default
 EFFORT = os.environ.get("BRIDGE_EFFORT", "medium")
-TIMEOUT_S = int(os.environ.get("BRIDGE_TIMEOUT_S", "90"))
+TIMEOUT_S = int(os.environ.get("BRIDGE_TIMEOUT_S", "180"))
 MAX_CONCURRENT = int(os.environ.get("BRIDGE_MAX_CONCURRENT", "2"))
 # The machines the bot may reach. bash_guard.py reads the same variable (it inherits this
 # environment through claude), and list_systems.sh lists only these. Keep the default in step
@@ -105,16 +105,37 @@ offer to; every fix is a step for the PM. If the PM did not say which system and
 than one could match, ask one short question listing the candidates, and stop.
 
 Only the skill's scripts are available here (run_triage.sh, remote_logs.sh, list_systems.sh,
-code.sh). You cannot run your own commands on a site, so skip the skill's targeted follow-ups
-(§5): answer from the triage output and the KB, and when one more check would settle
-it, give that check to the PM as a step with its exact command.
+code.sh), plus read-only text tools to cut their output down. You cannot run your own
+commands on a site, so skip the skill's targeted follow-ups (§5) other than remote_logs.sh
+and code.sh: answer from the triage output, the logs and the KB, and when one more check
+would settle it, give that check to the PM as a step with its exact command.
 
 How to run them, or the command is refused and the try is wasted:
-- One script per Bash call, by its full path: {scripts}/<script> <args>
-- Nothing else on the line: no `cd`, no `&&` or `;`, no pipes (`| head`, `| grep`), no
-  `2>&1`, no redirects. Output comes back whole; do not shorten it.
-- Read KB files and saved triage files with the Read tool, never `cat` or `grep`. To find a
-  case, use the SKILL.md index, then Read the case file under {kb}.
+- Scripts by their full path ({scripts}/<script> <args>), or `cd` into the skill first:
+  `cd <skill> && scripts/<script> <args>`.
+- Several reads may go in one call, joined with `&&` or `;`. `2>&1` is fine.
+- Read as much as the question needs: there is no line limit, and a full picture beats a
+  quick one. `remote_logs.sh <site> <container> all [--grep 'REGEX']` reads or searches the
+  whole log. Pipes are for removing noise (`| grep -vE 'DEBUG|health'`), finding
+  (`| grep -iE 'a|b'`) and counting (`| wc -l`, `| sort | uniq -c`), not for being brief:
+  never conclude that something did not happen, or when it started, from a short `| head` or
+  `| tail`.
+- An output over about 128,000 characters comes back as a short preview and the path of a
+  file holding all of it ("Output too large ... saved to ..."). Do not work from the preview:
+  Read that file (in parts, with offset and limit), or `grep` / `tail` it.
+- Put every regex and pattern in single quotes (`--grep 'restarted|returned 500'`); an
+  unquoted `|` is a pipe and `*` a glob, and the command is refused.
+- Nothing else: no redirects to files, no `sed`, `awk`, `xargs`, `tee`, `find`, no
+  `$VARIABLES`, no `$(...)`, no `for`/`while` loops and no `NAME=value` assignments. To run
+  the same check for several patterns, write each command out in full, joined with `;`.
+- The first whole-log read of a container (`all` or any `--grep`) fetches the log once and
+  keeps a copy for 3 minutes; later reads of the same container are answered from it in a
+  second ("from a copy of the whole log fetched Ns ago"). So searching one log many times is
+  cheap; still, one combined regex (`--grep 'a|b|c'`) split locally with pipes is tidiest.
+  An output marked PARTIAL is only part of the log: say so, never treat it as the whole.
+- KB files and saved triage files: Read them with the Read tool, or `cat` / `grep -ril` them
+  (only inside the skill and the triage folder). To find a case, use the SKILL.md index, then
+  the case file under {kb}.
 """
 
 
@@ -128,6 +149,16 @@ SKILL_DIR = (WORKSPACE / ".claude" / "skills" / "gotcha-support").resolve()
 _SECRET_FILES = (".env", ".env.*", "secrets.local.env", "*.pem", "*.key", "id_*")
 
 
+def tool_results_base() -> Path:
+    """Where Claude Code keeps this workspace's sessions: <config dir>/projects/<workspace path
+    with every non-alphanumeric as `-`>. A command's output too big to return inline is saved
+    under <session>/tool-results/ there, and the model gets a preview and the file's path.
+    Keep in step with bash_guard.TOOL_RESULTS_BASE (a test checks)."""
+    d = os.environ.get("CLAUDE_CONFIG_DIR")
+    config = Path(d) if d else Path.home() / ".claude"
+    return config.resolve() / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(WORKSPACE))
+
+
 def permission_overlay() -> str:
     """Read rules that need this machine's absolute paths, passed as --settings JSON.
 
@@ -135,11 +166,13 @@ def permission_overlay() -> str:
     skill in it is a symlink, and a read is judged on the path it resolves to, so the real
     skill directory has to be allowed by its absolute path. The `**/.env` style denies in
     settings.json only match under the workspace, so the same file names are denied here for
-    the skill directory. Everything else on the host stays unreadable. (`//path` is Claude
-    Code's absolute-path form.)"""
+    the skill directory. The bot's own saved outputs (tool-results) are allowed too, and
+    nothing else under Claude Code's config directory: without them, every output over the
+    inline ceiling would be a 2,000-character preview the bot could not read past. Everything
+    else on the host stays unreadable. (`//path` is Claude Code's absolute-path form.)"""
     root = f"/{SKILL_DIR}"
     return json.dumps({"permissions": {
-        "allow": [f"Read({root}/**)"],
+        "allow": [f"Read({root}/**)", f"Read(/{tool_results_base()}/*/tool-results/**)"],
         "deny": [f"Read({root}/**/{name})" for name in _SECRET_FILES]}})
 
 
@@ -172,9 +205,9 @@ def child_env() -> dict[str, str]:
     # The triage must end, with whatever it has, well before the turn is killed: a killed turn
     # answers nothing, a short triage answers with less. Leave the model time to write.
     env.setdefault("GOTCHA_TRIAGE_TIMEOUT", str(max(10, TIMEOUT_S - 12)))
-    # Claude Code cuts the middle out of a command's output past its default (about 10 KB),
-    # which dropped part of a source search once. A triage is about 18 KB and a log read can be
-    # far more; this lets it all through, and Claude Code still says when it has cut.
+    # How much of a command's output Claude Code reads back. settings.json's bashOutputMaxChars
+    # (128000, the inline ceiling as well) takes over from this on Claude Code 2.1.261 and later;
+    # it stays for an older claude, where the default cut part of a source search once.
     env.setdefault("BASH_MAX_OUTPUT_LENGTH", "150000")
     return env
 
@@ -213,6 +246,9 @@ def ensure_workspace_trusted() -> None:
     log.info("marked %s as trusted in %s", WORKSPACE, path)
 
 
+GUARD_PROBE = "/tmp/gotcha-guard-probe"
+
+
 def verify_guard() -> None:
     """Refuse to run unless the Bash guard, started the way Claude Code starts it, blocks a
     command it must and passes one it should. Claude Code runs a command when its hook fails any
@@ -227,9 +263,10 @@ def verify_guard() -> None:
         return subprocess.run(["/bin/sh", "-c", command], input=json.dumps(event), env=env,
                               capture_output=True, text=True, timeout=20)
 
-    blocked = run("rm -rf /")
+    # Never executed, only shown to the guard; harmless all the same, should that ever change.
+    blocked = run(f"touch {GUARD_PROBE}")
     if blocked.returncode != 2:
-        raise SystemExit("the Bash guard did not block `rm -rf /` "
+        raise SystemExit(f"the Bash guard did not block `touch {GUARD_PROBE}` "
                          f"(exit {blocked.returncode}: {blocked.stderr.strip()[:200]}); not starting")
     passed = run(f"{SKILL_DIR}/scripts/list_systems.sh")
     if passed.returncode != 0:

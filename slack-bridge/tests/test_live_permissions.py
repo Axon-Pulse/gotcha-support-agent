@@ -63,6 +63,21 @@ def test_the_saved_triage_files_are_readable(canary):
     assert text in ask(read_request(next(TRIAGE_DIR.glob("zz-live-*.txt"))))
 
 
+def test_the_bots_own_saved_outputs_are_readable_but_not_the_transcripts_beside_them(canary):
+    """An output over bashOutputMaxChars is saved under <session>/tool-results/; the bot must be
+    able to read it. The session's transcript (<session>.jsonl, one level up) must not be."""
+    session = f"zz-live-{uuid.uuid4().hex[:8]}"
+    saved = B.tool_results_base() / session / "tool-results" / "zz-live.txt"
+    text = canary(saved)
+    assert text in ask(read_request(saved)), "a saved tool-results file was refused"
+    transcript = B.tool_results_base() / f"{session}.jsonl"
+    text = canary(transcript)
+    assert text not in ask(read_request(transcript)), "a session transcript was read"
+    saved.unlink()
+    saved.parent.rmdir()
+    saved.parent.parent.rmdir()
+
+
 @pytest.mark.parametrize("via", ["relative symlink", "absolute symlink", "real path"])
 def test_the_skill_kb_is_readable_however_it_is_reached(via):
     rel = "kb/cases/radar-transmitter-off.md"
