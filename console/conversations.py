@@ -43,9 +43,9 @@ def timeout_s() -> int:
     """The bridge's BRIDGE_TIMEOUT_S, from its .env, so in-flight is judged as the bot does."""
     from console.ops import bot_env
     try:
-        return int(bot_env().get("BRIDGE_TIMEOUT_S") or 90)
+        return int(bot_env().get("BRIDGE_TIMEOUT_S") or 180)
     except ValueError:
-        return 90
+        return 180
 
 
 # --------------------------------------------------------------------------

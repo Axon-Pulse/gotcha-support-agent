@@ -252,6 +252,30 @@ def test_an_unquoted_regex_gets_told_to_quote_it():
         G.check(cmd, WS)
 
 
+@pytest.mark.parametrize("cmd", [
+    # what the bot sent, twice, in real conversations
+    f"cd {SKILL} && L=scripts/remote_logs.sh; for p in 'Loudness check' 'Error on unit'; do "
+    "echo \"== $p\"; scripts/remote_logs.sh axon-gotcha-4 dumbo all --grep \"$p\" 2>&1 | "
+    "grep -E '^20' | cut -c1-230 > /dev/null; done",
+    f"cd {SKILL} && for p in 'a' 'b'; do scripts/remote_logs.sh axon-gotcha-4 dumbo all "
+    "--grep \"$p\" | tail -1; done",
+    f"while true; do {SCRIPTS}/list_systems.sh; done",
+    f"if true; then {SCRIPTS}/list_systems.sh; fi",
+])
+def test_a_loop_is_refused_with_what_to_write_instead(cmd):
+    with pytest.raises(G.Denied, match="no for/while loops") as e:
+        G.check(cmd, WS)
+    assert "combined" in str(e.value)
+
+
+def test_a_bare_assignment_is_refused_with_what_to_write_instead():
+    """The bot sent `S=scripts/remote_logs.sh; scripts/remote_logs.sh ...` and never used S."""
+    with pytest.raises(G.Denied, match="write the script path or value out in full"):
+        G.check(f"cd {SKILL} && S=scripts/remote_logs.sh; scripts/list_systems.sh", WS)
+    assert allowed(f"GOTCHA_SSH=ssh {SCRIPTS}/run_triage.sh axon-gotcha-3")   # a prefix is fine
+    assert allowed(f"{SCRIPTS}/code.sh grep axon-gotcha-3 'for|while' src")  # words in a regex
+
+
 def test_grep_options_after_the_regex_get_told_to_use_a_pipe_not_to_quote():
     """The bot sent this; its regex was quoted, so a quoting hint would have been wrong."""
     cmd = (f"cd {SKILL} && scripts/remote_logs.sh axon-gotcha-4 dumbo all "

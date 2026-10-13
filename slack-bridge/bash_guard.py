@@ -86,6 +86,11 @@ _LINE_RANGE = re.compile(r"[0-9]+(,[0-9]+)?")
 _COUNT = re.compile(r"[+-]?[0-9]+")
 _LIST = re.compile(r"[0-9,-]+")
 
+_SHELL_KEYWORDS = {"for", "while", "until", "select", "do", "done", "if", "then", "elif", "else",
+                   "fi", "case", "esac", "function"}
+_NO_LOOPS = ("no for/while loops or if blocks in the bot's commands: write each command out in "
+             "full, joined with ; (for several patterns in one log, one search with a combined "
+             "--grep 'a|b|c', split locally with | grep, is faster)")
 _QUOTE_HINT = ("if the `|` was part of a --grep or code.sh grep regex, put the whole regex in "
                "single quotes")
 
@@ -154,7 +159,8 @@ def _no_expansions(cmd: str) -> None:
         elif c == "'" and not quote:
             quote = "'"
         elif c == "$" and not (nxt == "" or nxt in " \t\n|;&)" or (quote == '"' and nxt == '"')):
-            raise Denied("no $variables in the bot's commands (a regex `$` goes in single quotes)")
+            raise Denied("no $variables in the bot's commands: write values out in full (a "
+                         "regex `$` goes in single quotes)")
         elif not quote and c in _UNQUOTED_EXPANSIONS:
             raise Denied(f"an unquoted {c!r} is expanded by the shell: put patterns, regexes and "
                          "globs in single quotes")
@@ -467,14 +473,18 @@ def check(command: str, cwd: str) -> None:
     if "\r" in command:
         raise Denied("no carriage returns in the bot's commands")
     command = _HARMLESS_REDIRECTS.sub("", command.strip())
-    _no_expansions(command)
 
     # Split into segments, each with the separator before and after it.
     segments: list[list[str]] = [[]]
     seps: list[str] = []
+    bad_separator: Denied | None = None          # raised below, after the loop check
     for t in _tokens(command):
         if _is_op(t):
-            seps.append(_separator(t))
+            try:
+                seps.append(_separator(t))
+            except Denied as e:
+                bad_separator = bad_separator or e
+                seps.append(";")
             segments.append([])
         elif "\n" in t:
             raise Denied("no newlines inside a quoted word in the bot's commands")
@@ -483,8 +493,18 @@ def check(command: str, cwd: str) -> None:
     while len(segments) > 1 and not segments[-1] and seps[-1] == ";":
         segments.pop()                  # a trailing `;` or newline
         seps.pop()
+    # Loops and bare assignments are denied anyway (by the `$` they carry, or as a setting this
+    # file doesn't know); this says what to write instead, so the retry is the right one.
+    if any(tok[:1] and tok[0] in _SHELL_KEYWORDS for tok in segments):
+        raise Denied(_NO_LOOPS)
+    if any(tok and all(re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", t) for t in tok) for tok in segments):
+        raise Denied("no NAME=value assignments in the bot's commands: write the script "
+                     "path or value out in full every time it is used")
+    if bad_separator:
+        raise bad_separator
     if not any(segments):
         raise Denied("empty command")
+    _no_expansions(command)
 
     for n, tok in enumerate(segments):
         before = seps[n - 1] if n else None

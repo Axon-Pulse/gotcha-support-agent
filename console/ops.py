@@ -24,7 +24,7 @@ SHOWN = ("BRIDGE_MODEL", "BRIDGE_EFFORT", "BRIDGE_TIMEOUT_S", "BRIDGE_MAX_CONCUR
          "CLAUDE_BIN")
 # bridge.py's defaults for the same names (a test keeps the two in step).
 DEFAULTS = {"BRIDGE_MODEL": "claude-sonnet-5-5", "BRIDGE_EFFORT": "medium",
-            "BRIDGE_TIMEOUT_S": "90", "BRIDGE_MAX_CONCURRENT": "2", "BRIDGE_RTL_MARKS": "1",
+            "BRIDGE_TIMEOUT_S": "180", "BRIDGE_MAX_CONCURRENT": "2", "BRIDGE_RTL_MARKS": "1",
             "BRIDGE_ALLOWED_HOSTS": "axon-gotcha-[0-9]+", "BRIDGE_ALLOW_PING": "1",
             "SLACK_ALLOWED_CHANNELS": "", "SLACK_ALLOWED_USERS": "", "SLACK_ALLOW_DMS": "0",
             "GOTCHA_SSH_USER": "", "BOT_UID": "1000", "BOT_GID": "1000", "CLAUDE_BIN": "claude"}

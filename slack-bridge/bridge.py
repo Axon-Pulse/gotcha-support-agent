@@ -60,7 +60,7 @@ ALLOW_DMS = os.environ.get("SLACK_ALLOW_DMS") == "1"
 CLAUDE = os.environ.get("CLAUDE_BIN", "claude")
 MODEL = os.environ.get("BRIDGE_MODEL", "claude-sonnet-5-5")       # empty = Claude Code's default
 EFFORT = os.environ.get("BRIDGE_EFFORT", "medium")
-TIMEOUT_S = int(os.environ.get("BRIDGE_TIMEOUT_S", "90"))
+TIMEOUT_S = int(os.environ.get("BRIDGE_TIMEOUT_S", "180"))
 MAX_CONCURRENT = int(os.environ.get("BRIDGE_MAX_CONCURRENT", "2"))
 # The machines the bot may reach. bash_guard.py reads the same variable (it inherits this
 # environment through claude), and list_systems.sh lists only these. Keep the default in step
@@ -126,7 +126,11 @@ How to run them, or the command is refused and the try is wasted:
 - Put every regex and pattern in single quotes (`--grep 'restarted|returned 500'`); an
   unquoted `|` is a pipe and `*` a glob, and the command is refused.
 - Nothing else: no redirects to files, no `sed`, `awk`, `xargs`, `tee`, `find`, no
-  `$VARIABLES`, no `$(...)`.
+  `$VARIABLES`, no `$(...)`, no `for`/`while` loops and no `NAME=value` assignments. To run
+  the same check for several patterns, write each command out in full, joined with `;`.
+- Every `remote_logs.sh ... all` call reads the whole log on the site again, which takes
+  seconds on a big one. Prefer one search with a combined regex (`--grep 'a|b|c'`) and split
+  it locally with pipes over many separate searches of the same log.
 - KB files and saved triage files: Read them with the Read tool, or `cat` / `grep -ril` them
   (only inside the skill and the triage folder). To find a case, use the SKILL.md index, then
   the case file under {kb}.
