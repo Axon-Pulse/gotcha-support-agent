@@ -334,7 +334,10 @@ The bot runs the skill's scripts (`run_triage.sh`, `remote_logs.sh`, `list_syste
 <container> [lines|all] [--grep 'REGEX']` is the one way it reads a container's log: a fixed
 `docker logs --tail`, any number of whole lines or `all` (`--grep` searches the whole log), redacted
 like the triage, never following. Only the time limit bounds it; the bot cuts the output down
-itself with a local pipe (`| grep`, `| tail`). When the
+itself with a local pipe (`| grep`, `| tail`). A whole-log read (`all` or `--grep`) fetches the log
+once and keeps a redacted copy in the container's `/tmp/gotcha-logs` for 3 minutes
+(`GOTCHA_LOG_CACHE_TTL`, `0` = off), so the bot's next searches of that log don't read a
+million-line log over ssh again; a read cut short is marked PARTIAL and not kept. When the
 triage doesn't settle a question, the answer names the one next check as a step for the PM, with
 its exact command.
 

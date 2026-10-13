@@ -70,6 +70,47 @@ grep -E '^eth2 ' <<<"$net" | grep -q 'no link' && ok "net: down port reported as
 grep -E '^wlan0 ' <<<"$net" | grep -q 'WEAK SIGNAL' && ok "net: weak wifi is flagged" || bad "net: weak wifi not flagged: $net"
 grep -q '^docker0' <<<"$net" && bad "net: virtual device listed" || ok "net: virtual device skipped"
 
+# --- remote_logs.sh keeps one redacted copy of a whole log and answers repeat reads from it ------
+cat > "$STUB/ssh" <<'EOS'
+#!/usr/bin/env bash
+exec bash -s
+EOS
+cat > "$STUB/docker" <<'EOS'
+#!/usr/bin/env bash
+case $1 in
+  info) exit 0 ;;
+  ps) printf 'dumbo-backend\ngotcha30\n' ;;
+  inspect) echo "state=running started=x exit=0 restarts=0" ;;
+  logs) echo fetch >> "$FAKE_CALLS"
+        if [ -n "${FAKE_FAIL:-}" ]; then echo "2026-10-13T00:00:01Z part"; exit 1; fi
+        printf '%s\n' "2026-10-13T00:00:01Z INFO start" "2026-10-13T00:00:02Z ERROR boom" \
+          "2026-10-13T00:00:03Z WARNING loud" "2026-10-13T00:00:04Z ERROR again" \
+          "2026-10-13T00:00:05Z camera_password=hunter2" ;;
+esac
+EOS
+chmod +x "$STUB/ssh" "$STUB/docker"
+LOGC="$STUB/logcache"; CALLS="$STUB/calls"; : > "$CALLS"
+rl() { PATH="$STUB:$PATH" GOTCHA_SSH=ssh GOTCHA_LOG_CACHE="$LOGC" FAKE_CALLS="$CALLS" \
+         "$HERE/remote_logs.sh" axon-gotcha-4 dumbo "$@" 2>&1; }
+fetches() { wc -l < "$CALLS"; }
+out=$(rl all --grep 'error')
+grep -q 'ERROR boom' <<<"$out" && grep -q 'ERROR again' <<<"$out" && ! grep -q WARNING <<<"$out" \
+  && [ "$(fetches)" -eq 1 ] && ok "remote_logs: first --grep fetches the log once and filters it" || bad "remote_logs first read: $out"
+out=$(rl all --grep 'warning')
+grep -q 'WARNING loud' <<<"$out" && grep -q 'from a copy' <<<"$out" && [ "$(fetches)" -eq 1 ] \
+  && ok "remote_logs: a second search uses the copy" || bad "remote_logs second read fetched again: $out"
+out=$(rl 2)
+[ "$(grep -c '^2026' <<<"$out")" -eq 2 ] && grep -q 'ERROR again' <<<"$out" && [ "$(fetches)" -eq 1 ] \
+  && ok "remote_logs: a tail is served from a fresh copy" || bad "remote_logs tail: $out"
+! grep -rq hunter2 "$LOGC" && ! grep -q hunter2 <<<"$out" && ok "remote_logs: the copy is redacted" || bad "remote_logs copy holds a secret"
+[ "$(stat -c %a "$LOGC")" = 700 ] && ok "remote_logs: the copy's folder is private" || bad "remote_logs cache folder mode $(stat -c %a "$LOGC")"
+out=$(GOTCHA_LOG_CACHE_TTL=0 rl all --grep 'error')
+grep -q 'ERROR boom' <<<"$out" && [ "$(fetches)" -eq 2 ] && ok "remote_logs: TTL=0 reads the site every time" || bad "remote_logs TTL=0: $out"
+rm -rf "$LOGC"
+out=$(FAKE_FAIL=1 rl all --grep 'part')
+grep -q PARTIAL <<<"$out" && grep -q 'part' <<<"$out" && [ ! -e "$LOGC/axon-gotcha-4--dumbo.log" ] \
+  && ok "remote_logs: a read cut short says PARTIAL and is not kept" || bad "remote_logs partial: $out"
+
 # --- KB consistency: signatures <-> cases <-> SKILL.md index -----------------------------------
 for s in $(grep -vE '^#|^$' "$HERE/signatures.txt" | cut -d'|' -f1 | grep -v '^ok:'); do
   [ -f "$SKILL/kb/cases/$s.md" ] && ok "signature has a case: $s" || bad "signature slug has no case file: $s"

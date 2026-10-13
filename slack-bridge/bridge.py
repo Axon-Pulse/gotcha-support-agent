@@ -128,9 +128,11 @@ How to run them, or the command is refused and the try is wasted:
 - Nothing else: no redirects to files, no `sed`, `awk`, `xargs`, `tee`, `find`, no
   `$VARIABLES`, no `$(...)`, no `for`/`while` loops and no `NAME=value` assignments. To run
   the same check for several patterns, write each command out in full, joined with `;`.
-- Every `remote_logs.sh ... all` call reads the whole log on the site again, which takes
-  seconds on a big one. Prefer one search with a combined regex (`--grep 'a|b|c'`) and split
-  it locally with pipes over many separate searches of the same log.
+- The first whole-log read of a container (`all` or any `--grep`) fetches the log once and
+  keeps a copy for 3 minutes; later reads of the same container are answered from it in a
+  second ("from a copy of the whole log fetched Ns ago"). So searching one log many times is
+  cheap; still, one combined regex (`--grep 'a|b|c'`) split locally with pipes is tidiest.
+  An output marked PARTIAL is only part of the log: say so, never treat it as the whole.
 - KB files and saved triage files: Read them with the Read tool, or `cat` / `grep -ril` them
   (only inside the skill and the triage folder). To find a case, use the SKILL.md index, then
   the case file under {kb}.
