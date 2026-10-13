@@ -330,11 +330,11 @@ When the source solves something the KB didn't have, offer to write it up as a n
 tail) works everywhere, Slack included:
 
 ```
-scripts/remote_logs.sh <host> <container> [lines<=5000] [--grep REGEX]
+scripts/remote_logs.sh <host> <container> [lines|all] [--grep 'REGEX']
 ```
 
 `<container>` can be a fragment (`dumbo`); a name that matches nothing or several lists the
-machine's containers. Redacted like the triage. Use it instead of asking the PM to run
+machine's containers. `--grep` searches the whole log; quote the regex. Redacted like the triage. Use it instead of asking the PM to run
 `docker logs`. A container that isn't there is an answer too: say so, and say it doesn't show
 the software was never installed.
 

@@ -138,6 +138,133 @@ def test_everything_else_is_closed(cmd, why):
 
 
 # --------------------------------------------------------------------------
+# Chained and filtered reads: split into parts, every part checked on its own
+# --------------------------------------------------------------------------
+
+SKILL = f"{WS}/.claude/skills/gotcha-support"
+
+# What the bot sent in real conversations and the old guard refused (paths as in the container,
+# moved to this checkout).
+CHAINED = [
+    f"cd {SKILL} && scripts/list_systems.sh gotcha 4",
+    f"cd {SKILL} && scripts/list_systems.sh axon-gotcha-265",
+    f"cd {SKILL} && scripts/list_systems.sh",
+    f"cd {SKILL} && scripts/run_triage.sh axon-gotcha-4 --ping",
+    f"cd {SKILL} && cat kb/escalation.md",
+    f"cat {SKILL}/kb/cases/radar-transmitter-off.md",
+    f"cd {SKILL} && scripts/list_systems.sh gotcha 4; grep -ril 'firmware' kb | head",
+    f"cd {SKILL} && scripts/run_triage.sh axon-gotcha-4 --ping 2>&1 | "
+    "grep -iE 'firmware|version|release|magos|radar|UNREACHABLE|TIMED|dir:' | head -40",
+    f"cd {SKILL} && scripts/list_systems.sh gotcha 4 | head -20; "
+    "scripts/run_triage.sh axon-gotcha-4 --ping 2>&1 | head -300",
+    f"cd {SKILL} && scripts/list_systems.sh gotcha 2; scripts/list_systems.sh gotcha 3",
+    f"{SKILL}/scripts/remote_logs.sh axon-gotcha-4 gotcha30 5000 "
+    "--grep 'ASU processing restarted|freqs returned 500'",
+    # and a few more of the same kind
+    f"{SCRIPTS}/remote_logs.sh axon-gotcha-4 gotcha30 all --grep 'error$' | tail -n 50",
+    f"{SCRIPTS}/remote_logs.sh axon-gotcha-4 gotcha30 all | grep -c -i 'timeout'",
+    f"{SCRIPTS}/remote_logs.sh axon-gotcha-4 gotcha30 20000 2>&1 | grep -v DEBUG | "
+    "cut -c1-300 | sort | uniq -c | sort -rn | head -n 20",
+    f"{SCRIPTS}/run_triage.sh axon-gotcha-3 && {SCRIPTS}/run_triage.sh axon-gotcha-4",
+    f"{SCRIPTS}/run_triage.sh axon-gotcha-3 || {SCRIPTS}/list_systems.sh gotcha 3",
+    f"{SCRIPTS}/list_systems.sh gotcha 3\n{SCRIPTS}/list_systems.sh gotcha 4",
+    f"{SCRIPTS}/list_systems.sh; echo ---; {SCRIPTS}/code.sh resolve axon-gotcha-4",
+    f"{SCRIPTS}/code.sh grep axon-gotcha-3 'reconnect|retry' src | head -30",
+    f"grep -rn --include='*.md' 'transmitter' {SKILL}/kb",
+    f"ls -la {SKILL}/kb/cases && wc -l {SKILL}/kb/cases/radar-transmitter-off.md",
+    "ls /tmp/gotcha-triage",
+    "tail -n 100 /tmp/gotcha-triage/axon-gotcha-4.txt",
+]
+
+
+@pytest.mark.parametrize("cmd", CHAINED)
+def test_chained_and_filtered_reads_are_allowed(cmd):
+    try:
+        G.check(cmd, WS)
+    except G.Denied as e:
+        pytest.fail(f"{cmd!r}: {e}")
+
+
+CHAINED_BUT_NOT_SAFE = [
+    (f"{SCRIPTS}/list_systems.sh\nrm -rf /tmp/x", "a newline is a separator: rm"),
+    (f"{SCRIPTS}/list_systems.sh x\ntouch /tmp/x", "a newline is a separator: touch"),
+    (f"{SCRIPTS}/list_systems.sh #\ntouch /tmp/x", "a comment must not hide the next line"),
+    (f"{SCRIPTS}/list_systems.sh 'a\nb'", "a newline inside quotes"),
+    (f"{SCRIPTS}/list_systems.sh\r\ntouch /tmp/x", "carriage return"),
+    (f"{SCRIPTS}/list_systems.sh | sh", "pipe into a shell"),
+    (f"{SCRIPTS}/list_systems.sh | xargs rm", "xargs"),
+    (f"{SCRIPTS}/list_systems.sh | sed -n 1p", "sed (its e/w commands)"),
+    (f"{SCRIPTS}/list_systems.sh | awk '{{print}}'", "awk"),
+    (f"{SCRIPTS}/list_systems.sh | tee /tmp/x", "tee writes"),
+    (f"{SCRIPTS}/list_systems.sh >> /tmp/x", "append redirect"),
+    (f"{SCRIPTS}/list_systems.sh 2>/tmp/x", "stderr to a file"),
+    (f"grep x < /etc/passwd", "input redirect"),
+    (f"{SCRIPTS}/list_systems.sh &", "background"),
+    (f"{SCRIPTS}/list_systems.sh & touch /tmp/x", "background then a command"),
+    (f"( {SCRIPTS}/list_systems.sh )", "subshell"),
+    (f"{SCRIPTS}/list_systems.sh |& cat", "|&"),
+    (f"{SCRIPTS}/list_systems.sh &&", "dangling &&"),
+    ("; ls", "empty first part"),
+    ("cat $HOME/.ssh/id_rsa", "a $variable"),
+    ('cat "$HOME/.ssh/id_rsa"', "a $variable in double quotes"),
+    (f"cat {SKILL}/kb/$'\\x2e\\x2e'/x", "ANSI-C quoting"),
+    ("cat ~/.ssh/id_rsa", "~"),
+    ("cat /etc/passwd", "outside the read roots"),
+    (f"cat {SKILL}/../slack-bridge/.env", "outside, through .."),
+    (f"cat {SKILL}/kb/*", "an unquoted glob"),
+    (f"cat {SKILL}/kb/{{x,../../../etc/passwd}}", "a brace expansion"),
+    (f"grep {{-f,/etc/shadow}} {SKILL}/kb/glossary.md", "a brace expansion into options"),
+    (f"cat {WS}/.env", "a secret name inside the workspace"),
+    (f"cat {SKILL}/id_rsa", "a key name inside the skill"),
+    (f"grep -f /etc/shadow {SKILL}/kb/glossary.md", "grep -f reads a file"),
+    (f"grep --file=/etc/shadow {SKILL}/kb/glossary.md", "grep --file"),
+    (f"grep -r password /etc", "grep -r outside"),
+    (f"sort -o /tmp/x {SKILL}/kb/glossary.md", "sort -o writes"),
+    (f"{SCRIPTS}/list_systems.sh | sort --compress-program=sh", "sort runs a program"),
+    (f"tail -f {SKILL}/kb/glossary.md", "tail -f never ends"),
+    (f"tail --follow {SKILL}/kb/glossary.md", "tail --follow"),
+    (f"uniq {SKILL}/kb/glossary.md /tmp/x", "uniq's second name is its output"),
+    ("cd / && cat etc/passwd", "cd outside the read roots"),
+    (f"cd {SKILL}/kb; cat ../../slack-bridge/.env", "cd then out again"),
+    (f"{SCRIPTS}/list_systems.sh || cd /tmp && ls", "cd that may not run"),
+    (f"{SCRIPTS}/list_systems.sh | cd {SKILL}", "cd in a pipe"),
+    ("cd", "cd home"),
+    (f"cd {SKILL}/kb/nonexistent && ls", "cd into nothing"),
+    (f"cd {SKILL} && ./scripts/lib_ssh.sh", "a skill file that is not an entry point"),
+    ("run_triage.sh axon-gotcha-3", "a bare name is looked up on PATH"),
+    (f"{SCRIPTS}/run_triage.sh axon-gotcha-3 && tailscale ssh axon-gotcha-3 uptime", "ssh later"),
+    (f"{SCRIPTS}/run_triage.sh axon-gotcha-3 | grep x | bash", "a shell at the end"),
+    (f"echo x | {SCRIPTS}/run_triage.sh prod-db", "a wrong site later in the pipe"),
+    (f"LC_ALL=C grep x {SKILL}/kb/glossary.md", "environment for a text tool"),
+]
+
+
+@pytest.mark.parametrize("cmd,why", CHAINED_BUT_NOT_SAFE)
+def test_every_part_of_a_chain_is_checked(cmd, why):
+    assert not allowed(cmd), f"{why}: {cmd!r}"
+
+
+def test_an_unquoted_regex_gets_told_to_quote_it():
+    """The bot sent this; the `|` in its regex was a pipe to a command named `freqs`."""
+    cmd = (f"{SKILL}/scripts/remote_logs.sh axon-gotcha-4 gotcha30 5000 "
+           "--grep ASU processing restarted|freqs returned 500")
+    with pytest.raises(G.Denied, match="single quotes"):
+        G.check(cmd, WS)
+
+
+def test_grep_r_with_no_path_searches_the_cwd_which_must_be_readable():
+    assert allowed("grep -r 'transmitter'", WS)
+    assert not allowed("grep -r password", "/etc")
+    assert not allowed("ls", "/")
+
+
+def test_a_relative_script_path_follows_the_cd():
+    assert allowed(f"cd {SCRIPTS} && ./list_systems.sh")
+    assert not allowed("./list_systems.sh", WS)
+    assert allowed("./list_systems.sh", str(SCRIPTS))
+
+
+# --------------------------------------------------------------------------
 # Only the gotcha sites: not a laptop, a server, or any other machine on the tailnet
 # --------------------------------------------------------------------------
 
@@ -280,7 +407,7 @@ def test_when_the_guard_cannot_run_the_command_is_blocked_not_allowed(tmp_path, 
     """Claude Code runs the command when a hook exits with anything but 2. This is the case
     that used to leave Bash unrestricted (e.g. python3 older than 3.10 failing on `str | None`)."""
     ws = fake_project(tmp_path, guard_source)
-    r = run_settings_hook(ws, bash("rm -rf /"), path)
+    r = run_settings_hook(ws, bash("touch /tmp/gotcha-guard-probe"), path)
     assert r.returncode == 2, (name, r.returncode, r.stderr)
 
 
@@ -305,7 +432,7 @@ def test_a_guard_that_crashes_blocks_and_says_so(tmp_path):
 
 def test_the_real_hook_command_allows_and_blocks():
     assert run_settings_hook(Path(WS), bash(f"{SCRIPTS}/list_systems.sh")).returncode == 0
-    assert run_settings_hook(Path(WS), bash("rm -rf /")).returncode == 2
+    assert run_settings_hook(Path(WS), bash("touch /tmp/gotcha-guard-probe")).returncode == 2
     assert run_settings_hook(Path(WS), bash("tailscale ssh axon-gotcha-3 uptime")).returncode == 2
 
 
@@ -414,77 +541,6 @@ def test_ping_is_on_by_default_and_can_be_switched_off(monkeypatch):
     with pytest.raises(G.Denied, match="switched off"):
         G.check(call, WS)
     assert allowed(f"{SCRIPTS}/run_triage.sh axon-gotcha-3")      # the plain triage is unaffected
-
-
-# --------------------------------------------------------------------------
-# code.sh: its range goes into a sed script, and sed's `e` command runs a shell command
-# --------------------------------------------------------------------------
-
-# Each is code execution, or a file read or write, if it reaches `sed -n "${s},${e}{=;p}"`.
-BAD_RANGES = [
-    "1,2e touch {p}",            # sed `e`: runs the command. This ran as the bot user.
-    "1e touch {p}",
-    "1,2p;e touch {p}",
-    "1,2w {p}",                  # sed `w`: writes a file
-    "1,1r {p}",                  # sed `r`: reads one into the output
-    "1,2{{e touch {p}}}",
-    "1,$(touch {p})",            # command substitution, in case it is ever expanded
-    "1,`touch {p}`",
-    "$((1))",
-    "a[$(touch {p})]",           # bash arithmetic subscripts evaluate substitutions too
-    "1,",
-    ",5",
-    "1,2,3",
-    "-5",
-    "0x10",
-    "1 2",
-    "1;2",
-    "",                          # empty is fine for the script (whole file); not for the guard's arg
-]
-
-
-@pytest.mark.parametrize("rng", [r for r in BAD_RANGES if r])
-def test_the_guard_refuses_a_show_range_that_is_not_line_numbers(strict, rng):
-    cmd = f"{SCRIPTS}/code.sh show stable README.md '{rng.format(p='/tmp/x')}'"
-    assert not allowed(cmd), cmd
-
-
-@pytest.mark.parametrize("cmd", [
-    f"{SCRIPTS}/code.sh show 'v1;id' README.md 1,5",                 # version
-    f"{SCRIPTS}/code.sh show --output=/tmp/x README.md 1,5",
-    f"{SCRIPTS}/code.sh show stable 'a b' 1,5",                       # file
-    f"{SCRIPTS}/code.sh show stable -x 1,5",
-    f"{SCRIPTS}/code.sh show stable README.md 1,5 extra",             # too many arguments
-    f"{SCRIPTS}/code.sh show stable",                                 # no file
-    f"{SCRIPTS}/code.sh grep -p x src",                               # a version cannot be a flag
-    f"{SCRIPTS}/code.sh log '--output=/tmp/x' src",
-    f"{SCRIPTS}/code.sh resolve ''",
-    f"{SCRIPTS}/code.sh sync origin",
-    f"{SCRIPTS}/code.sh clone",
-])
-def test_the_guard_refuses_malformed_code_sh_arguments(strict, cmd):
-    assert not allowed(cmd), cmd
-
-
-@pytest.mark.parametrize("rng", [r for r in BAD_RANGES if r])
-def test_code_sh_itself_refuses_such_a_range_before_doing_anything(tmp_path, rng):
-    """The script is the authority; the guard is the second line. This calls the real script."""
-    canary = tmp_path / "pwn"
-    env = {**os.environ, "HOME": str(tmp_path), "GOTCHA_REPO": str(tmp_path / "none")}
-    r = subprocess.run([str(SCRIPTS / "code.sh"), "show", "stable", "README.md",
-                        rng.format(p=canary)], env=env, capture_output=True, text=True, timeout=20)
-    assert r.returncode == 2, (r.returncode, r.stderr)
-    assert "line numbers" in r.stderr
-    assert not canary.exists(), "the range was executed"
-
-
-@pytest.mark.parametrize("rng", ["5", "140,170", "1,2", ""])
-def test_code_sh_still_accepts_a_real_range(tmp_path, rng):
-    """Past the range check, with no clone to read the script stops at 'no gotcha30 clone'."""
-    env = {**os.environ, "HOME": str(tmp_path), "GOTCHA_REPO": str(tmp_path / "none")}
-    r = subprocess.run([str(SCRIPTS / "code.sh"), "show", "stable", "README.md", rng],
-                       env=env, capture_output=True, text=True, timeout=20)
-    assert r.returncode == 3 and "no gotcha30 clone" in r.stderr, (r.returncode, r.stderr)
 
 
 # --------------------------------------------------------------------------

@@ -105,16 +105,25 @@ offer to; every fix is a step for the PM. If the PM did not say which system and
 than one could match, ask one short question listing the candidates, and stop.
 
 Only the skill's scripts are available here (run_triage.sh, remote_logs.sh, list_systems.sh,
-code.sh). You cannot run your own commands on a site, so skip the skill's targeted follow-ups
-(§5): answer from the triage output and the KB, and when one more check would settle
-it, give that check to the PM as a step with its exact command.
+code.sh), plus read-only text tools to cut their output down. You cannot run your own
+commands on a site, so skip the skill's targeted follow-ups (§5) other than remote_logs.sh
+and code.sh: answer from the triage output, the logs and the KB, and when one more check
+would settle it, give that check to the PM as a step with its exact command.
 
 How to run them, or the command is refused and the try is wasted:
-- One script per Bash call, by its full path: {scripts}/<script> <args>
-- Nothing else on the line: no `cd`, no `&&` or `;`, no pipes (`| head`, `| grep`), no
-  `2>&1`, no redirects. Output comes back whole; do not shorten it.
-- Read KB files and saved triage files with the Read tool, never `cat` or `grep`. To find a
-  case, use the SKILL.md index, then Read the case file under {kb}.
+- Scripts by their full path ({scripts}/<script> <args>), or `cd` into the skill first:
+  `cd <skill> && scripts/<script> <args>`.
+- Several reads may go in one call, joined with `&&` or `;`. Keep only the lines that matter
+  with a pipe: `| grep -iE 'a|b'`, `| head -50`, `| tail -100`, `| wc -l`, `| sort | uniq -c`,
+  `| cut`. `2>&1` is fine. For a big log, `remote_logs.sh <site> <container> all --grep 'REGEX'`
+  searches the whole of it.
+- Put every regex and pattern in single quotes (`--grep 'restarted|returned 500'`); an
+  unquoted `|` is a pipe and `*` a glob, and the command is refused.
+- Nothing else: no redirects to files, no `sed`, `awk`, `xargs`, `tee`, `find`, no
+  `$VARIABLES`, no `$(...)`.
+- KB files and saved triage files: Read them with the Read tool, or `cat` / `grep -ril` them
+  (only inside the skill and the triage folder). To find a case, use the SKILL.md index, then
+  the case file under {kb}.
 """
 
 
@@ -213,6 +222,9 @@ def ensure_workspace_trusted() -> None:
     log.info("marked %s as trusted in %s", WORKSPACE, path)
 
 
+GUARD_PROBE = "/tmp/gotcha-guard-probe"
+
+
 def verify_guard() -> None:
     """Refuse to run unless the Bash guard, started the way Claude Code starts it, blocks a
     command it must and passes one it should. Claude Code runs a command when its hook fails any
@@ -227,9 +239,10 @@ def verify_guard() -> None:
         return subprocess.run(["/bin/sh", "-c", command], input=json.dumps(event), env=env,
                               capture_output=True, text=True, timeout=20)
 
-    blocked = run("rm -rf /")
+    # Never executed, only shown to the guard; harmless all the same, should that ever change.
+    blocked = run(f"touch {GUARD_PROBE}")
     if blocked.returncode != 2:
-        raise SystemExit("the Bash guard did not block `rm -rf /` "
+        raise SystemExit(f"the Bash guard did not block `touch {GUARD_PROBE}` "
                          f"(exit {blocked.returncode}: {blocked.stderr.strip()[:200]}); not starting")
     passed = run(f"{SKILL_DIR}/scripts/list_systems.sh")
     if passed.returncode != 0:

@@ -40,7 +40,7 @@ grep -q 'gotcha-30' <<<"$out" && ! grep -q 'gotcha-3 ' <<<"$out" && ok "gotcha 3
 
 # --- every script parses; remote_logs.sh refuses bad input before it touches the network -----
 for f in "$HERE"/*.sh; do bash -n "$f" 2>/dev/null && ok "parses: $(basename "$f")" || bad "syntax error: $(basename "$f")"; done
-for args in "h" "h 'a;b'" "h dumbo 0" "h dumbo 5001" "h dumbo 10 -f" "h dumbo --grep" "h dumbo 5 x"; do
+for args in "h" "h 'a;b'" "h dumbo 0" "h dumbo all x" "h dumbo 10 -f" "h dumbo --grep" "h dumbo 5 x"; do
   eval "\"$HERE/remote_logs.sh\" $args" >/dev/null 2>&1; [ $? -eq 2 ] && ok "remote_logs refuses: $args" || bad "remote_logs accepted: $args"
 done
 

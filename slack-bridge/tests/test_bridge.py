@@ -31,7 +31,8 @@ def test_the_prompt_says_how_to_run_a_script_so_the_guard_lets_it_through():
     p = B.system_prompt()
     scripts = f"{B.WORKSPACE}/.claude/skills/gotcha-support/scripts"
     assert f"{scripts}/<script>" in p and "{scripts}" not in p and "{kb}" not in p
-    assert "no `cd`" in p and "| head" in p and "Read tool" in p
+    assert "cd <skill> &&" in p and "| head" in p and "Read tool" in p
+    assert "single quotes" in p and "no `cd`" not in p and "no pipes" not in p
 
 
 def test_command_output_reaches_the_model_whole(monkeypatch):
