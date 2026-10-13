@@ -252,6 +252,27 @@ def test_an_unquoted_regex_gets_told_to_quote_it():
         G.check(cmd, WS)
 
 
+def test_grep_options_after_the_regex_get_told_to_use_a_pipe_not_to_quote():
+    """The bot sent this; its regex was quoted, so a quoting hint would have been wrong."""
+    cmd = (f"cd {SKILL} && scripts/remote_logs.sh axon-gotcha-4 dumbo all "
+           "--grep 'Traceback' -A 0 2>&1 | wc -l")
+    with pytest.raises(G.Denied) as e:
+        G.check(cmd, WS)
+    assert "pipe" in str(e.value) and "single quotes" not in str(e.value)
+
+
+def test_the_bot_may_grep_its_own_saved_outputs_but_not_the_transcripts_beside_them():
+    """A command's output too big to return inline is saved under <session>/tool-results/."""
+    saved = G.TOOL_RESULTS_BASE / "24b6cb5d-2e1c-4731-aa93-b0c239d44ce4" / "tool-results"
+    assert allowed(f"grep -n 'AttributeError' {saved}/bfq03jy4d.txt | sort | uniq -c")
+    assert allowed(f"tail -n 500 {saved}/toolu_01WqmGMuV5HzgNENCEX4PFwQ.txt")
+    assert allowed(f"ls {saved}")
+    assert not allowed(f"cat {G.TOOL_RESULTS_BASE}/24b6cb5d-2e1c-4731-aa93-b0c239d44ce4.jsonl")
+    assert not allowed(f"grep -r x {G.TOOL_RESULTS_BASE}")
+    assert not allowed(f"cat {saved}/../../../../.claude.json")
+    assert not allowed(f"cat {G.TOOL_RESULTS_BASE.parent.parent}/.credentials.json")
+
+
 def test_grep_r_with_no_path_searches_the_cwd_which_must_be_readable():
     assert allowed("grep -r 'transmitter'", WS)
     assert not allowed("grep -r password", "/etc")

@@ -359,6 +359,11 @@ to read-only users, before customer access.
      a read is judged on the path it resolves to, so the bridge adds the skill's absolute path
      with `--settings` (`bridge.permission_overlay`), plus absolute denies for secret file names
      inside it;
+   - a command's output comes back whole up to `bashOutputMaxChars` (128,000 characters, the
+     documented maximum). A bigger one comes back as a short preview plus the path of a file
+     Claude Code saved under `~/.claude/projects/<workspace>/<session>/tool-results/`, and the
+     bot may read those folders (and only those: `~/.claude`'s config, credentials and
+     transcripts are denied by name; a wholesale `~/.claude/**` deny would beat the allow);
    - the Slack message goes to `claude` on **stdin**, never as an argument. As an argument, a
      message such as `--allowedTools=Bash` would be parsed as a flag.
 

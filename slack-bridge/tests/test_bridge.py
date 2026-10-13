@@ -454,8 +454,32 @@ def test_the_skill_is_read_through_an_absolute_rule_the_bridge_adds():
     `./**` rule does not cover it. The bridge adds the absolute rule for this machine."""
     assert (B.SKILL_DIR / "SKILL.md").is_file()
     overlay = json.loads(B.permission_overlay())["permissions"]
-    assert overlay["allow"] == [f"Read(//{str(B.SKILL_DIR).lstrip('/')}/**)"]
+    assert overlay["allow"][0] == f"Read(//{str(B.SKILL_DIR).lstrip('/')}/**)"
     assert f"/{B.SKILL_DIR}/**".startswith("//")        # Claude Code's absolute-path form
+
+
+def test_the_bot_may_read_its_own_oversized_outputs_and_nothing_else_of_claudes(monkeypatch):
+    """An output over bashOutputMaxChars comes back as a preview plus a saved file under
+    <config>/projects/<workspace>/<session>/tool-results. That folder is allowed, by the same
+    path the guard uses; the transcripts beside it, and ~/.claude's config, are not."""
+    import bash_guard as G
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/home/gotcha/.claude")
+    monkeypatch.setattr(B, "WORKSPACE", Path("/app/slack-bridge/workspace"))
+    allow = json.loads(B.permission_overlay())["permissions"]["allow"]
+    assert allow[1] == ("Read(//home/gotcha/.claude/projects/-app-slack-bridge-workspace"
+                        "/*/tool-results/**)")
+    assert len(allow) == 2
+    monkeypatch.undo()
+    assert B.tool_results_base() == G.TOOL_RESULTS_BASE
+
+
+def test_claudes_config_is_denied_by_name_not_wholesale():
+    """A wholesale `Read(~/.claude/**)` deny would beat the tool-results allow above."""
+    assert "Read(~/.claude/**)" not in DENY
+    for rule in ("Read(~/.claude.json)", "Read(~/.claude/*.json)",
+                 "Read(~/.claude/projects/**/*.jsonl)"):
+        assert rule in DENY, rule
+    assert SETTINGS["bashOutputMaxChars"] == 128000
 
 
 def test_secret_file_names_are_denied_inside_the_skill_directory_too():

@@ -113,10 +113,16 @@ would settle it, give that check to the PM as a step with its exact command.
 How to run them, or the command is refused and the try is wasted:
 - Scripts by their full path ({scripts}/<script> <args>), or `cd` into the skill first:
   `cd <skill> && scripts/<script> <args>`.
-- Several reads may go in one call, joined with `&&` or `;`. Keep only the lines that matter
-  with a pipe: `| grep -iE 'a|b'`, `| head -50`, `| tail -100`, `| wc -l`, `| sort | uniq -c`,
-  `| cut`. `2>&1` is fine. For a big log, `remote_logs.sh <site> <container> all --grep 'REGEX'`
-  searches the whole of it.
+- Several reads may go in one call, joined with `&&` or `;`. `2>&1` is fine.
+- Read as much as the question needs: there is no line limit, and a full picture beats a
+  quick one. `remote_logs.sh <site> <container> all [--grep 'REGEX']` reads or searches the
+  whole log. Pipes are for removing noise (`| grep -vE 'DEBUG|health'`), finding
+  (`| grep -iE 'a|b'`) and counting (`| wc -l`, `| sort | uniq -c`), not for being brief:
+  never conclude that something did not happen, or when it started, from a short `| head` or
+  `| tail`.
+- An output over about 128,000 characters comes back as a short preview and the path of a
+  file holding all of it ("Output too large ... saved to ..."). Do not work from the preview:
+  Read that file (in parts, with offset and limit), or `grep` / `tail` it.
 - Put every regex and pattern in single quotes (`--grep 'restarted|returned 500'`); an
   unquoted `|` is a pipe and `*` a glob, and the command is refused.
 - Nothing else: no redirects to files, no `sed`, `awk`, `xargs`, `tee`, `find`, no
@@ -137,6 +143,16 @@ SKILL_DIR = (WORKSPACE / ".claude" / "skills" / "gotcha-support").resolve()
 _SECRET_FILES = (".env", ".env.*", "secrets.local.env", "*.pem", "*.key", "id_*")
 
 
+def tool_results_base() -> Path:
+    """Where Claude Code keeps this workspace's sessions: <config dir>/projects/<workspace path
+    with every non-alphanumeric as `-`>. A command's output too big to return inline is saved
+    under <session>/tool-results/ there, and the model gets a preview and the file's path.
+    Keep in step with bash_guard.TOOL_RESULTS_BASE (a test checks)."""
+    d = os.environ.get("CLAUDE_CONFIG_DIR")
+    config = Path(d) if d else Path.home() / ".claude"
+    return config.resolve() / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(WORKSPACE))
+
+
 def permission_overlay() -> str:
     """Read rules that need this machine's absolute paths, passed as --settings JSON.
 
@@ -144,11 +160,13 @@ def permission_overlay() -> str:
     skill in it is a symlink, and a read is judged on the path it resolves to, so the real
     skill directory has to be allowed by its absolute path. The `**/.env` style denies in
     settings.json only match under the workspace, so the same file names are denied here for
-    the skill directory. Everything else on the host stays unreadable. (`//path` is Claude
-    Code's absolute-path form.)"""
+    the skill directory. The bot's own saved outputs (tool-results) are allowed too, and
+    nothing else under Claude Code's config directory: without them, every output over the
+    inline ceiling would be a 2,000-character preview the bot could not read past. Everything
+    else on the host stays unreadable. (`//path` is Claude Code's absolute-path form.)"""
     root = f"/{SKILL_DIR}"
     return json.dumps({"permissions": {
-        "allow": [f"Read({root}/**)"],
+        "allow": [f"Read({root}/**)", f"Read(/{tool_results_base()}/*/tool-results/**)"],
         "deny": [f"Read({root}/**/{name})" for name in _SECRET_FILES]}})
 
 
@@ -181,9 +199,9 @@ def child_env() -> dict[str, str]:
     # The triage must end, with whatever it has, well before the turn is killed: a killed turn
     # answers nothing, a short triage answers with less. Leave the model time to write.
     env.setdefault("GOTCHA_TRIAGE_TIMEOUT", str(max(10, TIMEOUT_S - 12)))
-    # Claude Code cuts the middle out of a command's output past its default (about 10 KB),
-    # which dropped part of a source search once. A triage is about 18 KB and a log read can be
-    # far more; this lets it all through, and Claude Code still says when it has cut.
+    # How much of a command's output Claude Code reads back. settings.json's bashOutputMaxChars
+    # (128000, the inline ceiling as well) takes over from this on Claude Code 2.1.261 and later;
+    # it stays for an older claude, where the default cut part of a source search once.
     env.setdefault("BASH_MAX_OUTPUT_LENGTH", "150000")
     return env
 

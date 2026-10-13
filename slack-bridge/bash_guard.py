@@ -11,8 +11,9 @@ to ask, so this file decides instead. A command may be several segments joined b
   - `tailscale ping <site>`, `tailscale ip [<site>]`, `tailscale version`
   - a read-only text tool to cut output down or read a KB/triage file: grep, head, tail, wc,
     sort, uniq, cut, cat, ls, echo, each with a list of allowed flags, and with every file it
-    names inside READ_ROOTS (the skill, the workspace, the saved triages; what the Read tool
-    may open) and not a secret-looking file
+    names inside READ_ROOTS (the skill, the workspace, the saved triages) or the bot's own
+    saved outputs (TOOL_RESULTS_BASE/<session>/tool-results): what the Read tool may open;
+    and not a secret-looking file
   - `cd <dir>` inside READ_ROOTS, at the start of a list (so it always runs), never in a pipe
 
 Nothing else: no redirect to a file, no `&`, no subshell, no command substitution, no
@@ -44,6 +45,12 @@ TRIAGE_DIR = Path("/tmp/gotcha-triage").resolve()
 # Where the text tools may read: the same places settings.json and bridge.permission_overlay let
 # the Read tool open. Secret-looking names are refused inside them too (the same list as there).
 READ_ROOTS = (SKILL_DIR, WORKSPACE, TRIAGE_DIR)
+# ...and the bot's own outputs that were too big to return inline: Claude Code saves each under
+# <config dir>/projects/<workspace path, non-alphanumerics as `-`>/<session>/tool-results/ and
+# hands the model a preview and the path. Only those folders, not the transcripts beside them.
+# Keep in step with bridge.tool_results_base (a test checks).
+TOOL_RESULTS_BASE = (Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude").resolve()
+                     / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(WORKSPACE)))
 _SECRET_FILES = (".env", ".env.*", "secrets.local.env", "*.pem", "*.key", "id_*")
 _SECRET_DIRS = {".ssh", ".aws", ".config", ".gnupg"}
 
@@ -177,12 +184,21 @@ def _script(first: str, cwd: str) -> str | None:
     return p.name if p.parent == SCRIPTS_DIR else None
 
 
+def _tool_result(p: Path) -> bool:
+    """<TOOL_RESULTS_BASE>/<session>/tool-results, or anything in it."""
+    try:
+        rel = p.relative_to(TOOL_RESULTS_BASE)
+    except ValueError:
+        return False
+    return len(rel.parts) >= 2 and rel.parts[1] == "tool-results" and ".." not in rel.parts
+
+
 def _readable(path: str, cwd: str) -> Path:
     """A file or directory the text tools may read: inside READ_ROOTS, not a secret."""
     p = _resolve(path, cwd)
-    if not any(p == r or r in p.parents for r in READ_ROOTS):
-        raise Denied(f"{path!r} is outside what the bot may read (the skill, its KB and the "
-                     "saved triages)")
+    if not any(p == r or r in p.parents for r in READ_ROOTS) and not _tool_result(p):
+        raise Denied(f"{path!r} is outside what the bot may read (the skill, its KB, the "
+                     "saved triages and its own saved outputs)")
     if any(part in _SECRET_DIRS for part in p.parts) or \
             any(fnmatch.fnmatch(p.name, pat) for pat in _SECRET_FILES):
         raise Denied(f"{path!r} looks like a secret; the bot does not read it")
@@ -394,7 +410,7 @@ def _check_segment(tok: list[str], cwd: str) -> None:
         # <host> <container> [lines|all] [--grep REGEX]; the script validates again and is the
         # authority. Here: shape only, so nothing odd reaches it.
         args = tok[1:]
-        if not 2 <= len(args) <= 5:
+        if len(args) < 2:
             raise Denied("usage: remote_logs.sh <site> <container> [lines|all] [--grep 'REGEX']")
         if not _NAME.fullmatch(args[1]):
             raise Denied("remote_logs.sh: the container is a plain name")
@@ -402,6 +418,9 @@ def _check_segment(tok: list[str], cwd: str) -> None:
         rest = args[2:]
         if rest and (rest[0].isdigit() or rest[0] == "all"):
             rest = rest[1:]
+        if rest[:1] == ["--grep"] and len(rest) > 2:
+            raise Denied("remote_logs.sh: --grep takes one quoted regex and no grep options "
+                         "(-A, -v, -c, ...); filter or add context with a pipe, | grep ...")
         if rest and not (len(rest) == 2 and rest[0] == "--grep"):
             raise Denied("remote_logs.sh: after the container only [lines|all] and "
                          "[--grep 'REGEX'] (one quoted regex)")
@@ -432,6 +451,14 @@ def _grep_like(tok: list[str], cwd: str) -> bool:
     script = _script(tok[0], cwd) if tok else None
     return (script == "remote_logs.sh" and "--grep" in tok) or \
         (script == "code.sh" and tok[1:2] == ["grep"])
+
+
+def _known(tok: list[str], cwd: str) -> bool:
+    """Whether a segment starts with something this file knows how to check."""
+    while tok and re.match(r"^[A-Z_][A-Z0-9_]*=", tok[0]):
+        tok = tok[1:]
+    return bool(tok) and (tok[0] in TOOLS or tok[0] in ("echo", "cd", "tailscale")
+                          or _script(tok[0], cwd) is not None)
 
 
 def check(command: str, cwd: str) -> None:
@@ -478,8 +505,10 @@ def check(command: str, cwd: str) -> None:
                 continue
             _check_segment(tok, cwd)
         except Denied as e:
-            if (after == "|" and _grep_like(tok, cwd)) or \
-                    (before == "|" and _grep_like(segments[n - 1], cwd)):
+            # Only when what follows the `|` is no command at all: then the `|` most likely
+            # belonged to a regex. `--grep 'x' -A 0 | wc -l` is a different mistake.
+            if (after == "|" and _grep_like(tok, cwd) and not _known(segments[n + 1], cwd)) or \
+                    (before == "|" and _grep_like(segments[n - 1], cwd) and not _known(tok, cwd)):
                 raise Denied(f"{e} ({_QUOTE_HINT})")
             raise
 
