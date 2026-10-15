@@ -221,7 +221,7 @@ def test_junk_codes_dont_count_towards_the_lock(raw_client, enrolled):
 
 def test_before_sign_in_the_status_says_only_what_the_form_needs(raw_client, enrolled):
     st = raw_client.get("/api/auth/status").json()
-    assert set(st) == {"who", "enrolled", "logged_in", "stepup_seconds"}
+    assert set(st) == {"who", "enrolled", "logged_in", "stepup_seconds", "edit_seconds"}
     _login(raw_client, enrolled)
     st = raw_client.get("/api/auth/status").json()
     assert st["role"] == "viewer" and st["passkeys"] == 0 and "stepup_until" in st

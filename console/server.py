@@ -20,7 +20,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, StrictInt
+from pydantic import BaseModel, StrictFloat, StrictInt
 
 from console import access, auth, conversations, kb, ops, passkeys, secrets_env, sites
 from console.settings import S
@@ -138,10 +138,12 @@ def _auth_status(request: Request) -> dict:
     a request with a forged header alone learns no more than whether a login is set up."""
     s = request.state.session
     out = {"who": request.state.who, "enrolled": auth.enrolled(request.state.who),
-           "logged_in": s is not None, "stepup_seconds": S.stepup_seconds}
+           "logged_in": s is not None, "stepup_seconds": S.stepup_seconds,
+           "edit_seconds": S.edit_seconds}
     if s is not None:
         out.update(role=request.state.role, passkeys=passkeys.count(request.state.who),
-                   stepup_until=s["stepup_until"] if auth.stepup_ok(s) else None)
+                   stepup_until=s["stepup_until"] if auth.stepup_ok(s) else None,
+                   edit_until=s["edit_until"] if auth.edit_ok(s) else None)
     return out
 
 
@@ -314,18 +316,24 @@ def restart_bot(request: Request):
 # Access: each system's categories and components, and their fields and secrets
 # --------------------------------------------------------------------------
 # Reading is for everyone signed in, and never includes a password. Every change, and every
-# reveal, is an admin's, confirmed with a code or passkey, and audited without values.
+# reveal, is an admin's and audited without values. A reveal needs a step-up; a change needs a
+# code or passkey, except that one unlocks further changes for CONSOLE_EDIT_SECONDS (not
+# deletes, which always need one).
 
-class SystemAdd(Code):
-    name: str
-    site: str = ""
-    description: str = ""
-
-
-class SystemEdit(Code):
-    name: str | None = None
+class SystemFields(Code):
     site: str | None = None
     description: str | None = None
+    latitude: StrictInt | StrictFloat | str | None = None
+    longitude: StrictInt | StrictFloat | str | None = None
+    altitude: StrictInt | StrictFloat | str | None = None
+
+
+class SystemAdd(SystemFields):
+    name: str
+
+
+class SystemEdit(SystemFields):
+    name: str | None = None
 
 
 class ComponentFields(Code):
@@ -340,6 +348,24 @@ class ComponentFields(Code):
     clear_password: bool = False
     fields: dict[str, str] | None = None                 # the whole set of plain extra fields
     secret_fields: dict[str, str | None] | None = None   # name -> new value, or null to remove
+    # a sensor
+    version: str | None = None
+    gui: str | None = None
+    gui_password: str | None = None
+    azimuth: StrictInt | StrictFloat | str | None = None
+    elevation: StrictInt | StrictFloat | str | None = None
+    fov_from: StrictInt | StrictFloat | str | None = None
+    fov_to: StrictInt | StrictFloat | str | None = None
+    range: StrictInt | StrictFloat | str | None = None
+    # a computer
+    model: str | None = None
+    sensor: str | None = None
+    web: str | None = None
+    web_password: str | None = None
+    rustdesk_ip: str | None = None
+    rustdesk_password: str | None = None
+    users: dict[str, str | None] | None = None   # name -> new password, "" keep, null remove
+    clear: list[str] | None = None               # fixed passwords to remove, e.g. ["gui_password"]
 
 
 class ComponentAdd(ComponentFields):
@@ -361,83 +387,111 @@ def _access_error(e: "access.AccessError") -> HTTPException:
     return HTTPException(status, str(e))
 
 
-def _access_change(request: Request, req: Code, action: str, target: str, fn):
+def _access_change(request: Request, req: Code, action: str, target: str, fn, *,
+                   system: str | None = None, component: str | None = None, window: bool = True):
+    """Check the change (before the code is spent), the admin and the code, then make it.
+
+    One code (or passkey) opens a short window for further System access edits, so setting up
+    a system's components doesn't take a new code for each one. A code sent anyway is still
+    checked, and extends the window. A delete (window=False) always takes its own code.
+    Returns what `fn` returns, and how the change was confirmed: code, passkey or edit-window."""
     require_admin(request, f"{action} {target}")
     try:
         changes = _changes(req)
-        fields_now = (access.current_fields(*target.split("/", 1))
-                      if "fields" in changes and "/" in target else None)
-        access.precheck(changes, fields_now)
+        fields_now = access.current_fields(system, component) if "fields" in changes and component else None
+        coords_now = access.current_coords(system) if system and not component else None
+        access.precheck(changes, fields_now, coords_now)
     except access.AccessError as e:  # a typo shouldn't use up the admin's code
         raise _access_error(e) from None
-    check_code(request, req.code, action, target, req.passkey)
+    session = request.state.session
+    if window and auth.edit_ok(session) and not req.code and not req.passkey:
+        how = "edit-window"
+    else:
+        how = check_code(request, req.code, action, target, req.passkey)
     try:
-        return fn()
+        result = fn()
     except access.AccessError as e:
         raise _access_error(e) from None
+    if how != "edit-window":
+        auth.grant_edit(session)  # only once a change has gone through
+    return result, how
+
+
+def _access_out(request: Request, **extra) -> dict:
+    """What every System access route answers: the systems, and the editing window."""
+    s = request.state.session
+    return {**extra, **access.listing(), "can_edit": request.state.role == "admin",
+            "edit_until": s["edit_until"] if auth.edit_ok(s) else None}
 
 
 @app.get("/api/access")
 def list_access(request: Request):
-    return {**access.listing(), "can_edit": request.state.role == "admin"}
+    return _access_out(request)
 
 
 @app.post("/api/access/system")
 def add_system(req: SystemAdd, request: Request):
-    name = _access_change(request, req, "add-system", req.name, lambda: access.add_system(
-        req.name, request.state.who, req.site, req.description))
-    audit(request, "add-system", name)
-    return {"status": "saved", **access.listing()}
+    name, how = _access_change(request, req, "add-system", req.name, lambda: access.add_system(
+        req.name, request.state.who, {k: v for k, v in _changes(req).items() if k != "name"}))
+    audit(request, "add-system", name, method=how)
+    return _access_out(request, status="saved")
 
 
 @app.put("/api/access/system/{system}")
 def edit_system(system: str, req: SystemEdit, request: Request):
-    changed = _access_change(request, req, "edit-system", system, lambda: access.edit_system(
-        system, request.state.who, _changes(req)))
+    changed, how = _access_change(request, req, "edit-system", system, lambda: access.edit_system(
+        system, request.state.who, _changes(req)), system=system)
     if changed:
-        audit(request, "edit-system", system, fields=changed,
+        audit(request, "edit-system", system, fields=changed, method=how,
               **({"to": req.name.strip()} if "name" in changed else {}))
-    return {"status": "saved" if changed else "unchanged", "changed": changed, **access.listing()}
+    return _access_out(request, status="saved" if changed else "unchanged", changed=changed)
 
 
 @app.delete("/api/access/system/{system}")
 def delete_system(system: str, req: Code, request: Request):
-    n = _access_change(request, req, "delete-system", system, lambda: access.delete_system(system))
-    audit(request, "delete-system", system, components=n)
-    return {"status": "deleted", **access.listing()}
+    n, how = _access_change(request, req, "delete-system", system, lambda: access.delete_system(system),
+                            system=system, window=False)
+    audit(request, "delete-system", system, components=n, method=how)
+    return _access_out(request, status="deleted")
 
 
 @app.post("/api/access/system/{system}/component")
 def add_component(system: str, req: ComponentAdd, request: Request):
     target = f"{system}/{req.name}"
-    changed = _access_change(request, req, "add-component", target, lambda: access.add_component(
-        system, req.name, request.state.who, {k: v for k, v in _changes(req).items() if k != "name"}))
-    audit(request, "add-component", target, fields=changed)
-    return {"status": "saved", "changed": changed, **access.listing()}
+    changed, how = _access_change(request, req, "add-component", target, lambda: access.add_component(
+        system, req.name, request.state.who, {k: v for k, v in _changes(req).items() if k != "name"}),
+        system=system, component=req.name)
+    audit(request, "add-component", target, fields=changed, method=how)
+    return _access_out(request, status="saved", changed=changed)
 
 
 @app.put("/api/access/system/{system}/component/{component}")
 def edit_component(system: str, component: str, req: ComponentEdit, request: Request):
     target = f"{system}/{component}"
-    changed = _access_change(request, req, "edit-component", target, lambda: access.edit_component(
-        system, component, request.state.who, _changes(req)))
+    changed, how = _access_change(request, req, "edit-component", target, lambda: access.edit_component(
+        system, component, request.state.who, _changes(req)), system=system, component=component)
     if changed:
-        audit(request, "edit-component", target, fields=changed,
+        audit(request, "edit-component", target, fields=changed, method=how,
               **({"to": req.name.strip()} if "name" in changed else {}))
-    return {"status": "saved" if changed else "unchanged", "changed": changed, **access.listing()}
+    return _access_out(request, status="saved" if changed else "unchanged", changed=changed)
 
 
 @app.delete("/api/access/system/{system}/component/{component}")
 def delete_component(system: str, component: str, req: Code, request: Request):
     target = f"{system}/{component}"
-    _access_change(request, req, "delete-component", target,
-                   lambda: access.delete_component(system, component))
-    audit(request, "delete-component", target)
-    return {"status": "deleted", **access.listing()}
+    _, how = _access_change(request, req, "delete-component", target,
+                            lambda: access.delete_component(system, component),
+                            system=system, component=component, window=False)
+    audit(request, "delete-component", target, method=how)
+    return _access_out(request, status="deleted")
 
 
 class RevealReq(BaseModel):
-    field: str | None = None   # a secret field's name; none for the SSH password
+    """Which secret: a secret extra field, a fixed password, a user's password, or (none of
+    them) the SSH password."""
+    field: str | None = None
+    slot: str | None = None    # gui_password, web_password, rustdesk_password
+    user: str | None = None
 
 
 @app.post("/api/access/system/{system}/component/{component}/reveal")
@@ -448,13 +502,15 @@ def reveal_access(system: str, component: str, req: RevealReq, request: Request)
     if not auth.stepup_ok(request.state.session):
         raise HTTPException(403, "stepup")
     try:
-        value = access.secret(system, component, req.field)
+        value = access.secret(system, component, req.field, req.slot, req.user)
     except access.AccessError as e:
         raise _access_error(e) from None
     if value is None:
         raise HTTPException(404, f"{target} has no value set")
-    audit(request, "reveal-access", target, field=req.field or "ssh password")
-    return JSONResponse({"system": system, "component": component, "field": req.field, "value": value},
+    # Named as the page and `changed` name it: a field, a slot, user:<name>, or password (SSH).
+    which = req.field or req.slot or (f"user:{req.user}" if req.user else "password")
+    audit(request, "reveal-access", target, field=which)
+    return JSONResponse({"system": system, "component": component, "which": which, "value": value},
                         headers={"Cache-Control": "no-store", "Pragma": "no-cache"})
 
 

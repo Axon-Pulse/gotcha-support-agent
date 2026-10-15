@@ -221,6 +221,7 @@ def new_session(who: str) -> str:
     now = _now()
     with _SLOCK:
         SESSIONS[token] = {"who": who, "created": now, "last_seen": now, "stepup_until": 0,
+                           "edit_until": 0,
                            "enrolled": _load().get(who, {}).get("created")}
     return token
 
@@ -259,6 +260,15 @@ def grant_stepup(session: dict) -> float:
 
 def stepup_ok(session: dict | None) -> bool:
     return bool(session) and _now() < session["stepup_until"]
+
+
+def grant_edit(session: dict) -> None:
+    """Open (or extend) the window in which System access edits need no further code."""
+    session["edit_until"] = _now() + S.edit_seconds
+
+
+def edit_ok(session: dict | None) -> bool:
+    return bool(session) and _now() < session["edit_until"]
 
 
 # --------------------------------------------------------------------------

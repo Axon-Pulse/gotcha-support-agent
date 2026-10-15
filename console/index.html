@@ -9,10 +9,12 @@
       --sh1:0 1px 2px rgba(20,20,18,.06),0 1px 3px rgba(20,20,18,.05);
       --sh2:0 6px 16px rgba(20,20,18,.10),0 2px 5px rgba(20,20,18,.07);
       --tint:rgba(47,95,208,.09);--tint-w:rgba(154,106,0,.11);--ring:rgba(47,95,208,.28);
-      --bar:#2f5fd0;--grid:#ececE8}
+      --bar:#2f5fd0;--grid:#ececE8;
+      --radar:#5f7896;--camera:#6b8560;--acoustic:#7e6b94;--hub:#7d8a52}
 @media(prefers-color-scheme:dark){:root{--bg:#16171a;--fg:#e8e8e4;--dim:#9a9a94;--line:#2c2e33;
       --card:#1d1f23;--sunk:#141518;--ok:#5fd39b;--warn:#e0b050;--bad:#f08a8a;--accent:#7aa2f7;
       --sh1:0 1px 2px rgba(0,0,0,.4);--sh2:0 6px 18px rgba(0,0,0,.5);
+      --radar:#7f96b2;--camera:#8fa383;--acoustic:#9c8bb0;--hub:#A4B27C;
       --tint:rgba(122,162,247,.14);--tint-w:rgba(224,176,80,.14);--ring:rgba(122,162,247,.4);
       --bar:#7aa2f7;--grid:#26282d}}
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
@@ -160,10 +162,23 @@ svg.chart g.col:hover .hit{fill:var(--tint)}
 .secretval{font-family:var(--mono);font-size:12.5px;word-break:break-all;user-select:all;background:var(--sunk);
   border-radius:5px;padding:2px 6px}
 .masked{font-family:var(--mono);color:var(--dim);letter-spacing:.1em}
-details.sys>summary{cursor:pointer;display:flex;gap:8px;align-items:center;flex-wrap:wrap;list-style:none;font-size:13.5px}
-details.sys>summary::-webkit-details-marker{display:none}
-details.sys>summary::before{content:'▸';color:var(--dim);transition:transform var(--t)}
-details.sys[open]>summary::before{transform:rotate(90deg)}
+label.fld{display:inline-flex;flex-direction:column;gap:2px}
+label.fld>span{font-size:11px;color:var(--dim)}
+.tw-plan{display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 0}
+.tw-plan svg{background:radial-gradient(circle,var(--tint) 0,transparent 55%);max-width:100%;height:auto}
+.tw-ring{fill:none;stroke:var(--dim);stroke-opacity:.35}
+.tw-scale{font:10px var(--mono);fill:var(--dim)}
+.tw-label{font:10px var(--mono);fill:var(--fg);opacity:.8}
+.tw-hub{fill:var(--hub)}
+.tw-key{display:inline-block;width:10px;height:10px;border-radius:2px;vertical-align:-1px}
+.tw-north line{stroke:var(--dim);stroke-width:1.5}.tw-north path{fill:var(--dim)}
+.tw-north text{font:10px var(--mono);fill:var(--dim)}
+details.sys>summary,details.cat>summary{cursor:pointer;display:flex;gap:8px;align-items:center;flex-wrap:wrap;list-style:none}
+details.sys>summary{font-size:13.5px}
+details.sys>summary::-webkit-details-marker,details.cat>summary::-webkit-details-marker{display:none}
+details.sys>summary::before,details.cat>summary::before{content:'▸';color:var(--dim);transition:transform var(--t)}
+details.sys[open]>summary::before,details.cat[open]>summary::before{transform:rotate(90deg)}
+details.cat{margin-top:10px}
 </style></head><body><div class="wrap">
 
 <header class="top">
@@ -371,9 +386,13 @@ async function passkeyAnswer(purpose){
   return credJSON(c);
 }
 async function loginPasskey(){
+  const msg=$('#login-msg'), btn=$('#login-pk');
+  msg.textContent='Waiting for your passkey: look for the browser’s prompt (or your phone)…'; btn.disabled=true;
   try{ const passkey=await passkeyAnswer('login');
     await api('/auth/login',{method:'POST',body:{passkey}}); location.reload(); }
-  catch(e){ $('#login-msg').textContent=e.name==='NotAllowedError'?'Cancelled.':e.message; }
+  catch(e){ msg.textContent=e.name==='NotAllowedError'
+    ?'No passkey was given (cancelled, timed out, or none for this address). Try again or use a code.':e.message; }
+  finally{ btn.disabled=false; }
 }
 // A second factor for one action: {code}, {passkey}, or null if cancelled. The code dialog,
 // with a "Use passkey" button when this user has one and the page allows it.
@@ -1126,18 +1145,52 @@ async function restartNow(){
 }
 
 // ================================================================== Access
-// Each system has the same four categories (Radars, Acoustics, Cameras, Compute &
-// Infrastructure); which components are in each, and what is known about each one, varies.
-// Everyone signed in sees names, categories and plain fields; an admin reveals a secret (an SSH
-// password or a secret extra field) after a code, and adds, edits or deletes with a code (or
-// passkey) on every change. Written field by field to systems_inventory.yaml and
-// secrets.local.env at the repo root: there is no way to read or write the whole file here.
+// Each system has the same four categories. A sensor (radar, acoustic, camera) has a version,
+// IP and port, a GUI with its password, and where it points (azimuth, elevation). Compute &
+// infrastructure keeps its SSH access, and a computer adds its model, the sensor it serves, a
+// web address and RustDesk with their passwords, and its users, each with a password. Every
+// component can carry extra fields too. Everyone signed in sees names and plain values; an
+// admin reveals a secret after a code, and changes things with a code (or passkey), after
+// which editing stays unlocked for a few minutes. Written field by field to
+// systems_inventory.yaml and secrets.local.env: there is no way to read or write the file whole.
 var ACC={systems:[],categories:[],can_edit:false,inventory_file:true,error:null,
-  reveal:{},timers:{},form:null,fresh:false,rows:[],cells:{},open:new Set()};   // open: systems expanded
-// A secret's key: "system/component" for the SSH password, "system/component#field" for a field.
-const akey=(s,c,f)=>s+'/'+c+(f?'#'+f:'');
+  reveal:{},timers:{},form:null,fresh:false,rows:[],users:[],cells:{},
+  open:new Set(),openCats:new Set(),   // systems, and "system/category"s, expanded
+  towerView:new Set()};                // systems whose tower view is shown
+const SENSOR_CATS=['radars','acoustics','cameras'];
+const isSensorCat=k=>SENSOR_CATS.includes(k);
+// A secret is named by "which": '' for the SSH password, 'field:<name>', 'slot:<gui_password|
+// web_password|rustdesk_password>' or 'user:<name>'. Its key is "system/component#which".
+const akey=(s,c,which)=>s+'/'+c+(which?'#'+which:'');
+const splitWhich=which=>{ const i=which.indexOf(':'); return [which.slice(0,i),which.slice(i+1)]; };
+function whichBody(which){
+  if(!which) return {};
+  const [kind,name]=splitWhich(which);
+  return kind==='field'?{field:name}:kind==='slot'?{slot:name}:{user:name};
+}
+function secretIsSet(c,which){
+  if(!which) return c.has_password;
+  const [kind,name]=splitWhich(which);
+  if(kind==='slot') return c['has_'+name];
+  const list=kind==='field'?c.secret_fields:c.users;
+  return !!(list.find(x=>x.name===name)||{}).set;
+}
 function accessState(r){ ACC.systems=r.systems; ACC.inventory_file=r.inventory_file; ACC.error=r.error||null;
-  if(r.categories) ACC.categories=r.categories; if('can_edit' in r) ACC.can_edit=r.can_edit; }
+  if(r.categories) ACC.categories=r.categories; if('can_edit' in r) ACC.can_edit=r.can_edit;
+  if('edit_until' in r&&AUTH){ AUTH.edit_until=r.edit_until; watchEditWindow(); } }
+// After one code, System access edits go without one for a few minutes (the server decides).
+const editActive=()=>!!(AUTH&&AUTH.edit_until&&AUTH.edit_until*1000>Date.now());
+const editMins=()=>Math.max(1,Math.round((AUTH.edit_until*1000-Date.now())/60000));
+const editBadge=()=>`<span class="badge ok" title="Your last code unlocked editing; changes are still audited">editing unlocked · ${editMins()} min</span>`;
+var EDIT_TIMER=null;
+// When the window ends, show the code box again (and the badge goes).
+function watchEditWindow(){
+  clearTimeout(EDIT_TIMER);
+  if(editActive()) EDIT_TIMER=setTimeout(()=>{ if(TAB==='secrets') renderAccess(); }, AUTH.edit_until*1000-Date.now()+500);
+}
+function endEditWindow(){ if(AUTH) AUTH.edit_until=null; renderAccess(); }
+// In the System access forms: the code box, or, inside the window, a note that none is needed.
+const accessCode=()=>editActive()?editBadge():codeInput('af-code');
 function findComp(sys,comp){
   const s=ACC.systems.find(x=>x.name===sys); if(!s) return null;
   for(const cat of s.categories){ const c=cat.components.find(x=>x.name===comp); if(c) return {s,c,cat:cat.key}; }
@@ -1146,40 +1199,72 @@ function findComp(sys,comp){
 const codeInput=id=>`<input id="${id}" class="mono" placeholder="${PK_OK&&AUTH&&AUTH.passkeys?'code (empty: passkey)':'6-digit code'}"
   title="The code from your authenticator app${PK_OK&&AUTH&&AUTH.passkeys?', or leave empty to use your passkey':''}"
   inputmode="numeric" autocomplete="one-time-code" maxlength="9" style="width:200px">`;
+// A web address as a link: one without http(s):// opens as http.
+const webLink=u=>u?`<a href="${esc(/^https?:\/\//i.test(u)?u:'http://'+u)}" target="_blank" rel="noopener noreferrer" class="mono">${esc(u)}</a>`:'';
 
 // ------------------------------------------------------------------ a secret's cell
-function secretCell(k,isSet,sys,comp,field){
+function secretCell(k,isSet,sys,comp,which){
   const shown=ACC.reveal[k];
   if(shown!==undefined) return `<span class="secretval">${esc(shown)}</span>
     <button class="sm" onclick="hideAccess('${jsq(k)}')">hide</button>`;
   if(!isSet) return '<span class="dim">—</span>';
-  return `<span class="masked">••••••••</span>${ACC.can_edit?` <button class="sm" onclick="revealAccess('${jsq(sys)}','${jsq(comp)}',${field?`'${jsq(field)}'`:'null'})">reveal</button>`:''}`;
+  return `<span class="masked">••••••••</span>${ACC.can_edit?` <button class="sm" onclick="revealAccess('${jsq(sys)}','${jsq(comp)}','${jsq(which||'')}')">reveal</button>`:''}`;
+}
+// A secret in its own span, so it can be redrawn alone.
+function secretSpan(s,c,which,id){
+  const k=akey(s.name,c.name,which); ACC.cells[k]=id;
+  return `<span id="${id}">${secretCell(k,secretIsSet(c,which),s.name,c.name,which)}</span>`;
 }
 // Redraw one secret's cell without touching an open form (a reveal ending mustn't wipe it).
 function paintSecret(k){
   const id=ACC.cells[k], cell=id&&document.getElementById(id);
-  const [path,field]=k.split('#'), [sys,...rest]=path.split('/'), comp=rest.join('/');
+  const h=k.indexOf('#'), path=h<0?k:k.slice(0,h), which=h<0?'':k.slice(h+1);   // see akey
+  const [sys,...rest]=path.split('/'), comp=rest.join('/');
   const f=findComp(sys,comp);
   if(!cell||!f){ if(!ACC.form) renderAccess(); return; }   // its row is the open edit form
-  const isSet=field?(f.c.secret_fields.find(x=>x.name===field)||{}).set:f.c.has_password;
-  cell.innerHTML=secretCell(k,isSet,sys,comp,field||null);
+  cell.innerHTML=secretCell(k,secretIsSet(f.c,which),sys,comp,which);
 }
 
 // ------------------------------------------------------------------ forms
-const SYS_FIELDS=[['name','name'],['site','location'],['description','description']];
-const COMP_FIELDS=[['name','name'],['type','type / model'],['role','role'],['scheme','scheme'],
+const SYS_FIELDS=[['name','name'],['site','location'],['description','description'],
+  ['latitude','latitude'],['longitude','longitude'],['altitude','altitude m']];
+const SENSOR_FIELDS=[['name','name'],['version','version'],['address','IP'],['port','port'],
+  ['gui','GUI address'],['azimuth','azimuth °'],['elevation','elevation °'],
+  ['fov_from','FOV from °'],['fov_to','FOV to °'],['range','range m']];
+
+const COMP_FIELDS=[['name','name'],['type','type'],['role','role'],['scheme','scheme'],
   ['address','IP or host'],['port','port'],['user','SSH user']];
+const PC_FIELDS=[['model','model'],['web','web address'],['rustdesk_ip','RustDesk IP']];
+// Every input a form may have, kept as typed when the form is redrawn.
+const KEEP_IDS=[...new Set([...SYS_FIELDS,...SENSOR_FIELDS,...COMP_FIELDS,...PC_FIELDS].map(([k])=>k)),
+  'code','category','sensor','user','scheme','pw','guipw','webpw','rdpw'];
+const KEEP_CHECKS=['clear','clear-gui','clear-web','clear-rd'];
+const MONO=new Set(['name','address','port','user','gui','web','rustdesk_ip','version','azimuth','elevation',
+  'fov_from','fov_to','range','latitude','longitude','altitude']);
+const WIDTH={port:'80px',scheme:'90px',azimuth:'100px',elevation:'100px',gui:'220px',web:'220px',
+  fov_from:'90px',fov_to:'90px',range:'90px',site:'180px',description:'320px',latitude:'130px',longitude:'130px',altitude:'100px'};
+const NUMERIC=new Set(['port','azimuth','elevation','fov_from','fov_to','range','latitude','longitude','altitude']);
+// Each box with its name above it: a filled box no longer shows its placeholder.
+const fld=(label,inner)=>`<label class="fld"><span>${esc(label)}</span>${inner}</label>`;
+const inputs=(fields,v)=>fields.map(([k,label])=>fld(label,`<input id="af-${k}" class="${MONO.has(k)?'mono':''}"
+  placeholder="${label}" value="${esc(v[k]??'')}" autocomplete="off" style="width:${WIDTH[k]||'140px'}"
+  ${NUMERIC.has(k)?'inputmode="decimal"':''}>`)).join('');
+// A password box, with "remove" when one is set.
+const pwBox=(id,clearId,isSet,label)=>fld(label+(isSet?' · set':''),`<input type="password" id="af-${id}" autocomplete="new-password" style="width:260px"
+    placeholder="${isSet?`new ${label} (empty = keep)`:`${label} (optional)`}">`)+`
+  <button class="sm" onclick="const i=$('#af-${id}');i.type=i.type==='password'?'text':'password'">show</button>
+  ${isSet?`<label class="note"><input type="checkbox" id="af-${clearId}"> remove</label>`:''}`;
+const catSelect=cat=>fld('category',`<select id="af-category">${ACC.categories.map(x=>`<option value="${esc(x.key)}" ${x.key===cat?'selected':''}>${esc(x.label)}</option>`).join('')}</select>`);
 function sysForm(s){
   const v=s||{}, n=s?s.categories.reduce((a,c)=>a+c.components.length,0):0;
   return `<div class="card" style="background:var(--sunk)"><h3>${s?`Edit system ${esc(s.name)}`:'Add a system'}</h3>
-    <div class="row">
-      ${SYS_FIELDS.map(([k,label])=>`<input id="af-${k}" placeholder="${label}" value="${esc(v[k]??'')}"
-        autocomplete="off" style="width:${k==='description'?'320px':'180px'}">`).join('')}
-    </div>
-    <div class="row" style="margin-top:8px">${codeInput('af-code')}
+    <div class="row">${inputs(SYS_FIELDS.slice(0,3),v)}</div>
+    <div class="row" style="margin-top:6px">${inputs(SYS_FIELDS.slice(3),v)}
+      <span class="note">Where the system stands: decimal degrees (e.g. 32.6619, 35.0102). Both or neither.</span></div>
+    <div class="row" style="margin-top:8px">${accessCode()}
       <button class="go" onclick="saveSystem(${s?`'${jsq(s.name)}'`:'null'})">Save</button>
       <button class="sm" onclick="closeForm()">Cancel</button>
-      ${s?`<button class="sm no grow" onclick="deleteSystem('${jsq(s.name)}')">delete system</button>`:''}
+      ${s?`<button class="sm no" onclick="deleteSystem('${jsq(s.name)}')">delete system</button>`:''}
     </div>
     ${s?`<p class="hint">Deleting removes the system, its ${n} component(s) and the secrets only they hold.</p>`:''}
   </div>`;
@@ -1195,6 +1280,10 @@ function fieldRows(){
       <button class="sm no" onclick="syncRows();ACC.rows[${i}].removed=true;renderAccess()">remove</button>
     </div>`).join('');
 }
+const extraFields=()=>`<div style="margin-top:8px"><span class="note">Extra fields — only what this component has. Tick <b>secret</b> for anything sensitive: it's kept hidden like a password.</span>
+    ${fieldRows()}
+    <div class="row" style="margin-top:4px"><button class="sm" onclick="syncRows();ACC.rows.push({name:'',value:'',secret:false});renderAccess()">+ add field</button></div>
+  </div>`;
 // Switching a row between plain and secret drops what was typed in it, so a secret never ends
 // up redrawn in a plain text box.
 function toggleSecret(i,on){
@@ -1207,63 +1296,182 @@ function syncRows(){
     const n=$('#ff-n-'+i), v=$('#ff-v-'+i);
     if(n&&typeof n.value==='string'&&!(r.existing&&r.secret)) r.name=n.value;
     if(v&&typeof v.value==='string') r.value=v.value; });
+  ACC.users.forEach((u,i)=>{ if(u.removed) return;
+    const n=$('#uu-n-'+i), p=$('#uu-p-'+i);
+    if(n&&typeof n.value==='string'&&!u.existing) u.name=n.value;
+    if(p&&typeof p.value==='string') u.pw=p.value; });
+}
+// A computer's users, each with its own password; an existing user's name stays as it is.
+function userRows(){
+  return ACC.users.map((u,i)=>u.removed?'':`<div class="row" style="margin-top:4px">
+      <input id="uu-n-${i}" class="mono" placeholder="user name" value="${esc(u.name)}" ${u.existing?'disabled':''} style="width:160px" autocomplete="off">
+      <input id="uu-p-${i}" type="password" autocomplete="new-password" style="width:260px"
+        placeholder="${u.existing&&u.isSet?'new password (empty = keep)':'password'}">
+      <button class="sm no" onclick="syncRows();ACC.users[${i}].removed=true;renderAccess()">remove</button>
+    </div>`).join('');
+}
+// What a sensor of this category covers when it says nothing, as the server tells it.
+function coverageHint(cat){
+  const c=(ACC.categories.find(x=>x.key===cat)||{}).coverage;
+  if(!c) return '';
+  return `${c.to-c.from>=360?'all round':c.from===-c.to?`±${c.to}°`:`${c.from}° to ${c.to}°`} · ${c.range} m`;
+}
+// A sensor written with SSH access (older inventories) keeps it reachable here.
+const sensorHasSsh=v=>!!(v&&(v.user||v.has_password||v.scheme));
+const SENSOR_SSH_FIELDS=[['scheme','scheme'],['user','SSH user']];
+function sensorForm(s,c,cat){
+  const v=c||{};
+  return `<tr><td colspan="7">
+    <div class="row">${inputs(SENSOR_FIELDS.slice(0,4),v)} ${catSelect(cat)}</div>
+    <div class="row" style="margin-top:6px">${inputs(SENSOR_FIELDS.slice(4,5),v)} ${pwBox('guipw','clear-gui',v.has_gui_password,'GUI password')}</div>
+    <div class="row" style="margin-top:6px">${inputs(SENSOR_FIELDS.slice(5),v)}
+      <span class="note">Azimuth: where it points, 0 = north, clockwise. FOV: degrees either side of that;
+        empty means ${esc(coverageHint(cat))}.</span></div>
+    ${sensorHasSsh(v)?`<div class="row" style="margin-top:6px">${inputs(SENSOR_SSH_FIELDS,v)} ${pwBox('pw','clear',v.has_password,'SSH password')}</div>`:''}
+    ${extraFields()}
+    ${formButtons(s,c)}</td></tr>`;
 }
 function compForm(s,c,cat){
   const v=c||{};
-  return `<tr><td colspan="6"><div class="row">
-      ${COMP_FIELDS.map(([k,label])=>`<input id="af-${k}" class="${['address','port','user','name'].includes(k)?'mono':''}"
-        placeholder="${label}" value="${esc(v[k]??'')}" autocomplete="off"
-        ${k==='port'?'inputmode="numeric" style="width:80px"':k==='scheme'?'style="width:90px"':'style="width:140px"'}>`).join('')}
-      <select id="af-category">${ACC.categories.map(x=>`<option value="${esc(x.key)}" ${x.key===cat?'selected':''}>${esc(x.label)}</option>`).join('')}</select>
-    </div>
-    <div class="row" style="margin-top:6px">
-      <input type="password" id="af-pw" placeholder="${v.has_password?'new SSH password (empty = keep)':'SSH password (optional)'}" autocomplete="new-password" style="width:240px">
-      <button class="sm" onclick="const i=$('#af-pw');i.type=i.type==='password'?'text':'password'">show</button>
-      ${v.has_password?'<label class="note"><input type="checkbox" id="af-clear"> remove SSH password</label>':''}
-    </div>
-    <div style="margin-top:8px"><span class="note">Extra fields — only what this component has. Tick <b>secret</b> for anything sensitive (passwords, keys, communities): it's kept hidden like a password.</span>
-      ${fieldRows()}
-      <div class="row" style="margin-top:4px"><button class="sm" onclick="syncRows();ACC.rows.push({name:'',value:'',secret:false});renderAccess()">+ add field</button></div>
-    </div>
-    <div class="row" style="margin-top:8px">${codeInput('af-code')}
-      <button class="go" onclick="saveComponent('${jsq(s.name)}',${c?`'${jsq(c.name)}'`:'null'})">Save</button>
-      <button class="sm" onclick="closeForm()">Cancel</button>
-      ${c?`<button class="sm no grow" onclick="deleteComponent('${jsq(s.name)}','${jsq(c.name)}')">delete component</button>`:''}
-    </div></td></tr>`;
+  const sensors=s.categories.filter(x=>isSensorCat(x.key)).flatMap(x=>x.components.map(y=>y.name));
+  return `<tr><td colspan="7">
+    <div class="row">${inputs(COMP_FIELDS,v)} ${catSelect(cat)}</div>
+    <div class="row" style="margin-top:6px">${pwBox('pw','clear',v.has_password,'SSH password')}</div>
+    <div style="margin-top:10px"><b>Computer</b> <span class="note">— leave empty for a switch or anything that isn't one</span></div>
+    <div class="row" style="margin-top:4px">${inputs(PC_FIELDS,v)}
+      ${fld('serves sensor',`<select id="af-sensor"><option value="">none</option>
+        ${sensors.map(n=>`<option value="${esc(n)}" ${v.sensor===n?'selected':''}>${esc(n)}</option>`).join('')}</select>`)}</div>
+    <div class="row" style="margin-top:6px">${pwBox('webpw','clear-web',v.has_web_password,'web password')}</div>
+    <div class="row" style="margin-top:6px">${pwBox('rdpw','clear-rd',v.has_rustdesk_password,'RustDesk password')}</div>
+    <div style="margin-top:6px"><span class="note">Users</span>${userRows()}
+      <div class="row" style="margin-top:4px"><button class="sm" onclick="syncRows();ACC.users.push({name:'',pw:''});renderAccess()">+ add user</button></div></div>
+    ${extraFields()}
+    ${formButtons(s,c)}</td></tr>`;
 }
+const formButtons=(s,c)=>`<div class="row" style="margin-top:8px">${accessCode()}
+    <button class="go" onclick="saveComponent('${jsq(s.name)}',${c?`'${jsq(c.name)}'`:'null'})">Save</button>
+    <button class="sm" onclick="closeForm()">Cancel</button>
+    ${c?`<button class="sm no" onclick="deleteComponent('${jsq(s.name)}','${jsq(c.name)}')">delete component</button>`:''}
+  </div>`;
+
+// ------------------------------------------------------------------ rows
+const changedNote=c=>c.updated_at?`<div class="note">changed ${fmtTime(c.updated_at)} by ${esc(c.updated_by||'?')}</div>`:'';
+function extrasCell(s,c,id){
+  return [...Object.entries(c.fields).map(([n,v])=>`<span class="tchip"><b>${esc(n)}</b> ${esc(v)}</span>`),
+    ...c.secret_fields.map((f,fi)=>`<span class="tchip"><b>${esc(f.name)}</b> ${secretSpan(s,c,'field:'+f.name,`${id}-f${fi}`)}</span>`)]
+    .join(' ')||'<span class="dim">—</span>';
+}
+const addrCell=c=>c.address?`${c.scheme?esc(c.scheme)+'://':''}${esc(c.address)}${c.port!=null&&c.port!==''?':'+esc(c.port):''}`:'<span class="dim">—</span>';
+const editBtn=(s,c)=>ACC.can_edit?`<button class="sm" onclick="openForm('comp-edit','${jsq(s.name)}','${jsq(c.name)}')">edit</button>`:'';
+const deg3=x=>String(Math.round(((x%360)+360)%360)).padStart(3,'0');
+function sensorRow(s,c,id){
+  const has=x=>x!=null&&x!=='';
+  const aim=[has(c.azimuth)?`az ${deg3(c.azimuth)}°`:'',has(c.elevation)?`el ${esc(c.elevation)}°`:''].filter(Boolean).join(' · ');
+  return `<tr><td class="mono">${esc(c.name)}<div class="dim" style="font-family:inherit">${esc([c.version&&'v'+c.version,c.type].filter(Boolean).join(' · '))}</div></td>
+    <td class="mono">${addrCell(c)}</td>
+    <td>${webLink(c.gui)||'<span class="dim">—</span>'}${c.has_gui_password?`<div>${secretSpan(s,c,'slot:gui_password',id+'-g')}</div>`:''}</td>
+    <td class="mono">${aim||'<span class="dim">—</span>'}</td>
+    <td class="mono">${(c.computers||[]).map(esc).join(', ')||'<span class="dim">—</span>'}</td>
+    <td>${sensorHasSsh(c)?`<span class="tchip"><b>SSH</b> <span class="mono">${esc(c.user||'')}</span> ${c.has_password?secretSpan(s,c,'',id+'-s'):''}</span> `:''}${extrasCell(s,c,id)}${changedNote(c)}</td>
+    <td style="white-space:nowrap">${editBtn(s,c)}</td></tr>`;
+}
+function compRow(s,c,id){
+  const pc=[c.model&&`<span class="tchip"><b>model</b> ${esc(c.model)}</span>`,
+    c.sensor&&`<span class="tchip"><b>serves</b> ${esc(c.sensor)}</span>`,
+    (c.web||c.has_web_password)&&`<span class="tchip"><b>web</b> ${webLink(c.web)} ${c.has_web_password?secretSpan(s,c,'slot:web_password',id+'-w'):''}</span>`,
+    (c.rustdesk_ip||c.has_rustdesk_password)&&`<span class="tchip"><b>RustDesk</b> <span class="mono">${esc(c.rustdesk_ip||'')}</span> ${c.has_rustdesk_password?secretSpan(s,c,'slot:rustdesk_password',id+'-r'):''}</span>`,
+    ...c.users.map((u,ui)=>`<span class="tchip"><b>user</b> <span class="mono">${esc(u.name)}</span> ${u.set?secretSpan(s,c,'user:'+u.name,`${id}-u${ui}`):''}</span>`)]
+    .filter(Boolean).join(' ');
+  return `<tr><td class="mono">${esc(c.name)}<div class="dim" style="font-family:inherit">${esc([c.type,c.role].filter(Boolean).join(' · '))}</div></td>
+    <td class="mono">${addrCell(c)}</td>
+    <td class="mono">${esc(c.user||'—')} ${c.has_password?secretSpan(s,c,'',id):''}</td>
+    <td>${pc||'<span class="dim">—</span>'}</td>
+    <td>${extrasCell(s,c,id)}${changedNote(c)}</td>
+    <td style="white-space:nowrap">${editBtn(s,c)}</td></tr>`;
+}
+const SENSOR_HEAD='<tr><th>component</th><th>IP</th><th>GUI</th><th>aim</th><th>computer</th><th>extra fields</th><th></th></tr>';
+const COMP_HEAD='<tr><th>component</th><th>IP</th><th>SSH</th><th>computer</th><th>extra fields</th><th></th></tr>';
+
+// ------------------------------------------------------------------ tower view
+// A system drawn as the Gotcha GUI draws a tower: one circle, north up, every sensor a wedge
+// pointing along its azimuth out to its range (or a full circle when it hears all round).
+const TYPE_TINT={radars:'var(--radar)',cameras:'var(--camera)',acoustics:'var(--acoustic)'};
+const niceRange=m=>[200,500,1000,2000,5000,10000].find(c=>c>=m)??Math.ceil(m/1000)*1000;
+function towerPlan(s){
+  const SIZE=300, C=SIZE/2, R=112;
+  const polar=(deg,r)=>[C+r*Math.sin(deg*Math.PI/180), C-r*Math.cos(deg*Math.PI/180)];
+  const f1=x=>x.toFixed(1);
+  const sensors=s.categories.filter(c=>isSensorCat(c.key)).flatMap(c=>c.components.map(x=>({...x,cat:c.key})));
+  const omni=m=>m.coverage.to-m.coverage.from>=360;
+  // A sensor needs a direction to be drawn, unless it hears all round.
+  const drawn=sensors.filter(m=>omni(m)||(m.azimuth!=null&&m.azimuth!=='')), missing=sensors.filter(m=>!drawn.includes(m));
+  const outerM=niceRange(Math.max(1,...drawn.map(m=>m.coverage.range)));
+  const wedges=drawn.map(m=>{
+    const tint=TYPE_TINT[m.cat]||'#6b7280', cov=m.coverage, az=Number(m.azimuth)||0;
+    const r=R*Math.min(1,cov.range/outerM);
+    const tip=`${m.name} · ${omni(m)?'all round':`${deg3(az)}°, ${cov.from}° to ${cov.to}°`} · ${cov.range} m`;
+    let shape, mid;
+    if(omni(m)){
+      shape=`<circle cx="${C}" cy="${C}" r="${f1(r)}" fill="${tint}" fill-opacity=".08" stroke="${tint}" stroke-opacity=".75" stroke-width="1.2"/>`;
+      mid=az+20;
+    }else{
+      const from=az+cov.from, to=az+cov.to, [sx,sy]=polar(from,r), [ex,ey]=polar(to,r);
+      shape=`<path d="M ${C} ${C} L ${f1(sx)} ${f1(sy)} A ${f1(r)} ${f1(r)} 0 ${cov.to-cov.from>180?1:0} 1 ${f1(ex)} ${f1(ey)} Z"
+        fill="${tint}" fill-opacity=".10" stroke="${tint}" stroke-opacity=".75" stroke-width="1.2"/>
+        <line x1="${C}" y1="${C}" x2="${f1(polar(az,r)[0])}" y2="${f1(polar(az,r)[1])}" stroke="${tint}" stroke-width="1.5"/>`;
+      mid=az;
+    }
+    const [lx,ly]=polar(mid,Math.min(r+14,R+20)), sn=Math.sin(mid*Math.PI/180);
+    const anchor=sn<-0.3?'end':sn>0.3?'start':'middle';
+    return `<g><title>${esc(tip)}</title>${shape}
+      <text x="${f1(lx)}" y="${f1(ly+3)}" text-anchor="${anchor}" class="tw-label">${esc(m.name)}${omni(m)?'':` ${deg3(az)}°`}</text></g>`;
+  }).join('');
+  return `<div class="tw-plan">
+    <svg viewBox="-60 0 ${SIZE+120} ${SIZE}" width="${SIZE+120}" height="${SIZE}" role="img" aria-label="Tower view of ${esc(s.name)}">
+      ${[1/3,2/3,1].map(k=>`<circle cx="${C}" cy="${C}" r="${f1(R*k)}" class="tw-ring"/>`).join('')}
+      <text x="${C+4}" y="${f1(C-R-3)}" class="tw-scale">${outerM} m</text>
+      ${wedges}
+      <circle cx="${C}" cy="${C}" r="3.5" class="tw-hub"/>
+      <g class="tw-north"><line x1="${C}" y1="12" x2="${C}" y2="26"/>
+        <path d="M ${C} 6 L ${C-4} 15 L ${C+4} 15 Z"/><text x="${C+7}" y="16">N</text></g>
+    </svg>
+    <div class="row" style="justify-content:center;gap:12px">
+      ${Object.entries({radars:'radar',cameras:'camera',acoustics:'acoustic'}).map(([k,l])=>`<span class="note"><span class="tw-key" style="background:${TYPE_TINT[k]}"></span> ${l}</span>`).join('')}
+      <span class="note">· north up · outer ring ${outerM} m</span></div>
+    ${sensors.length?'':'<p class="note" style="text-align:center">No radars, cameras or acoustics yet: add one and it shows here.</p>'}
+    ${missing.length?`<p class="note" style="text-align:center">No azimuth yet, so not drawn: ${missing.map(m=>esc(m.name)).join(', ')}.</p>`:''}
+  </div>`;
+}
+function toggleTowerView(name){ ACC.towerView.has(name)?ACC.towerView.delete(name):ACC.towerView.add(name); renderAccess(); }
 
 // ------------------------------------------------------------------ the part
 function renderAccess(){
   // Keep what was typed in an open form across a redraw.
   // (Not when a form has just been opened: what's on screen then belongs to the one before.)
-  const keep={}; if(ACC.form&&!ACC.fresh){ syncRows(); [...COMP_FIELDS,...SYS_FIELDS,['code'],['pw'],['category']].forEach(([k])=>{
-    const i=$('#af-'+k); if(i&&typeof i.value==='string') keep[k]=i.value; });
-    const clr=$('#af-clear'); if(clr&&typeof clr.checked==='boolean') keep.clear=clr.checked; }
+  const keep={}, checks={};
+  if(ACC.form&&!ACC.fresh){ syncRows();
+    KEEP_IDS.forEach(k=>{ const i=$('#af-'+k); if(i&&typeof i.value==='string') keep[k]=i.value; });
+    KEEP_CHECKS.forEach(k=>{ const i=$('#af-'+k); if(i&&typeof i.checked==='boolean') checks[k]=i.checked; }); }
   ACC.fresh=false;
   const F=ACC.form||{}, admin=ACC.can_edit;
   ACC.cells={};
   const cards=ACC.systems.map((s,si)=>{
     const sections=s.categories.map((cat,ki)=>{
+      const sensor=isSensorCat(cat.key);
       const rows=cat.components.map((c,ci)=>{
-        if(F.kind==='comp-edit'&&F.sys===s.name&&F.comp===c.name) return compForm(s,c,cat.key);
-        const k=akey(s.name,c.name), id=`acp-${si}-${ki}-${ci}`; ACC.cells[k]=id;
-        const addr=c.address?`${c.scheme?esc(c.scheme)+'://':''}${esc(c.address)}${c.port?':'+esc(c.port):''}`:'<span class="dim">—</span>';
-        const extras=[...Object.entries(c.fields).map(([n,v])=>`<span class="tchip"><b>${esc(n)}</b> ${esc(v)}</span>`),
-          ...c.secret_fields.map((f,fi)=>{ const fk=akey(s.name,c.name,f.name), fid=`${id}-f${fi}`; ACC.cells[fk]=fid;
-            return `<span class="tchip"><b>${esc(f.name)}</b> <span id="${fid}">${secretCell(fk,f.set,s.name,c.name,f.name)}</span></span>`; })];
-        return `<tr><td class="mono">${esc(c.name)}<div class="dim" style="font-family:inherit">${esc([c.type,c.role].filter(Boolean).join(' · '))}</div></td>
-          <td class="mono">${addr}</td><td class="mono">${esc(c.user||'—')}</td>
-          <td id="${id}">${secretCell(k,c.has_password,s.name,c.name,null)}</td>
-          <td>${extras.join(' ')||'<span class="dim">—</span>'}
-            ${c.updated_at?`<div class="note">changed ${fmtTime(c.updated_at)} by ${esc(c.updated_by||'?')}</div>`:''}</td>
-          <td style="white-space:nowrap">${admin?`<button class="sm" onclick="openForm('comp-edit','${jsq(s.name)}','${jsq(c.name)}')">edit</button>`:''}</td></tr>`;
+        if(F.kind==='comp-edit'&&F.sys===s.name&&F.comp===c.name) return sensor?sensorForm(s,c,cat.key):compForm(s,c,cat.key);
+        const id=`acp-${si}-${ki}-${ci}`;
+        return sensor?sensorRow(s,c,id):compRow(s,c,id);
       }).join('');
       const adding=F.kind==='comp-add'&&F.sys===s.name&&F.cat===cat.key;
-      return `<div style="margin-top:10px"><div class="row"><b>${esc(cat.label)}</b>
-          <span class="badge">${cat.components.length}</span>
-          ${admin&&!adding?`<button class="sm" onclick="openForm('comp-add','${jsq(s.name)}',null,'${jsq(cat.key)}')">+ add</button>`:''}</div>
-        ${cat.components.length||adding?`<div class="scroll"><table><tr><th>component</th><th>address</th><th>SSH user</th><th>SSH password</th><th>extra fields</th><th></th></tr>
-          ${rows}${adding?compForm(s,null,cat.key):''}</table></div>`:'<p class="note">None.</p>'}</div>`;
+      const editing=F.kind==='comp-edit'&&F.sys===s.name&&cat.components.some(c=>c.name===F.comp);
+      // Collapsed by default; open while a form is open in it or the admin opened it.
+      const ck=s.name+'/'+cat.key, open=ACC.openCats.has(ck)||adding||editing;
+      return `<details class="cat" ${open?'open':''} ontoggle="toggleCat('${jsq(ck)}',this.open)">
+        <summary><b>${esc(cat.label)}</b> <span class="badge">${cat.components.length}</span>
+          ${admin&&!adding?`<button class="sm" onclick="event.preventDefault();event.stopPropagation();openForm('comp-add','${jsq(s.name)}',null,'${jsq(cat.key)}')">+ add</button>`:''}</summary>
+        ${cat.components.length||adding?`<div class="scroll"><table>${sensor?SENSOR_HEAD:COMP_HEAD}
+          ${rows}${adding?(sensor?sensorForm(s,null,cat.key):compForm(s,null,cat.key)):''}</table></div>`:'<p class="note">None.</p>'}</details>`;
     }).join('');
     const n=s.categories.reduce((a,c)=>a+c.components.length,0);
     const counts=s.categories.filter(c=>c.components.length).map(c=>`${c.components.length} ${esc(c.label.toLowerCase())}`).join(' · ');
@@ -1272,37 +1480,63 @@ function renderAccess(){
     return `<details class="card sys" ${open?'open':''} ontoggle="toggleSystem('${jsq(s.name)}',this.open)">
       <summary><b>${esc(s.name)}</b>
         ${s.site?`<span class="dim">— ${esc(s.site)}</span>`:''}
+        ${s.latitude!=null&&s.longitude!=null?`<a class="mono" style="font-size:12px" target="_blank" rel="noopener noreferrer"
+          title="open on OpenStreetMap" onclick="event.stopPropagation()"
+          href="https://www.openstreetmap.org/?mlat=${encodeURIComponent(s.latitude)}&amp;mlon=${encodeURIComponent(s.longitude)}#map=16/${encodeURIComponent(s.latitude)}/${encodeURIComponent(s.longitude)}"
+          >${esc(s.latitude)}, ${esc(s.longitude)}${s.altitude!=null?` · ${esc(s.altitude)} m`:''}</a>`:''}
         <span class="badge">${n} component${n===1?'':'s'}</span>
         <span class="dim" style="font-size:12px">${counts}</span></summary>
       <div class="row" style="margin-top:6px">
         ${s.description?`<span class="note">${esc(s.description)}</span>`:''}
-        ${admin?`<span class="grow"></span><button class="sm" onclick="openForm('sys-edit','${jsq(s.name)}')">edit system</button>`:''}</div>
+        <span class="grow"></span><button class="sm" onclick="toggleTowerView('${jsq(s.name)}')">${ACC.towerView.has(s.name)?'hide tower view':'tower view'}</button>
+        ${admin?`<button class="sm" onclick="openForm('sys-edit','${jsq(s.name)}')">edit system</button>`:''}</div>
+      ${ACC.towerView.has(s.name)?towerPlan(s):''}
       ${F.kind==='sys-edit'&&F.sys===s.name?sysForm(s):''}${sections}</details>`;
   }).join('');
+  const mins=Math.round(AUTH.edit_seconds/60);
   $('#sec-access').innerHTML=`<div class="card"><h3>System access <span class="dim" style="font-weight:400">— each system's radars, acoustics, cameras and compute, and how to reach them (<code>systems_inventory.yaml</code>)</span>
+      ${admin&&editActive()?editBadge():''}
       <span class="grow"></span>${ACC.systems.length?'<button class="sm" onclick="expandAll(true)">expand all</button><button class="sm" onclick="expandAll(false)">collapse all</button>':''}
       ${admin&&F.kind!=='sys-add'?'<button class="sm" onclick="openForm(\'sys-add\')">+ add system</button>':''}</h3>
     ${ACC.error?`<p class="alert">${esc(ACC.error)}</p>`:ACC.inventory_file?'':'<p class="alert warn">There is no systems_inventory.yaml at the repo root yet; adding a system creates it.</p>'}
-    <p class="note">${admin?'Secrets are hidden: reveal asks for a code from your authenticator and shows a value for 30 seconds. Every add, edit and delete asks for a code (or passkey) and goes in the audit log.'
-      :'Systems, components and their plain fields are shown; ask an admin for a secret or a change.'}</p></div>
+    <p class="note">${admin?`Secrets are hidden: reveal asks for a code from your authenticator and shows a value for 30 seconds. Your first add or edit asks for a code (or passkey); then editing stays unlocked for ${mins} minutes. A delete always asks. Every change goes in the audit log.`
+      :'Systems, components and their plain values are shown; ask an admin for a secret or a change.'}</p></div>
     ${F.kind==='sys-add'?sysForm(null):''}${cards}`;
-  Object.entries(keep).forEach(([k,v])=>{ const i=$('#af-'+k); if(!i) return;
-    if(k==='clear') i.checked=v; else i.value=v; });
+  Object.entries(keep).forEach(([k,v])=>{ const i=$('#af-'+k); if(i) i.value=v; });
+  Object.entries(checks).forEach(([k,v])=>{ const i=$('#af-'+k); if(i) i.checked=v; });
+  // Passwords typed in user rows and secret field rows (drawn empty) go back in too.
+  if(ACC.form){
+    ACC.users.forEach((u,i)=>{ const p=$('#uu-p-'+i); if(p&&u.pw) p.value=u.pw; });
+    ACC.rows.forEach((r,i)=>{ const v=$('#ff-v-'+i); if(v&&r.secret&&r.value) v.value=r.value; });
+  }
 }
 function toggleSystem(name,open){ open?ACC.open.add(name):ACC.open.delete(name); }
-function expandAll(open){ ACC.open=new Set(open?ACC.systems.map(s=>s.name):[]); renderAccess(); }
+function toggleCat(key,open){ open?ACC.openCats.add(key):ACC.openCats.delete(key); }
+// Every system and every category in it, open or closed. Collapsing also closes what would
+// hold them open: a form (as Cancel does) and the tower views.
+function expandAll(open){
+  ACC.open=new Set(open?ACC.systems.map(s=>s.name):[]);
+  ACC.openCats=new Set(open?ACC.systems.flatMap(s=>s.categories.map(c=>s.name+'/'+c.key)):[]);
+  if(!open){ ACC.towerView.clear(); ACC.form=null; ACC.rows=[]; ACC.users=[]; }
+  renderAccess();
+}
 function openForm(kind,sys,comp,cat){
   ACC.form={kind,sys,comp,cat}; ACC.fresh=true;
   const f=comp?findComp(sys,comp):null;
+  // What the form is in stays open after it closes: you were working there.
+  if(sys) ACC.open.add(sys);
+  if(sys&&(cat||f)) ACC.openCats.add(sys+'/'+(cat||f.cat));
   ACC.rows=f?[...Object.entries(f.c.fields).map(([name,value])=>({name,value:shownValue(value),secret:false,existing:true,
       origName:name,raw:value})),
     ...f.c.secret_fields.map(x=>({name:x.name,value:'',secret:true,existing:true,isSet:x.set}))]:[];
+  ACC.users=f?f.c.users.map(u=>({name:u.name,pw:'',existing:true,isSet:u.set})):[];
   renderAccess(); setTimeout(()=>{ const i=$('#af-name'); if(i&&i.focus) i.focus(); },0);
 }
-function closeForm(){ ACC.form=null; ACC.rows=[]; renderAccess(); }
+function closeForm(){ ACC.form=null; ACC.rows=[]; ACC.users=[]; renderAccess(); }
 // How a text box shows a value: a box can't hold a line break, and the page trims.
 const shownValue=v=>String(v??'').replace(/[\r\n]+/g,'').trim();
 const formVal=k=>{ const i=$('#af-'+k); return i&&typeof i.value==='string'?i.value.trim():''; };
+const checked=k=>{ const i=$('#af-'+k); return !!(i&&i.checked===true); };
 // Only what changed, so a field nobody touched is left as it is in the file.
 function diffFields(fields,orig){
   const out={};
@@ -1343,19 +1577,52 @@ function fieldChanges(orig){
   if(Object.keys(secret).length) out.secret_fields=secret;
   return out;
 }
+// The users as the server wants them: name -> new password, "" for a new user without one,
+// null for one removed. Users nobody touched aren't sent.
+function userChanges(){
+  syncRows();
+  const out={}, seen=new Set();
+  for(const u of ACC.users){
+    const name=(u.name||'').trim();
+    if(u.removed){ if(u.existing) out[name]=null; continue; }
+    if(!name){ if(u.pw) throw new Error('a user needs a name'); continue; }
+    if(seen.has(name)) throw new Error(`two users are called ${name}`);
+    seen.add(name);
+    if(!u.existing||u.pw) out[name]=u.pw||'';
+  }
+  return Object.keys(out).length?{users:out}:{};
+}
+// The fixed passwords typed, or ticked for removal.
+// The passwords typed, or ticked for removal: each box, its "remove" tick, and what it sets.
+function passwordChanges(sensor,withSsh){
+  const out={}, clear=[];
+  const boxes=sensor?[['guipw','clear-gui','gui_password']]:[['webpw','clear-web','web_password'],['rdpw','clear-rd','rustdesk_password']];
+  if(!sensor||withSsh) boxes.push(['pw','clear','password']);
+  for(const [box,tick,name] of boxes){
+    const v=$('#af-'+box), val=v&&typeof v.value==='string'?v.value:'';
+    if(val&&checked(tick)) throw new Error('either type a new password or tick “remove”, not both');
+    if(val) out[name]=val; else if(checked(tick)) clear.push(name);
+  }
+  if(clear.length) out.clear=clear;
+  return out;
+}
 // Send a change with the form's code (or the passkey). On success the form closes, and with it
 // everything typed into it; on failure it stays as typed, so a mistyped code is retried with
 // the next one without typing the rest again.
 async function accessCall(method,path,body,done){
   const code=formVal('code');
   try{
-    const f=await saveFactor(code); if(!f) return;
+    const f=!code&&editActive()?{}:await saveFactor(code);
+    if(!f){ endEditWindow(); return; }
     const r=await api('/access/'+path,{method,body:{...body,...f}});
     Object.values(ACC.timers).forEach(clearTimeout);
-    ACC.form=null; ACC.rows=[]; ACC.reveal={}; ACC.timers={}; accessState(r); renderAccess();
+    ACC.form=null; ACC.rows=[]; ACC.users=[]; ACC.reveal={}; ACC.timers={}; accessState(r); renderAccess();
     toast(done(r),'ok');
   }catch(e){
     const c=$('#af-code'); if(c) c.value='';   // a code is used once either way
+    // Asked for a code the page thought it didn't need (the window ended, or the clocks
+    // differ): show the code box again.
+    if(!c&&ACC.form&&/code|login/i.test(e.message)) endEditWindow();
     toast(e.message,'bad');
   }
 }
@@ -1365,7 +1632,11 @@ async function saveSystem(name){
   if(!name&&!body.name){ toast('Give the system a name.','warn'); return; }
   if(name&&!Object.keys(body).length){ toast('Nothing changed.'); closeForm(); return; }
   await accessCall(name?'PUT':'POST', name?`system/${encodeURIComponent(name)}`:'system', body,
-    r=>{ if(name&&body.name&&ACC.open.delete(name)){ ACC.open.add(body.name); renderAccess(); }
+    r=>{ if(name&&body.name){
+        if(ACC.open.delete(name)) ACC.open.add(body.name);
+        if(ACC.towerView.delete(name)) ACC.towerView.add(body.name);
+        ACC.openCats=new Set([...ACC.openCats].map(k=>k.startsWith(name+'/')?body.name+k.slice(name.length):k));
+        renderAccess(); }
       return name?`Saved ${body.name||name}: ${(r.changed||[]).join(', ')||'nothing changed'}.`:`Added system ${body.name}.`; });
 }
 async function deleteSystem(name){
@@ -1374,12 +1645,16 @@ async function deleteSystem(name){
 }
 async function saveComponent(sys,comp){
   const f=comp?findComp(sys,comp):null, orig=f?f.c:null;
+  // The form on screen is a sensor's or a computer's by the category it was opened in.
+  const sensor=isSensorCat(f?f.cat:ACC.form&&ACC.form.cat);
   let body;
-  try{ body={...diffFields(COMP_FIELDS,orig),...fieldChanges(orig)}; }catch(e){ toast(e.message,'warn'); return; }
+  try{
+    const ssh=sensor&&sensorHasSsh(orig);
+    body={...diffFields(sensor?[...SENSOR_FIELDS,...(ssh?SENSOR_SSH_FIELDS:[])]:[...COMP_FIELDS,...PC_FIELDS],orig),
+      ...fieldChanges(orig),...passwordChanges(sensor,ssh),...(sensor?{}:userChanges())};
+  }catch(e){ toast(e.message,'warn'); return; }
   const cat=formVal('category'); if(!f||cat!==f.cat) body.category=cat;
-  const pwEl=$('#af-pw'), pw=pwEl&&typeof pwEl.value==='string'?pwEl.value:''; if(pw) body.password=pw;
-  const clr=$('#af-clear'); if(clr&&clr.checked) body.clear_password=true;
-  if(body.password&&body.clear_password){ toast('Either type a new SSH password or tick “remove”, not both.','warn'); return; }
+  if(!sensor){ const s=formVal('sensor'); if(s!==(orig&&orig.sensor||'')) body.sensor=s; }
   if(!comp&&!body.name){ toast('Give the component a name.','warn'); return; }
   if(comp&&!Object.keys(body).length){ toast('Nothing changed.'); closeForm(); return; }
   const base=`system/${encodeURIComponent(sys)}/component`;
@@ -1390,17 +1665,17 @@ async function deleteComponent(sys,comp){
   if(!confirm(`Delete component ${sys}/${comp}? Its secrets go too, unless another component holds them.`)) return;
   await accessCall('DELETE',`system/${encodeURIComponent(sys)}/component/${encodeURIComponent(comp)}`,{},()=>`Deleted ${sys}/${comp}.`);
 }
-async function revealAccess(sys,comp,field,retried){
+async function revealAccess(sys,comp,which,retried){
   if(!await ensureStepup()) return;
-  const k=akey(sys,comp,field);
+  const k=akey(sys,comp,which);
   try{
     const r=await api(`/access/system/${encodeURIComponent(sys)}/component/${encodeURIComponent(comp)}/reveal`,
-      {method:'POST',body:field?{field}:{}});
+      {method:'POST',body:whichBody(which)});
     ACC.reveal[k]=r.value;
     clearTimeout(ACC.timers[k]); ACC.timers[k]=setTimeout(()=>hideAccess(k),REVEAL_MS);
     paintSecret(k);
   }catch(e){
-    if(e.message==='stepup'&&!retried){ AUTH.stepup_until=null; return revealAccess(sys,comp,field,true); }
+    if(e.message==='stepup'&&!retried){ AUTH.stepup_until=null; return revealAccess(sys,comp,which,true); }
     toast(e.message,'bad');
   }
 }
@@ -1430,6 +1705,6 @@ Object.assign(window,{showTab,runSelftest,openDeploy,startDeploy,loadConvos,open
   previewSlug,toggleTopic,addTopic,setMode,renderSyms,addSym,renderSigs,moveSec,rmSec,addSec,saveCase,renameCase,
   deleteCase,openDoc,renderDoc,saveDoc,loadStats,loadSystems,toggleSite,runTriage,loadBot,
   doLogin,logout,loadSecrets,renderSecrets,revealSecret,hideSecret,copySecret,editSecret,addSecret,cancelEdit,
-  togglePwField,saveSecret,restartNow,refreshDeploy,SEC,renderAccess,openForm,closeForm,saveSystem,deleteSystem,saveComponent,deleteComponent,revealAccess,hideAccess,syncRows,toggleSecret,toggleSystem,expandAll,fieldChanges,ACC,
+  togglePwField,saveSecret,restartNow,refreshDeploy,SEC,renderAccess,openForm,closeForm,saveSystem,deleteSystem,saveComponent,deleteComponent,revealAccess,hideAccess,syncRows,toggleSecret,toggleSystem,toggleCat,expandAll,toggleTowerView,fieldChanges,ACC,
   loginPasskey,togglePasskeys,renderPasskeys,registerPasskey,removePasskey});
 </script></body></html>

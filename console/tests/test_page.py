@@ -76,18 +76,27 @@ def _capture(client, env, monkeypatch) -> dict:
     r["PUT /secrets/SLACK_BOT_TOKEN"] = client.put("/api/secrets/SLACK_BOT_TOKEN", headers=ADMIN, json={
         "value": "xoxb-y", "code": auth._now.code("admin@example.com")}).json()
     S.inventory_file.write_text(
-        "systems:\n  gotcha5:\n    site: Test\n    components:\n"
-        "      1: {type: node, domain: radar, address: 10.0.0.1, fields: {azimuth: '120'},\n"
-        "          secret_fields: [{name: web password, env: G5_1_WEB_PW}],\n"
-        "          access: {ssh: {user: admin, password_env: NODE_1_SSH_PW}}}\n")
-    S.device_secrets_file.write_text("NODE_1_SSH_PW=pw\nG5_1_WEB_PW=webpw\n")
+        "systems:\n  gotcha5:\n    site: Test\n    latitude: 32.6619\n    longitude: 35.0102\n    components:\n"
+        "      1: {domain: radar, version: 4.2, address: 10.0.0.1, port: 8080, gui: 'http://10.0.0.1/ui',\n"
+        "          gui_password_env: G5_1_GUI_PW, azimuth: 120, elevation: -2, fov_from: -45, fov_to: 45, fields: {band: X},\n"
+        "          secret_fields: [{name: web password, env: G5_1_WEB_PW}]}\n"
+        "      pc: {domain: infra, model: NUC 13, sensor: '1', address: 10.0.0.50, web: 'http://10.0.0.50:9090',\n"
+        "           web_password_env: G5_PC_WEB_PW, rustdesk_ip: 10.0.0.50, rustdesk_password_env: G5_PC_RD_PW,\n"
+        "           users: [{name: root, password_env: G5_PC_ROOT_PW}, {name: viewer}],\n"
+        "           access: {ssh: {user: admin, password_env: G5_PC_SSH_PW}}}\n")
+    S.device_secrets_file.write_text("G5_1_GUI_PW=guipw\nG5_1_WEB_PW=webpw\nG5_PC_WEB_PW=pcweb\n"
+                                     "G5_PC_RD_PW=rd\nG5_PC_ROOT_PW=rootpw\nG5_PC_SSH_PW=ssh\n")
     r["/access"] = client.get("/api/access", headers=ADMIN).json()
     code = lambda: auth._now.code("admin@example.com")  # noqa: E731
     base = "/access/system/gotcha5/component"
-    r[f"POST {base}/1/reveal"] = client.post(f"/api{base}/1/reveal", headers=ADMIN, json={}).json()
+    r[f"POST {base}/1/reveal"] = client.post(f"/api{base}/1/reveal", headers=ADMIN,
+                                             json={"slot": "gui_password"}).json()
+    r[f"POST {base}/pc/reveal"] = client.post(f"/api{base}/pc/reveal", headers=ADMIN, json={"user": "root"}).json()
     r[f"PUT {base}/1"] = client.put(f"/api{base}/1", headers=ADMIN, json={
-        "address": "10.0.0.2", "fields": {"azimuth": "125", "firmware": "4.2"},
+        "address": "10.0.0.2", "version": "4.3", "fields": {"range": "6km", "firmware": "4.2"},
         "secret_fields": {"snmp community": "c1"}, "code": code()}).json()
+    r[f"PUT {base}/pc"] = client.put(f"/api{base}/pc", headers=ADMIN, json={
+        "model": "NUC 14", "users": {"ops": "opspw", "viewer": None}, "code": code()}).json()
     r[f"POST {base}"] = client.post(f"/api{base}", headers=ADMIN, json={
         "name": "cam", "category": "cameras", "type": "camera", "address": "10.0.0.3", "code": code()}).json()
     r[f"DELETE {base}/cam"] = client.request("DELETE", f"/api{base}/cam", headers=ADMIN, json={"code": code()}).json()
@@ -99,6 +108,10 @@ def _capture(client, env, monkeypatch) -> dict:
                                                         json={"code": code()}).json()
     for k in [k for k in r if "access/" in k]:
         assert "systems" in r[k] or "value" in r[k], (k, r[k])
+        # Replayed, these would open the editing window for every check after them; the
+        # harness opens it itself where it means to.
+        if "edit_until" in r[k]:
+            r[k]["edit_until"] = None
     get("/passkeys")
     for _ in range(200):
         if not ops.DEPLOY.running:
