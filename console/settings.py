@@ -42,6 +42,9 @@ class Settings:
         # `tailscale serve` sets); a request without one is local, and refused unless asked for.
         self.allowed_users = _csv("CONSOLE_ALLOWED_USERS")
         self.allow_local = env("CONSOLE_ALLOW_LOCAL") == "1"
+        # Host names the page may be opened as (e.g. gotcha-server.tail1234.ts.net,localhost);
+        # empty accepts any.
+        self.allowed_hosts = _csv("CONSOLE_ALLOWED_HOSTS")
         # Who may see and change secrets. Everyone else let in is a viewer. Kept in .env, not
         # in the page, so a session that has been taken over can't make itself an admin.
         self.admins = _csv("CONSOLE_ADMINS")
@@ -51,9 +54,9 @@ class Settings:
         # After a secret changes: recreate the container so it reads .env again. A plain
         # `docker compose restart` would keep the old environment.
         self.restart_cmd = ["make", "-C", str(self.bridge_dir), "restart"]
-        # How to reach each system's machines (the Secrets tab's system access part): the retired bot's two files.
         # Passkeys: the host name they are bound to; by default the one the page is opened on.
         self.rp_id = env("CONSOLE_RP_ID") or ""
+        # The Secrets tab's system access part: the retired bot's inventory and its passwords.
         self.inventory_file = Path(env("CONSOLE_INVENTORY_FILE") or ROOT / "systems_inventory.yaml")
         self.device_secrets_file = Path(env("CONSOLE_DEVICE_SECRETS_FILE") or ROOT / "secrets.local.env")
 

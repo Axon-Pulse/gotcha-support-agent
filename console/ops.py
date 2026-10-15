@@ -14,6 +14,7 @@ import threading
 import time
 from pathlib import Path
 
+from console.files import env_entries
 from console.settings import S
 
 # Shown with their values. Anything else in slack-bridge/.env is shown as "set", never read
@@ -37,22 +38,21 @@ def _run(argv: list[str], timeout: int = 20, **kw) -> subprocess.CompletedProces
         return None
 
 
-def _env_lines() -> list[tuple[str, str]]:
+BOT_ENV_NAME_RX = re.compile(r"[A-Z][A-Z0-9_]*")
+
+
+def bot_env_entries() -> list[tuple[str, str]]:
+    """(NAME, value) for slack-bridge/.env's capitalised entries, in file order."""
     try:
-        text = (S.bridge_dir / ".env").read_text()
-    except (FileNotFoundError, PermissionError):
+        return [(k, v.strip()) for k, v in env_entries(S.bridge_dir / ".env")
+                if BOT_ENV_NAME_RX.fullmatch(k)]
+    except PermissionError:
         return []
-    out = []
-    for line in text.splitlines():
-        m = re.match(r"^\s*([A-Z][A-Z0-9_]*)=(.*)$", line)
-        if m:
-            out.append((m.group(1), m.group(2).strip()))
-    return out
 
 
 def bot_env() -> dict[str, str]:
     """The allowlisted settings only. Nothing else from .env leaves this module."""
-    return {k: v for k, v in _env_lines() if k in SHOWN}
+    return {k: v for k, v in bot_env_entries() if k in SHOWN}
 
 
 def bot_config() -> dict:
@@ -61,7 +61,7 @@ def bot_config() -> dict:
     for k in SHOWN:
         settings.append({"name": k, "value": env.get(k), "default": DEFAULTS.get(k, ""),
                          "set": k in env})
-    hidden = sorted({k for k, _ in _env_lines() if k not in SHOWN})
+    hidden = sorted({k for k, _ in bot_env_entries() if k not in SHOWN})
     try:
         perms = json.loads((S.bridge_dir / "workspace" / ".claude" / "settings.json").read_text())
     except (FileNotFoundError, ValueError):
@@ -192,10 +192,14 @@ class Deploy:
         it is queued, and it waits for questions being answered. Returns a note for the page,
         or None when it started straight away."""
         with self.lock:
+            if self.running and self.kind == "restart" and self.waiting:
+                # It hasn't recreated the container yet, so it will read this change too.
+                return "the restart already waiting will pick it up"
             if self.running:
                 self.pending_restart = by
                 return f"queued after the {self.kind} that is running now"
             self._begin("restart", by)
+            self.waiting = True  # until it has looked at the questions in flight
         threading.Thread(target=self._run, args=(S.restart_cmd, True), daemon=True).start()
         return None
 
@@ -241,6 +245,7 @@ class Deploy:
                 nxt, self.pending_restart = self.pending_restart, None
                 if nxt is not None:
                     self._begin("restart", nxt)
+                    self.waiting = True
             if nxt is not None:
                 threading.Thread(target=self._run, args=(S.restart_cmd, True), daemon=True).start()
 

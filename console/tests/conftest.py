@@ -39,6 +39,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(S, "container", "no-such-container-for-tests")
     monkeypatch.setattr(S, "allowed_users", {"pm@example.com", "admin@example.com"})
     monkeypatch.setattr(S, "allow_local", True)
+    monkeypatch.setattr(S, "allowed_hosts", set())
     monkeypatch.setattr(S, "admins", {"admin@example.com"})
     monkeypatch.setattr(S, "local_role", "viewer")
     monkeypatch.setattr(S, "inventory_file", tmp_path / "systems_inventory.yaml")

@@ -1,0 +1,16 @@
+{
+ "id": "51a34308c985",
+ "name": "screenshot-174010.png",
+ "file": "screenshot-174010.png",
+ "media_type": "image/png",
+ "kind": "image",
+ "bytes": 147218,
+ "text": "**What this is:** A screenshot of a web app titled **\"support-agent console\"** in a Chrome browser on an Ubuntu desktop. It shows the troubleshooting console's own input screen, not a sensor, radar, acoustic, camera, launcher or network status display. No sensor data, device status, errors or logs are visible.\n\n**Browser / system**\n- URL: `127.0.0.1:8765/#run`\n- Two open tabs, both titled \"support-agent console\". The second tab is active.\n- Top bar clock: **Sep 28 17:40**. Keyboard layout indicator: \"en\".\n- Chrome profile badge: \"Work\".\n\n**Application header**\n- Title: **support-agent console**\n- Badge outlined in green: `token mode`\n- Badge: `claude-opus-5-5`\n- Badge: `auth: secrets.local.env`\n\n**Navigation tabs**\n- **Run** (selected/highlighted), Approvals, Traces, Knowledge, Agents & permissions, Inventory & systems\n\n**Main panel: \"Diagnose\"**\n- Text input is **empty**. It shows only greyed placeholder text: \"e.g. the acoustic sensor shows no tracks\"\n- Buttons: \"Attach\" (paperclip icon) and \"Send\" (highlighted purple/blue)\n- Helper text below the input, verbatim: \"Runs against recorded fixtures. Live mode stays a deliberate command-line act. Follow-up questions are answered from evidence already gathered \u2014 no tools, no device touched.\"\n\n**Notable / empty**\n- No diagnosis has been entered or run.\n- There are no results, error messages, warnings, node or host names, or status values on screen.\n- The area below the Diagnose panel is blank.",
+ "truncated": false,
+ "usage": {
+  "input": 3184,
+  "output": 615,
+  "cache_read": 0
+ },
+ "created_at": 1790606419.2582717
+}

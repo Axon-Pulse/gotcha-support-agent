@@ -154,3 +154,80 @@ def test_new_recovery_codes_replace_the_old_and_keep_the_app_entry(raw_client, e
     assert raw_client.post("/api/auth/login", json={"code": new[0]}).status_code == 200
     with pytest.raises(auth.AuthError):
         auth.new_recovery_codes("nobody@example.com")
+
+
+def test_each_lock_is_twice_as_long_as_the_last(raw_client, enrolled):
+    for n in (1, 2, 3):
+        for _ in range(auth.MAX_FAILS):
+            raw_client.post("/api/auth/login", json={"code": "123456"})
+        wait = auth._load()["local"]["locked_until"] - enrolled.t
+        assert wait == pytest.approx(auth.LOCK_SECONDS * 2 ** (n - 1), abs=1)
+        enrolled.t += wait
+    assert _login(raw_client, enrolled).status_code == 200
+    assert auth._load()["local"]["locks"] == 0  # a right code starts the count again
+
+
+def test_non_ascii_digits_are_a_wrong_code_not_a_crash(raw_client, enrolled):
+    r = raw_client.post("/api/auth/login", json={"code": "\u0661\u0662\u0663\u0664\u0665\u0666"})
+    assert r.status_code == 401 and auth._load()["local"]["fails"] == 0  # not even a guess
+
+
+def test_the_store_is_locked_across_processes(env, clock):
+    import fcntl
+    import os
+    auth.enroll("x@example.com")
+    fd = os.open(S.state_dir / ".auth.lock", os.O_RDWR)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    try:
+        import threading
+        done = threading.Event()
+        threading.Thread(target=lambda: (auth.reset("x@example.com"), done.set()), daemon=True).start()
+        assert not done.wait(0.3)  # waits for the other process's lock
+    finally:
+        os.close(fd)
+    assert done.wait(5) and not auth.enrolled("x@example.com")
+
+
+def test_an_unexpected_host_is_refused_when_hosts_are_set(raw_client, env, monkeypatch):
+    monkeypatch.setattr(S, "allowed_hosts", {"gotcha-server.example.ts.net"})
+    assert raw_client.get("/api/auth/status").status_code == 421
+    r = raw_client.get("/api/auth/status", headers={"host": "gotcha-server.example.ts.net:443"})
+    assert r.status_code == 200
+
+
+def test_the_lock_stops_growing_at_a_day(raw_client, enrolled):
+    for _ in range(12):
+        for _ in range(auth.MAX_FAILS):
+            raw_client.post("/api/auth/login", json={"code": "123456"})
+        wait = auth._load()["local"]["locked_until"] - enrolled.t
+        enrolled.t += wait
+    assert wait == pytest.approx(auth.MAX_LOCK_SECONDS, abs=1)
+
+
+@pytest.mark.parametrize("host,ok", [("[::1]:8766", True), ("[::1]", True), ("localhost:8766", True),
+                                     ("evil.example:8766", False)])
+def test_allowed_hosts_handles_ipv6_and_ports(raw_client, env, monkeypatch, host, ok):
+    monkeypatch.setattr(S, "allowed_hosts", {"::1", "localhost"})
+    r = raw_client.get("/api/auth/status", headers={"host": host})
+    assert (r.status_code == 200) is ok
+
+
+def test_junk_codes_dont_count_towards_the_lock(raw_client, enrolled):
+    for junk in ("", " ", "abc", "1234567890", "12345"):
+        assert raw_client.post("/api/auth/login", json={"code": junk}).status_code == 401
+    assert auth._load()["local"]["fails"] == 0
+    assert _login(raw_client, enrolled).status_code == 200
+
+
+def test_before_sign_in_the_status_says_only_what_the_form_needs(raw_client, enrolled):
+    st = raw_client.get("/api/auth/status").json()
+    assert set(st) == {"who", "enrolled", "logged_in", "stepup_seconds"}
+    _login(raw_client, enrolled)
+    st = raw_client.get("/api/auth/status").json()
+    assert st["role"] == "viewer" and st["passkeys"] == 0 and "stepup_until" in st
+
+
+def test_a_large_body_is_refused_before_anything_reads_it(raw_client, env):
+    r = raw_client.post("/api/auth/login", content="x" * (70 * 1024),
+                        headers={"content-type": "application/json"})
+    assert r.status_code == 413

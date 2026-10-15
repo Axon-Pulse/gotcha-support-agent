@@ -22,7 +22,8 @@ from webauthn.helpers.structs import (AuthenticatorSelectionCriteria, PublicKeyC
                                       ResidentKeyRequirement, UserVerificationRequirement)
 
 from console import auth
-from console.auth import AuthError, write_private
+from console.auth import AuthError
+from console.files import file_lock, write_private
 from console.settings import S
 
 RP_NAME = "Gotcha support console"
@@ -57,12 +58,19 @@ def listing(who: str) -> list[dict]:
              "last_used": k.get("last_used")} for k in _load().get(who, [])]
 
 
+def remove_all(who: str) -> None:
+    with file_lock("passkeys"):
+        store = _load()
+        if store.pop(who, None) is not None:
+            _save(store)
+
+
 def count(who: str) -> int:
     return len(_load().get(who, []))
 
 
 def remove(who: str, cred_id: str) -> bool:
-    with _LOCK:
+    with file_lock("passkeys"):
         store = _load()
         keys = store.get(who, [])
         left = [k for k in keys if k["id"] != cred_id]
@@ -77,16 +85,20 @@ def remove(who: str, cred_id: str) -> bool:
 # Where the page is
 # --------------------------------------------------------------------------
 
+def host_name(request) -> str:
+    """The host name the page was opened as, without its port ([::1]:8766 -> ::1)."""
+    host = request.headers.get("host") or request.url.netloc
+    if host.startswith("["):
+        return host[1:host.index("]")] if "]" in host else host[1:]
+    return host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+
+
 def origin_of(request) -> tuple[str, str]:
     """(origin, rp_id) of the page as the browser sees it. The rp_id is the bare host name;
     browsers refuse an IP address there, so open the page as localhost, not 127.0.0.1."""
     host = request.headers.get("host") or request.url.netloc
     proto = request.headers.get("x-forwarded-proto") or request.url.scheme
-    if host.startswith("["):
-        name = host[1:host.index("]")]
-    else:
-        name = host.rsplit(":", 1)[0]
-    return f"{proto}://{host}", S.rp_id or name
+    return f"{proto}://{host}", S.rp_id or host_name(request)
 
 
 def _issue(who: str, purpose: str, challenge: bytes, origin: str, rp_id: str) -> None:
@@ -130,13 +142,13 @@ def register(who: str, credential: dict, name: str) -> dict:
                                  expected_rp_id=rp_id, expected_origin=origin,
                                  require_user_verification=True)
     except Exception as e:
-        raise AuthError(f"the passkey could not be registered: {e}")
+        raise AuthError(f"the passkey could not be registered: {e}") from e
     cred_id = bytes_to_base64url(v.credential_id)
     entry = {"id": cred_id, "public_key": bytes_to_base64url(v.credential_public_key),
              "sign_count": v.sign_count, "rp_id": rp_id,
              "name": (name or "").strip()[:60] or f"passkey {time.strftime('%Y-%m-%d')}",
              "created": round(auth._now(), 3), "last_used": None}
-    with _LOCK:
+    with file_lock("passkeys"):
         store = _load()
         if any(k["id"] == cred_id for keys in store.values() for k in keys):
             raise AuthError("that passkey is already registered")
@@ -171,7 +183,7 @@ def authenticate(who: str, purpose: str, credential: dict) -> None:
     """Raise AuthError unless `credential` is `who`'s passkey answering this purpose's challenge."""
     challenge, origin, rp_id = _take(who, purpose)
     cred_id = (credential or {}).get("id") or (credential or {}).get("rawId")
-    with _LOCK:
+    with file_lock("passkeys"):
         store = _load()
         key = next((k for k in store.get(who, []) if k["id"] == cred_id), None)
         if key is None:
@@ -182,7 +194,7 @@ def authenticate(who: str, purpose: str, credential: dict) -> None:
                 expected_origin=origin, credential_public_key=base64url_to_bytes(key["public_key"]),
                 credential_current_sign_count=key["sign_count"], require_user_verification=True)
         except Exception as e:
-            raise AuthError(f"the passkey was not accepted: {e}")
+            raise AuthError(f"the passkey was not accepted: {e}") from e
         key["sign_count"], key["last_used"] = v.new_sign_count, round(auth._now(), 3)
         _save(store)
 

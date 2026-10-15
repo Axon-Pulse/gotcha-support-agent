@@ -160,6 +160,10 @@ svg.chart g.col:hover .hit{fill:var(--tint)}
 .secretval{font-family:var(--mono);font-size:12.5px;word-break:break-all;user-select:all;background:var(--sunk);
   border-radius:5px;padding:2px 6px}
 .masked{font-family:var(--mono);color:var(--dim);letter-spacing:.1em}
+details.sys>summary{cursor:pointer;display:flex;gap:8px;align-items:center;flex-wrap:wrap;list-style:none;font-size:13.5px}
+details.sys>summary::-webkit-details-marker{display:none}
+details.sys>summary::before{content:'▸';color:var(--dim);transition:transform var(--t)}
+details.sys[open]>summary::before{transform:rotate(90deg)}
 </style></head><body><div class="wrap">
 
 <header class="top">
@@ -190,7 +194,7 @@ svg.chart g.col:hover .hit{fill:var(--tint)}
 <section id="stats" hidden></section>
 <section id="systems" hidden></section>
 <section id="bot" hidden></section>
-<section id="secrets" hidden><div id="sec-bot"></div><div id="sec-access"></div></section>
+<section id="secrets" hidden><div id="sec-access"></div><div id="sec-bot"></div></section>
 
 <div class="overlay solid" id="login" hidden><div class="card">
   <h3>Sign in</h3>
@@ -308,7 +312,8 @@ function showLogin(st){
   $('#login').hidden=false;
   $('#login-who').textContent=st?`Signed in to the tailnet as ${st.who}.`:'';
   $('#login-form').hidden=!!(st&&!st.enrolled);
-  $('#login-pk').hidden=!(PK_OK&&st&&st.passkeys);
+  // Shown whenever the browser can: the server says if this login has no passkey here.
+  $('#login-pk').hidden=!PK_OK;
   if(st&&!st.enrolled) $('#login-who').innerHTML=`${esc(st.who)} has no authenticator set up yet.<br>
     Ask an admin to run <code>make -C console totp-enroll EMAIL=${esc(st.who)}</code> on the server.`;
   setTimeout(()=>$('#login-code').focus(),0);
@@ -329,6 +334,7 @@ function stepupActive(){ return !!(AUTH&&AUTH.stepup_until&&AUTH.stepup_until*10
 function askCode(msg){
   return new Promise(res=>{
     const d=$('#codedlg'), i=$('#codein');
+    $('#codepk').hidden=true; $('#codepk').onclick=null;   // askFactor turns it on for its own call
     $('#codemsg').textContent=msg; i.value=''; d.hidden=false; setTimeout(()=>i.focus(),0);
     const done=v=>{ d.hidden=true; i.value=''; $('#codeok').onclick=$('#codecancel').onclick=i.onkeydown=null; res(v); };
     $('#codeok').onclick=()=>done(i.value.trim());
@@ -375,13 +381,14 @@ function askFactor(msg,purpose){
   const usePk=PK_OK&&AUTH&&AUTH.passkeys>0;
   return new Promise(res=>{
     let viaPk=false;
+    const ask=askCode(msg);   // resets the passkey button, so it is set up after this
     $('#codepk').hidden=!usePk;
     $('#codepk').onclick=async()=>{
       viaPk=true; $('#codecancel').onclick();   // closes the dialog
       try{ res({passkey:await passkeyAnswer(purpose)}); }
       catch(e){ toast(e.name==='NotAllowedError'?'Passkey cancelled.':e.message,'warn'); res(null); }
     };
-    askCode(msg).then(code=>{ if(!viaPk) res(code===null?null:{code}); });
+    ask.then(code=>{ if(!viaPk) res(code===null?null:{code}); });
   });
 }
 
@@ -425,8 +432,11 @@ async function registerPasskey(){
 }
 async function removePasskey(id){
   if(!confirm('Remove this passkey? You can still sign in with your app code.')) return;
-  try{ const r=await api(`/passkeys/${encodeURIComponent(id)}`,{method:'DELETE',body:{}});
-    AUTH.passkeys=r.passkeys.length; renderPasskeys(); }
+  // Like adding one, removing one takes a code (or a passkey).
+  const f=await askFactor('Enter your code (or use a passkey) to remove this passkey.','confirm');
+  if(!f) return;
+  try{ const r=await api(`/passkeys/${encodeURIComponent(id)}`,{method:'DELETE',body:f});
+    AUTH.passkeys=r.passkeys.length; renderPasskeys(); toast('Passkey removed.','ok'); }
   catch(e){ toast(e.message,'bad'); }
 }
 
@@ -451,7 +461,8 @@ async function runSelftest(){ const t=await api('/selftest'); showSelftest(t);
 
 var DEPLOY=null, DEPLOY_OPEN=false, DEPLOY_TIMER=null, RESTART_WATCH=false;
 async function refreshDeploy(){
-  try{ DEPLOY=await api('/deploy'); }catch(e){ return; }
+  try{ DEPLOY=await api('/deploy'); }
+  catch(e){ clearTimeout(DEPLOY_TIMER); DEPLOY_TIMER=setTimeout(refreshDeploy, 5000); return; }
   const p=$('#deploypill'), d=DEPLOY;
   const map={deployed:['ok','bot is up to date'],
     changed:['warn',`${d.changed.length||'some'} change${d.changed.length===1?'':'s'} not deployed`],
@@ -998,15 +1009,19 @@ function clearReveals(){
   Object.values(SEC.timers).forEach(clearTimeout);
   SEC.reveal={}; SEC.timers={};
   if(TAB==='secrets'&&$('#sec-bot').innerHTML) renderSecrets();
-  if(typeof ACC!=='undefined'){ Object.values(ACC.timers).forEach(clearTimeout); ACC.reveal={}; ACC.timers={};
-    if(TAB==='secrets'&&$('#sec-access').innerHTML) renderAccess(); }
+  if(typeof ACC!=='undefined'){ Object.values(ACC.timers).forEach(clearTimeout);
+    const shown=Object.keys(ACC.reveal); ACC.reveal={}; ACC.timers={};
+    if(TAB==='secrets'&&$('#sec-access').innerHTML) shown.forEach(paintSecret); }
 }
-// One tab, two parts: the bot's secrets (#sec-bot) and how to reach each system (#sec-access).
+// One tab, two parts: how to reach each system (#sec-access), then the bot's secrets (#sec-bot).
 async function loadSecrets(){
-  const [r,a,st]=await Promise.all([api('/secrets'),api('/access'),api('/auth/status')]);
-  AUTH=st; SEC.list=r.secrets; SEC.can_edit=r.can_edit; SEC.env_file=r.env_file;
-  ACC.systems=a.systems; ACC.can_edit=a.can_edit; ACC.inventory_file=a.inventory_file;
-  renderSecrets(); renderAccess();
+  const [r,a,st]=await Promise.allSettled([api('/secrets'),api('/access'),api('/auth/status')]);
+  if(st.status==='fulfilled') AUTH=st.value;
+  // Each part on its own: one failing doesn't blank the other.
+  if(r.status==='fulfilled'){ SEC.list=r.value.secrets; SEC.can_edit=r.value.can_edit; SEC.env_file=r.value.env_file; renderSecrets(); }
+  else $('#sec-bot').innerHTML=`<div class="card"><p class="alert">Bot secrets: ${esc(r.reason.message)}</p></div>`;
+  if(a.status==='fulfilled'){ accessState(a.value); renderAccess(); }
+  else $('#sec-access').innerHTML=`<div class="card"><p class="alert">System access: ${esc(a.reason.message)}</p></div>`;
 }
 function renderSecrets(){
   const mins=Math.max(1,Math.round(((AUTH&&AUTH.stepup_until||0)*1000-Date.now())/60000));
@@ -1015,7 +1030,7 @@ function renderSecrets(){
         ${isNew?'<input id="sv-name" placeholder="NAME_OF_SECRET" autocomplete="off" style="text-transform:uppercase">':''}
         <input type="password" id="sv-val" placeholder="new value" autocomplete="new-password" style="min-width:260px">
         <button class="sm" onclick="togglePwField()">show</button>
-        <input id="sv-code" class="mono" placeholder="${PK_OK&&AUTH&&AUTH.passkeys?'code, or empty = passkey':'6-digit code'}" inputmode="numeric" autocomplete="one-time-code" maxlength="9" style="width:170px">
+        ${codeInput('sv-code')}
         <button class="go" onclick="saveSecret('${jsq(name)}',${isNew})">Save</button>
         <button class="sm" onclick="cancelEdit()">Cancel</button>
       </div>
@@ -1111,76 +1126,285 @@ async function restartNow(){
 }
 
 // ================================================================== Access
-// Each system's machines: address, port and SSH user for everyone; the SSH password for an
-// admin, revealed after a code and saved with one. Written to systems_inventory.yaml and
-// secrets.local.env at the repo root.
-var ACC={systems:[],can_edit:false,inventory_file:true,reveal:{},timers:{},edit:null};
-const akey=(s,c)=>s+'/'+c;
-function renderAccess(){
-  const editRow=(s,c)=>`<tr><td colspan="7">
-      <div class="row">
-        <input id="ac-addr" class="mono" placeholder="address" value="${esc(c.address||'')}" style="width:160px">
-        <input id="ac-port" class="mono" placeholder="port" inputmode="numeric" value="${esc(c.port??'')}" style="width:80px">
-        <input id="ac-user" class="mono" placeholder="SSH user" value="${esc(c.user||'')}" style="width:120px" autocomplete="off">
-        <input type="password" id="ac-pw" placeholder="${c.has_password?'new password (empty = keep)':'SSH password'}" autocomplete="new-password" style="width:200px">
-        <button class="sm" onclick="const i=$('#ac-pw');i.type=i.type==='password'?'text':'password'">show</button>
-        ${c.has_password?'<label class="note"><input type="checkbox" id="ac-clear"> remove password</label>':''}
-      </div>
-      <div class="row" style="margin-top:6px">
-        <input id="ac-code" class="mono" placeholder="${PK_OK&&AUTH&&AUTH.passkeys?'code, or empty = passkey':'6-digit code'}" inputmode="numeric" autocomplete="one-time-code" maxlength="9" style="width:170px">
-        <button class="go" onclick="saveAccess('${jsq(s.name)}','${jsq(c.name)}')">Save</button>
-        <button class="sm" onclick="ACC.edit=null;renderAccess()">Cancel</button>
-      </div></td></tr>`;
-  const cards=ACC.systems.map(s=>`<div class="card"><h3>${esc(s.name)}
-        ${s.site?`<span class="dim" style="font-weight:400">— ${esc(s.site)}</span>`:''}</h3>
-      ${s.description?`<p class="note">${esc(s.description)}</p>`:''}
-      <div class="scroll"><table><tr><th>component</th><th>type</th><th>address</th><th>SSH user</th><th>SSH password</th><th>last changed</th><th></th></tr>
-      ${s.components.map(c=>{
-        const k=akey(s.name,c.name), shown=ACC.reveal[k];
-        const pw=shown!==undefined?`<span class="secretval">${esc(shown)}</span>
-            <button class="sm" onclick="hideAccess('${jsq(k)}')">hide</button>`
-          :c.has_password?'<span class="masked">••••••••</span>':'<span class="dim">—</span>';
-        const addr=c.address?`${c.scheme?esc(c.scheme)+'://':''}${esc(c.address)}${c.port?':'+esc(c.port):''}`:'<span class="dim">—</span>';
-        const acts=ACC.can_edit?`${c.has_password?`<button class="sm" onclick="revealAccess('${jsq(s.name)}','${jsq(c.name)}')" ${shown!==undefined?'disabled':''}>reveal</button>`:''}
-            <button class="sm" onclick="ACC.edit='${jsq(k)}';renderAccess()">edit</button>`:'';
-        return `<tr><td class="mono">${esc(c.name)}</td><td class="dim">${esc(c.type||'')}</td><td class="mono">${addr}</td>
-          <td class="mono">${esc(c.user||'—')}</td><td>${pw}</td>
-          <td class="mono dim">${c.updated_at?`${fmtTime(c.updated_at)} by ${esc(c.updated_by||'?')}`:''}</td>
-          <td style="white-space:nowrap">${acts}</td></tr>`+(ACC.edit===k?editRow(s,c):'');
-      }).join('')||'<tr><td colspan="7" class="dim">No components.</td></tr>'}</table></div></div>`).join('');
-  $('#sec-access').innerHTML=`<div class="card"><h3>System access <span class="dim" style="font-weight:400">— how to reach each system's machines (<code>systems_inventory.yaml</code>)</span></h3>
-    ${ACC.inventory_file?'':'<p class="alert warn">There is no systems_inventory.yaml at the repo root.</p>'}
-    <p class="note">${ACC.can_edit?'Passwords are hidden: reveal asks for a code from your authenticator and shows one for 30 seconds; every save asks for a code. Each reveal and change is in the audit log.'
-      :'Addresses and users are shown; ask an admin for a password.'}</p></div>${cards}`;
+// Each system has the same four categories (Radars, Acoustics, Cameras, Compute &
+// Infrastructure); which components are in each, and what is known about each one, varies.
+// Everyone signed in sees names, categories and plain fields; an admin reveals a secret (an SSH
+// password or a secret extra field) after a code, and adds, edits or deletes with a code (or
+// passkey) on every change. Written field by field to systems_inventory.yaml and
+// secrets.local.env at the repo root: there is no way to read or write the whole file here.
+var ACC={systems:[],categories:[],can_edit:false,inventory_file:true,error:null,
+  reveal:{},timers:{},form:null,fresh:false,rows:[],cells:{},open:new Set()};   // open: systems expanded
+// A secret's key: "system/component" for the SSH password, "system/component#field" for a field.
+const akey=(s,c,f)=>s+'/'+c+(f?'#'+f:'');
+function accessState(r){ ACC.systems=r.systems; ACC.inventory_file=r.inventory_file; ACC.error=r.error||null;
+  if(r.categories) ACC.categories=r.categories; if('can_edit' in r) ACC.can_edit=r.can_edit; }
+function findComp(sys,comp){
+  const s=ACC.systems.find(x=>x.name===sys); if(!s) return null;
+  for(const cat of s.categories){ const c=cat.components.find(x=>x.name===comp); if(c) return {s,c,cat:cat.key}; }
+  return null;
 }
-async function revealAccess(sys,comp,retried){
-  if(!await ensureStepup()) return;
-  const k=akey(sys,comp);
+const codeInput=id=>`<input id="${id}" class="mono" placeholder="${PK_OK&&AUTH&&AUTH.passkeys?'code (empty: passkey)':'6-digit code'}"
+  title="The code from your authenticator app${PK_OK&&AUTH&&AUTH.passkeys?', or leave empty to use your passkey':''}"
+  inputmode="numeric" autocomplete="one-time-code" maxlength="9" style="width:200px">`;
+
+// ------------------------------------------------------------------ a secret's cell
+function secretCell(k,isSet,sys,comp,field){
+  const shown=ACC.reveal[k];
+  if(shown!==undefined) return `<span class="secretval">${esc(shown)}</span>
+    <button class="sm" onclick="hideAccess('${jsq(k)}')">hide</button>`;
+  if(!isSet) return '<span class="dim">—</span>';
+  return `<span class="masked">••••••••</span>${ACC.can_edit?` <button class="sm" onclick="revealAccess('${jsq(sys)}','${jsq(comp)}',${field?`'${jsq(field)}'`:'null'})">reveal</button>`:''}`;
+}
+// Redraw one secret's cell without touching an open form (a reveal ending mustn't wipe it).
+function paintSecret(k){
+  const id=ACC.cells[k], cell=id&&document.getElementById(id);
+  const [path,field]=k.split('#'), [sys,...rest]=path.split('/'), comp=rest.join('/');
+  const f=findComp(sys,comp);
+  if(!cell||!f){ if(!ACC.form) renderAccess(); return; }   // its row is the open edit form
+  const isSet=field?(f.c.secret_fields.find(x=>x.name===field)||{}).set:f.c.has_password;
+  cell.innerHTML=secretCell(k,isSet,sys,comp,field||null);
+}
+
+// ------------------------------------------------------------------ forms
+const SYS_FIELDS=[['name','name'],['site','location'],['description','description']];
+const COMP_FIELDS=[['name','name'],['type','type / model'],['role','role'],['scheme','scheme'],
+  ['address','IP or host'],['port','port'],['user','SSH user']];
+function sysForm(s){
+  const v=s||{}, n=s?s.categories.reduce((a,c)=>a+c.components.length,0):0;
+  return `<div class="card" style="background:var(--sunk)"><h3>${s?`Edit system ${esc(s.name)}`:'Add a system'}</h3>
+    <div class="row">
+      ${SYS_FIELDS.map(([k,label])=>`<input id="af-${k}" placeholder="${label}" value="${esc(v[k]??'')}"
+        autocomplete="off" style="width:${k==='description'?'320px':'180px'}">`).join('')}
+    </div>
+    <div class="row" style="margin-top:8px">${codeInput('af-code')}
+      <button class="go" onclick="saveSystem(${s?`'${jsq(s.name)}'`:'null'})">Save</button>
+      <button class="sm" onclick="closeForm()">Cancel</button>
+      ${s?`<button class="sm no grow" onclick="deleteSystem('${jsq(s.name)}')">delete system</button>`:''}
+    </div>
+    ${s?`<p class="hint">Deleting removes the system, its ${n} component(s) and the secrets only they hold.</p>`:''}
+  </div>`;
+}
+// The extra-fields editor works on ACC.rows, so adding or removing a row keeps what was typed.
+function fieldRows(){
+  return ACC.rows.map((r,i)=>r.removed?'':`<div class="row" style="margin-top:4px">
+      <input id="ff-n-${i}" placeholder="field name" value="${esc(r.name)}" ${r.existing&&r.secret?'disabled':''} style="width:160px" autocomplete="off">
+      <input id="ff-v-${i}" ${r.secret?'type="password" autocomplete="new-password"':'autocomplete="off"'}
+        placeholder="${r.secret?(r.existing&&r.isSet?'new value (empty = keep)':'secret value'):'value'}" value="${r.secret?'':esc(r.value)}" style="width:220px">
+      <label class="note"><input type="checkbox" id="ff-s-${i}" ${r.secret?'checked':''} ${r.existing?'disabled':''}
+        onchange="toggleSecret(${i},this.checked)"> secret</label>
+      <button class="sm no" onclick="syncRows();ACC.rows[${i}].removed=true;renderAccess()">remove</button>
+    </div>`).join('');
+}
+// Switching a row between plain and secret drops what was typed in it, so a secret never ends
+// up redrawn in a plain text box.
+function toggleSecret(i,on){
+  syncRows(); ACC.rows[i].secret=on; ACC.rows[i].value='';
+  const v=$('#ff-v-'+i); if(v) v.value='';
+  renderAccess();
+}
+function syncRows(){
+  ACC.rows.forEach((r,i)=>{ if(r.removed) return;
+    const n=$('#ff-n-'+i), v=$('#ff-v-'+i);
+    if(n&&typeof n.value==='string'&&!(r.existing&&r.secret)) r.name=n.value;
+    if(v&&typeof v.value==='string') r.value=v.value; });
+}
+function compForm(s,c,cat){
+  const v=c||{};
+  return `<tr><td colspan="6"><div class="row">
+      ${COMP_FIELDS.map(([k,label])=>`<input id="af-${k}" class="${['address','port','user','name'].includes(k)?'mono':''}"
+        placeholder="${label}" value="${esc(v[k]??'')}" autocomplete="off"
+        ${k==='port'?'inputmode="numeric" style="width:80px"':k==='scheme'?'style="width:90px"':'style="width:140px"'}>`).join('')}
+      <select id="af-category">${ACC.categories.map(x=>`<option value="${esc(x.key)}" ${x.key===cat?'selected':''}>${esc(x.label)}</option>`).join('')}</select>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <input type="password" id="af-pw" placeholder="${v.has_password?'new SSH password (empty = keep)':'SSH password (optional)'}" autocomplete="new-password" style="width:240px">
+      <button class="sm" onclick="const i=$('#af-pw');i.type=i.type==='password'?'text':'password'">show</button>
+      ${v.has_password?'<label class="note"><input type="checkbox" id="af-clear"> remove SSH password</label>':''}
+    </div>
+    <div style="margin-top:8px"><span class="note">Extra fields — only what this component has. Tick <b>secret</b> for anything sensitive (passwords, keys, communities): it's kept hidden like a password.</span>
+      ${fieldRows()}
+      <div class="row" style="margin-top:4px"><button class="sm" onclick="syncRows();ACC.rows.push({name:'',value:'',secret:false});renderAccess()">+ add field</button></div>
+    </div>
+    <div class="row" style="margin-top:8px">${codeInput('af-code')}
+      <button class="go" onclick="saveComponent('${jsq(s.name)}',${c?`'${jsq(c.name)}'`:'null'})">Save</button>
+      <button class="sm" onclick="closeForm()">Cancel</button>
+      ${c?`<button class="sm no grow" onclick="deleteComponent('${jsq(s.name)}','${jsq(c.name)}')">delete component</button>`:''}
+    </div></td></tr>`;
+}
+
+// ------------------------------------------------------------------ the part
+function renderAccess(){
+  // Keep what was typed in an open form across a redraw.
+  // (Not when a form has just been opened: what's on screen then belongs to the one before.)
+  const keep={}; if(ACC.form&&!ACC.fresh){ syncRows(); [...COMP_FIELDS,...SYS_FIELDS,['code'],['pw'],['category']].forEach(([k])=>{
+    const i=$('#af-'+k); if(i&&typeof i.value==='string') keep[k]=i.value; });
+    const clr=$('#af-clear'); if(clr&&typeof clr.checked==='boolean') keep.clear=clr.checked; }
+  ACC.fresh=false;
+  const F=ACC.form||{}, admin=ACC.can_edit;
+  ACC.cells={};
+  const cards=ACC.systems.map((s,si)=>{
+    const sections=s.categories.map((cat,ki)=>{
+      const rows=cat.components.map((c,ci)=>{
+        if(F.kind==='comp-edit'&&F.sys===s.name&&F.comp===c.name) return compForm(s,c,cat.key);
+        const k=akey(s.name,c.name), id=`acp-${si}-${ki}-${ci}`; ACC.cells[k]=id;
+        const addr=c.address?`${c.scheme?esc(c.scheme)+'://':''}${esc(c.address)}${c.port?':'+esc(c.port):''}`:'<span class="dim">—</span>';
+        const extras=[...Object.entries(c.fields).map(([n,v])=>`<span class="tchip"><b>${esc(n)}</b> ${esc(v)}</span>`),
+          ...c.secret_fields.map((f,fi)=>{ const fk=akey(s.name,c.name,f.name), fid=`${id}-f${fi}`; ACC.cells[fk]=fid;
+            return `<span class="tchip"><b>${esc(f.name)}</b> <span id="${fid}">${secretCell(fk,f.set,s.name,c.name,f.name)}</span></span>`; })];
+        return `<tr><td class="mono">${esc(c.name)}<div class="dim" style="font-family:inherit">${esc([c.type,c.role].filter(Boolean).join(' · '))}</div></td>
+          <td class="mono">${addr}</td><td class="mono">${esc(c.user||'—')}</td>
+          <td id="${id}">${secretCell(k,c.has_password,s.name,c.name,null)}</td>
+          <td>${extras.join(' ')||'<span class="dim">—</span>'}
+            ${c.updated_at?`<div class="note">changed ${fmtTime(c.updated_at)} by ${esc(c.updated_by||'?')}</div>`:''}</td>
+          <td style="white-space:nowrap">${admin?`<button class="sm" onclick="openForm('comp-edit','${jsq(s.name)}','${jsq(c.name)}')">edit</button>`:''}</td></tr>`;
+      }).join('');
+      const adding=F.kind==='comp-add'&&F.sys===s.name&&F.cat===cat.key;
+      return `<div style="margin-top:10px"><div class="row"><b>${esc(cat.label)}</b>
+          <span class="badge">${cat.components.length}</span>
+          ${admin&&!adding?`<button class="sm" onclick="openForm('comp-add','${jsq(s.name)}',null,'${jsq(cat.key)}')">+ add</button>`:''}</div>
+        ${cat.components.length||adding?`<div class="scroll"><table><tr><th>component</th><th>address</th><th>SSH user</th><th>SSH password</th><th>extra fields</th><th></th></tr>
+          ${rows}${adding?compForm(s,null,cat.key):''}</table></div>`:'<p class="note">None.</p>'}</div>`;
+    }).join('');
+    const n=s.categories.reduce((a,c)=>a+c.components.length,0);
+    const counts=s.categories.filter(c=>c.components.length).map(c=>`${c.components.length} ${esc(c.label.toLowerCase())}`).join(' · ');
+    // Collapsed by default; open while it has a form open or the admin opened it.
+    const open=ACC.open.has(s.name)||F.sys===s.name;
+    return `<details class="card sys" ${open?'open':''} ontoggle="toggleSystem('${jsq(s.name)}',this.open)">
+      <summary><b>${esc(s.name)}</b>
+        ${s.site?`<span class="dim">— ${esc(s.site)}</span>`:''}
+        <span class="badge">${n} component${n===1?'':'s'}</span>
+        <span class="dim" style="font-size:12px">${counts}</span></summary>
+      <div class="row" style="margin-top:6px">
+        ${s.description?`<span class="note">${esc(s.description)}</span>`:''}
+        ${admin?`<span class="grow"></span><button class="sm" onclick="openForm('sys-edit','${jsq(s.name)}')">edit system</button>`:''}</div>
+      ${F.kind==='sys-edit'&&F.sys===s.name?sysForm(s):''}${sections}</details>`;
+  }).join('');
+  $('#sec-access').innerHTML=`<div class="card"><h3>System access <span class="dim" style="font-weight:400">— each system's radars, acoustics, cameras and compute, and how to reach them (<code>systems_inventory.yaml</code>)</span>
+      <span class="grow"></span>${ACC.systems.length?'<button class="sm" onclick="expandAll(true)">expand all</button><button class="sm" onclick="expandAll(false)">collapse all</button>':''}
+      ${admin&&F.kind!=='sys-add'?'<button class="sm" onclick="openForm(\'sys-add\')">+ add system</button>':''}</h3>
+    ${ACC.error?`<p class="alert">${esc(ACC.error)}</p>`:ACC.inventory_file?'':'<p class="alert warn">There is no systems_inventory.yaml at the repo root yet; adding a system creates it.</p>'}
+    <p class="note">${admin?'Secrets are hidden: reveal asks for a code from your authenticator and shows a value for 30 seconds. Every add, edit and delete asks for a code (or passkey) and goes in the audit log.'
+      :'Systems, components and their plain fields are shown; ask an admin for a secret or a change.'}</p></div>
+    ${F.kind==='sys-add'?sysForm(null):''}${cards}`;
+  Object.entries(keep).forEach(([k,v])=>{ const i=$('#af-'+k); if(!i) return;
+    if(k==='clear') i.checked=v; else i.value=v; });
+}
+function toggleSystem(name,open){ open?ACC.open.add(name):ACC.open.delete(name); }
+function expandAll(open){ ACC.open=new Set(open?ACC.systems.map(s=>s.name):[]); renderAccess(); }
+function openForm(kind,sys,comp,cat){
+  ACC.form={kind,sys,comp,cat}; ACC.fresh=true;
+  const f=comp?findComp(sys,comp):null;
+  ACC.rows=f?[...Object.entries(f.c.fields).map(([name,value])=>({name,value:shownValue(value),secret:false,existing:true,
+      origName:name,raw:value})),
+    ...f.c.secret_fields.map(x=>({name:x.name,value:'',secret:true,existing:true,isSet:x.set}))]:[];
+  renderAccess(); setTimeout(()=>{ const i=$('#af-name'); if(i&&i.focus) i.focus(); },0);
+}
+function closeForm(){ ACC.form=null; ACC.rows=[]; renderAccess(); }
+// How a text box shows a value: a box can't hold a line break, and the page trims.
+const shownValue=v=>String(v??'').replace(/[\r\n]+/g,'').trim();
+const formVal=k=>{ const i=$('#af-'+k); return i&&typeof i.value==='string'?i.value.trim():''; };
+// Only what changed, so a field nobody touched is left as it is in the file.
+function diffFields(fields,orig){
+  const out={};
+  fields.forEach(([k])=>{
+    const v=formVal(k), was=orig?shownValue(orig[k]):'';
+    if(orig&&v===was) return;            // untouched
+    if(!orig&&v==='') return;            // a new item: empty fields aren't sent
+    if(k==='port'){
+      if(v!==''&&!/^\d+$/.test(v)) throw new Error('the port is a number');
+      out[k]=v===''?null:Number(v);
+    }else out[k]=v;
+  });
+  return out;
+}
+// The extra fields as the server wants them: the whole plain set (if it changed), and the
+// secret ones that are new, changed or removed.
+function fieldChanges(orig){
+  syncRows();
+  const plain={}, secret={}, seen=new Set();
+  for(const r of ACC.rows){
+    const name=(r.name||'').trim();
+    if(r.removed){ if(r.existing&&r.secret) secret[name]=null; continue; }
+    if(!name){ if(r.value) throw new Error('an extra field needs a name'); continue; }
+    if(seen.has(name.toLowerCase())) throw new Error(`two fields are called ${name}`);
+    seen.add(name.toLowerCase());
+    if(r.secret){
+      if(r.value) secret[name]=r.value;
+      else if(!r.existing) throw new Error(`give the secret field ${name} a value`);
+    }else{
+      // Untouched, it goes back exactly as the file has it (a line break, padding and all).
+      const untouched=r.existing&&name===r.origName&&r.value.trim()===shownValue(r.raw);
+      plain[name]=untouched?r.raw:r.value.trim();
+    }
+  }
+  const out={};
+  const was=orig?orig.fields:{};
+  if(JSON.stringify(Object.entries(plain))!==JSON.stringify(Object.entries(was))) out.fields=plain;
+  if(Object.keys(secret).length) out.secret_fields=secret;
+  return out;
+}
+// Send a change with the form's code (or the passkey). On success the form closes, and with it
+// everything typed into it; on failure it stays as typed, so a mistyped code is retried with
+// the next one without typing the rest again.
+async function accessCall(method,path,body,done){
+  const code=formVal('code');
   try{
-    const r=await api(`/access/${encodeURIComponent(sys)}/${encodeURIComponent(comp)}/reveal`,{method:'POST',body:{}});
-    ACC.reveal[k]=r.password;
-    clearTimeout(ACC.timers[k]); ACC.timers[k]=setTimeout(()=>hideAccess(k),REVEAL_MS);
-    renderAccess();
+    const f=await saveFactor(code); if(!f) return;
+    const r=await api('/access/'+path,{method,body:{...body,...f}});
+    Object.values(ACC.timers).forEach(clearTimeout);
+    ACC.form=null; ACC.rows=[]; ACC.reveal={}; ACC.timers={}; accessState(r); renderAccess();
+    toast(done(r),'ok');
   }catch(e){
-    if(e.message==='stepup'&&!retried){ AUTH.stepup_until=null; return revealAccess(sys,comp,true); }
+    const c=$('#af-code'); if(c) c.value='';   // a code is used once either way
     toast(e.message,'bad');
   }
 }
-function hideAccess(k){ clearTimeout(ACC.timers[k]); delete ACC.timers[k]; delete ACC.reveal[k]; renderAccess(); }
-async function saveAccess(sys,comp){
-  const body={address:$('#ac-addr').value.trim(), user:$('#ac-user').value.trim(), code:$('#ac-code').value.trim()};
-  const port=$('#ac-port').value.trim(); if(port) body.port=Number(port);
-  const pw=$('#ac-pw').value; if(pw) body.password=pw;
-  const clr=$('#ac-clear'); if(clr&&clr.checked) body.clear_password=true;
-  $('#ac-pw').value=''; $('#ac-code').value='';   // never left in the page
-  try{
-    const f=await saveFactor(body.code); delete body.code; if(!f) return; Object.assign(body,f);
-    const r=await api(`/access/${encodeURIComponent(sys)}/${encodeURIComponent(comp)}`,{method:'PUT',body});
-    ACC.edit=null; delete ACC.reveal[akey(sys,comp)];
-    ACC.systems=r.systems; renderAccess();
-    toast(r.changed.length?`Saved ${sys}/${comp}: ${r.changed.join(', ')}.`:'Nothing changed.', r.changed.length?'ok':'');
-  }catch(e){ toast(e.message,'bad'); }
+async function saveSystem(name){
+  let body; try{ body=diffFields(SYS_FIELDS,name?ACC.systems.find(s=>s.name===name):null); }
+  catch(e){ toast(e.message,'warn'); return; }
+  if(!name&&!body.name){ toast('Give the system a name.','warn'); return; }
+  if(name&&!Object.keys(body).length){ toast('Nothing changed.'); closeForm(); return; }
+  await accessCall(name?'PUT':'POST', name?`system/${encodeURIComponent(name)}`:'system', body,
+    r=>{ if(name&&body.name&&ACC.open.delete(name)){ ACC.open.add(body.name); renderAccess(); }
+      return name?`Saved ${body.name||name}: ${(r.changed||[]).join(', ')||'nothing changed'}.`:`Added system ${body.name}.`; });
 }
+async function deleteSystem(name){
+  if(!confirm(`Delete system ${name}, all its components and the secrets only they hold? This can't be undone here.`)) return;
+  await accessCall('DELETE',`system/${encodeURIComponent(name)}`,{},()=>`Deleted system ${name}.`);
+}
+async function saveComponent(sys,comp){
+  const f=comp?findComp(sys,comp):null, orig=f?f.c:null;
+  let body;
+  try{ body={...diffFields(COMP_FIELDS,orig),...fieldChanges(orig)}; }catch(e){ toast(e.message,'warn'); return; }
+  const cat=formVal('category'); if(!f||cat!==f.cat) body.category=cat;
+  const pwEl=$('#af-pw'), pw=pwEl&&typeof pwEl.value==='string'?pwEl.value:''; if(pw) body.password=pw;
+  const clr=$('#af-clear'); if(clr&&clr.checked) body.clear_password=true;
+  if(body.password&&body.clear_password){ toast('Either type a new SSH password or tick “remove”, not both.','warn'); return; }
+  if(!comp&&!body.name){ toast('Give the component a name.','warn'); return; }
+  if(comp&&!Object.keys(body).length){ toast('Nothing changed.'); closeForm(); return; }
+  const base=`system/${encodeURIComponent(sys)}/component`;
+  await accessCall(comp?'PUT':'POST', comp?`${base}/${encodeURIComponent(comp)}`:base, body,
+    r=>comp?`Saved ${sys}/${body.name||comp}: ${(r.changed||[]).join(', ')||'nothing changed'}.`:`Added ${sys}/${body.name}.`);
+}
+async function deleteComponent(sys,comp){
+  if(!confirm(`Delete component ${sys}/${comp}? Its secrets go too, unless another component holds them.`)) return;
+  await accessCall('DELETE',`system/${encodeURIComponent(sys)}/component/${encodeURIComponent(comp)}`,{},()=>`Deleted ${sys}/${comp}.`);
+}
+async function revealAccess(sys,comp,field,retried){
+  if(!await ensureStepup()) return;
+  const k=akey(sys,comp,field);
+  try{
+    const r=await api(`/access/system/${encodeURIComponent(sys)}/component/${encodeURIComponent(comp)}/reveal`,
+      {method:'POST',body:field?{field}:{}});
+    ACC.reveal[k]=r.value;
+    clearTimeout(ACC.timers[k]); ACC.timers[k]=setTimeout(()=>hideAccess(k),REVEAL_MS);
+    paintSecret(k);
+  }catch(e){
+    if(e.message==='stepup'&&!retried){ AUTH.stepup_until=null; return revealAccess(sys,comp,field,true); }
+    toast(e.message,'bad');
+  }
+}
+function hideAccess(k){ clearTimeout(ACC.timers[k]); delete ACC.timers[k]; delete ACC.reveal[k]; paintSecret(k); }
 
 // ================================================================== start
 function route(){
@@ -1206,6 +1430,6 @@ Object.assign(window,{showTab,runSelftest,openDeploy,startDeploy,loadConvos,open
   previewSlug,toggleTopic,addTopic,setMode,renderSyms,addSym,renderSigs,moveSec,rmSec,addSec,saveCase,renameCase,
   deleteCase,openDoc,renderDoc,saveDoc,loadStats,loadSystems,toggleSite,runTriage,loadBot,
   doLogin,logout,loadSecrets,renderSecrets,revealSecret,hideSecret,copySecret,editSecret,addSecret,cancelEdit,
-  togglePwField,saveSecret,restartNow,refreshDeploy,SEC,renderAccess,revealAccess,hideAccess,saveAccess,ACC,
+  togglePwField,saveSecret,restartNow,refreshDeploy,SEC,renderAccess,openForm,closeForm,saveSystem,deleteSystem,saveComponent,deleteComponent,revealAccess,hideAccess,syncRows,toggleSecret,toggleSystem,expandAll,fieldChanges,ACC,
   loginPasskey,togglePasskeys,renderPasskeys,registerPasskey,removePasskey});
 </script></body></html>

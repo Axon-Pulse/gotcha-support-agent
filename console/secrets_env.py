@@ -6,23 +6,22 @@ The file stays the bot's: same place, same NAME=value lines, comments and order 
 `docker compose` (env_file) and `make dev` (`. ./.env`) read it as before. Who changed what,
 and when, is kept beside it in console/state/secrets_meta.json, without values.
 """
-import json
 import re
-import threading
-import time
 
 from console import ops
-from console.auth import write_private
+from console.files import env_update, file_lock, meta_load, meta_save, meta_touch
+from console.safe_text import has_control
 from console.settings import S
 
 NAME_RX = re.compile(r"[A-Z][A-Z0-9_]{1,63}")
-LINE_RX = re.compile(r"^\s*([A-Z][A-Z0-9_]*)=(.*)$")
+# A NEW entry must look like a secret. Anything else the bot reads from its environment
+# (CLAUDE_BIN, LD_PRELOAD, HTTPS_PROXY, ANTHROPIC_BASE_URL…) could change what it runs or
+# where it sends the key, which is more than managing a secret. Existing entries stay editable.
+NEW_NAME_RX = re.compile(r"[A-Z][A-Z0-9_]{0,55}_(TOKEN|KEY|SECRET|PASSWORD|PW)")
 # Written bare when it is only these; otherwise in single quotes, which both docker compose
 # and the shell take literally (no $VAR expansion, no # comment).
 BARE_RX = re.compile(r"[A-Za-z0-9._:/+=@,%-]*")
 MAX_LEN = 4096
-
-_LOCK = threading.Lock()
 
 
 class SecretError(ValueError):
@@ -39,20 +38,13 @@ def _unquote(v: str) -> str:
     return v
 
 
-def _meta() -> dict:
-    try:
-        return json.loads(S.secrets_meta_file.read_text(encoding="utf-8"))
-    except (FileNotFoundError, ValueError):
-        return {}
-
-
 def hidden() -> dict[str, str]:
     """name -> value for the entries the console doesn't show. Stays in this process."""
-    return {k: _unquote(v) for k, v in ops._env_lines() if k not in ops.SHOWN}
+    return {k: _unquote(v) for k, v in ops.bot_env_entries() if k not in ops.SHOWN}
 
 
 def listing() -> list[dict]:
-    meta = _meta()
+    meta = meta_load(S.secrets_meta_file)
     return [{"name": k, "set": bool(v), "updated_at": meta.get(k, {}).get("at"),
              "updated_by": meta.get(k, {}).get("by")}
             for k, v in sorted(hidden().items())]
@@ -74,8 +66,9 @@ def _line(name: str, val: str) -> str:
     return f"{name}='{val}'"
 
 
-def put(name: str, val: str, who: str) -> dict:
-    """Set one hidden entry, leaving every other line of .env as it was."""
+def precheck(name: str, val: str) -> str:
+    """Everything that can be said about a name and value without the file: run before the
+    admin's code is spent. Returns the line that would be written."""
     if not NAME_RX.fullmatch(name or ""):
         raise SecretError("a name is capital letters, digits and _, starting with a letter")
     if name in ops.SHOWN:
@@ -84,27 +77,20 @@ def put(name: str, val: str, who: str) -> dict:
         raise SecretError("the value is empty")
     if len(val) > MAX_LEN:
         raise SecretError(f"the value is longer than {MAX_LEN} characters")
-    if any(c in val for c in "\n\r\0"):
-        raise SecretError("the value has a line break in it")
-    new = _line(name, val)
-    with _LOCK:
-        p = _path()
-        try:
-            lines = p.read_text(encoding="utf-8").splitlines()
-        except FileNotFoundError:
-            lines = []
-        done = False
-        for i, line in enumerate(lines):
-            m = LINE_RX.match(line)
-            if m and m.group(1) == name:
-                if done:
-                    lines[i] = ""  # a duplicate later in the file would win; drop it
-                else:
-                    lines[i], done = new, True
-        if not done:
-            lines.append(new)
-        write_private(p, "\n".join(lines) + "\n")
-        meta = _meta()
-        meta[name] = {"at": round(time.time(), 3), "by": who}
-        write_private(S.secrets_meta_file, json.dumps(meta, indent=1, sort_keys=True))
+    if has_control(val):
+        raise SecretError("the value has a line break or another control character in it")
+    if name not in hidden() and not NEW_NAME_RX.fullmatch(name):
+        raise SecretError("a new secret's name must end in _TOKEN, _KEY, _SECRET, _PASSWORD "
+                          "or _PW; other settings of the bot are changed on the server")
+    return _line(name, val)
+
+
+def put(name: str, val: str, who: str) -> dict:
+    """Set one hidden entry, leaving every other line of .env as it was."""
+    with file_lock("bot-env"):
+        line = precheck(name, val)  # again, under the lock: the file may have changed
+        env_update(_path(), {name: line})
+        meta = meta_load(S.secrets_meta_file)
+        meta_touch(meta, name, who)
+        meta_save(S.secrets_meta_file, meta)
     return next(r for r in listing() if r["name"] == name)

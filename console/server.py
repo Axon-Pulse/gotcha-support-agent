@@ -20,7 +20,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, StrictInt
 
 from console import access, auth, conversations, kb, ops, passkeys, secrets_env, sites
 from console.settings import S
@@ -29,6 +29,7 @@ HERE = Path(__file__).resolve().parent
 app = FastAPI(title="gotcha support console", docs_url=None, redoc_url=None, openapi_url=None)
 
 WRITES = {"POST", "PUT", "PATCH", "DELETE"}
+MAX_BODY = 64 * 1024  # every request here is a small JSON body
 # Reachable before signing in: the page itself, and what it needs to show the sign-in form.
 NO_SESSION = {"/", "/api/auth/status", "/api/auth/login", "/api/passkeys/options"}
 
@@ -47,6 +48,18 @@ def caller(request: Request) -> str | None:
 
 @app.middleware("http")
 async def gate(request: Request, call_next):
+    try:
+        if int(request.headers.get("content-length") or 0) > MAX_BODY:
+            return JSONResponse({"detail": "request too large"}, status_code=413)
+    except ValueError:
+        return JSONResponse({"detail": "bad Content-Length"}, status_code=400)
+    if S.allowed_hosts:
+        # The Host the page was opened as. Set it, and a page elsewhere that points its own
+        # name at this machine (DNS rebinding) gets nothing back.
+        host = passkeys.host_name(request).lower()
+        if host not in S.allowed_hosts:
+            return JSONResponse({"detail": f"unexpected Host {host!r} (CONSOLE_ALLOWED_HOSTS)"},
+                                status_code=421)
     who = caller(request)
     if who is None:
         login = request.headers.get("tailscale-user-login")
@@ -121,11 +134,15 @@ class Code(BaseModel):
 
 
 def _auth_status(request: Request) -> dict:
+    """Before sign-in only what the sign-in form needs; role and passkeys once signed in, so
+    a request with a forged header alone learns no more than whether a login is set up."""
     s = request.state.session
-    return {"who": request.state.who, "role": request.state.role,
-            "enrolled": auth.enrolled(request.state.who), "logged_in": s is not None,
-            "stepup_until": s["stepup_until"] if s and auth.stepup_ok(s) else None,
-            "stepup_seconds": S.stepup_seconds, "passkeys": passkeys.count(request.state.who)}
+    out = {"who": request.state.who, "enrolled": auth.enrolled(request.state.who),
+           "logged_in": s is not None, "stepup_seconds": S.stepup_seconds}
+    if s is not None:
+        out.update(role=request.state.role, passkeys=passkeys.count(request.state.who),
+                   stepup_until=s["stepup_until"] if auth.stepup_ok(s) else None)
+    return out
 
 
 @app.get("/api/auth/status")
@@ -219,7 +236,9 @@ def passkey_register(req: PasskeyAdd, request: Request):
 
 
 @app.delete("/api/passkeys/{cred_id}")
-def passkey_remove(cred_id: str, request: Request):
+def passkey_remove(cred_id: str, req: Code, request: Request):
+    # A code here too: someone at an unlocked browser shouldn't be able to strip the passkeys.
+    check_code(request, req.code, "passkey-remove", request.state.who, req.passkey)
     if not passkeys.remove(request.state.who, cred_id):
         raise HTTPException(404, "no such passkey")
     audit(request, "passkey-removed", request.state.who)
@@ -261,11 +280,15 @@ def save_secret(name: str, req: SecretSave, request: Request):
     require_admin(request, f"set {name}")
     # A code on every save, even inside the step-up window: a change is the one thing here
     # that can lock the bot out of Slack or Anthropic.
+    try:
+        secrets_env.precheck(name, req.value)  # a typo shouldn't use up the admin's code
+    except secrets_env.SecretError as e:
+        raise HTTPException(400, str(e)) from None
     check_code(request, req.code, "set-secret", name, req.passkey)
     try:
         row = secrets_env.put(name, req.value, request.state.who)
     except secrets_env.SecretError as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from None
     audit(request, "set-secret", name)
     out = {"status": "saved", "secret": row}
     try:
@@ -288,17 +311,70 @@ def restart_bot(request: Request):
 
 
 # --------------------------------------------------------------------------
-# Access: each system's addresses, SSH users and SSH passwords
+# Access: each system's categories and components, and their fields and secrets
 # --------------------------------------------------------------------------
+# Reading is for everyone signed in, and never includes a password. Every change, and every
+# reveal, is an admin's, confirmed with a code or passkey, and audited without values.
 
-class AccessSave(BaseModel):
+class SystemAdd(Code):
+    name: str
+    site: str = ""
+    description: str = ""
+
+
+class SystemEdit(Code):
+    name: str | None = None
+    site: str | None = None
+    description: str | None = None
+
+
+class ComponentFields(Code):
+    category: str | None = None
+    type: str | None = None
+    role: str | None = None
+    scheme: str | None = None
     address: str | None = None
-    port: int | None = None
+    port: StrictInt | None = None
     user: str | None = None
     password: str | None = None
     clear_password: bool = False
-    code: str = ""
-    passkey: dict | None = None
+    fields: dict[str, str] | None = None                 # the whole set of plain extra fields
+    secret_fields: dict[str, str | None] | None = None   # name -> new value, or null to remove
+
+
+class ComponentAdd(ComponentFields):
+    name: str
+    category: str
+
+
+class ComponentEdit(ComponentFields):
+    name: str | None = None
+
+
+def _changes(req: BaseModel) -> dict:
+    """Only the fields the page sent: a field left out is left alone."""
+    return {k: getattr(req, k) for k in req.model_fields_set if k not in ("code", "passkey")}
+
+
+def _access_error(e: "access.AccessError") -> HTTPException:
+    status = 404 if isinstance(e, access.NotFound) else 409 if isinstance(e, access.Conflict) else 400
+    return HTTPException(status, str(e))
+
+
+def _access_change(request: Request, req: Code, action: str, target: str, fn):
+    require_admin(request, f"{action} {target}")
+    try:
+        changes = _changes(req)
+        fields_now = (access.current_fields(*target.split("/", 1))
+                      if "fields" in changes and "/" in target else None)
+        access.precheck(changes, fields_now)
+    except access.AccessError as e:  # a typo shouldn't use up the admin's code
+        raise _access_error(e) from None
+    check_code(request, req.code, action, target, req.passkey)
+    try:
+        return fn()
+    except access.AccessError as e:
+        raise _access_error(e) from None
 
 
 @app.get("/api/access")
@@ -306,37 +382,80 @@ def list_access(request: Request):
     return {**access.listing(), "can_edit": request.state.role == "admin"}
 
 
-@app.post("/api/access/{system}/{component}/reveal")
-def reveal_password(system: str, component: str, request: Request):
+@app.post("/api/access/system")
+def add_system(req: SystemAdd, request: Request):
+    name = _access_change(request, req, "add-system", req.name, lambda: access.add_system(
+        req.name, request.state.who, req.site, req.description))
+    audit(request, "add-system", name)
+    return {"status": "saved", **access.listing()}
+
+
+@app.put("/api/access/system/{system}")
+def edit_system(system: str, req: SystemEdit, request: Request):
+    changed = _access_change(request, req, "edit-system", system, lambda: access.edit_system(
+        system, request.state.who, _changes(req)))
+    if changed:
+        audit(request, "edit-system", system, fields=changed,
+              **({"to": req.name.strip()} if "name" in changed else {}))
+    return {"status": "saved" if changed else "unchanged", "changed": changed, **access.listing()}
+
+
+@app.delete("/api/access/system/{system}")
+def delete_system(system: str, req: Code, request: Request):
+    n = _access_change(request, req, "delete-system", system, lambda: access.delete_system(system))
+    audit(request, "delete-system", system, components=n)
+    return {"status": "deleted", **access.listing()}
+
+
+@app.post("/api/access/system/{system}/component")
+def add_component(system: str, req: ComponentAdd, request: Request):
+    target = f"{system}/{req.name}"
+    changed = _access_change(request, req, "add-component", target, lambda: access.add_component(
+        system, req.name, request.state.who, {k: v for k, v in _changes(req).items() if k != "name"}))
+    audit(request, "add-component", target, fields=changed)
+    return {"status": "saved", "changed": changed, **access.listing()}
+
+
+@app.put("/api/access/system/{system}/component/{component}")
+def edit_component(system: str, component: str, req: ComponentEdit, request: Request):
+    target = f"{system}/{component}"
+    changed = _access_change(request, req, "edit-component", target, lambda: access.edit_component(
+        system, component, request.state.who, _changes(req)))
+    if changed:
+        audit(request, "edit-component", target, fields=changed,
+              **({"to": req.name.strip()} if "name" in changed else {}))
+    return {"status": "saved" if changed else "unchanged", "changed": changed, **access.listing()}
+
+
+@app.delete("/api/access/system/{system}/component/{component}")
+def delete_component(system: str, component: str, req: Code, request: Request):
+    target = f"{system}/{component}"
+    _access_change(request, req, "delete-component", target,
+                   lambda: access.delete_component(system, component))
+    audit(request, "delete-component", target)
+    return {"status": "deleted", **access.listing()}
+
+
+class RevealReq(BaseModel):
+    field: str | None = None   # a secret field's name; none for the SSH password
+
+
+@app.post("/api/access/system/{system}/component/{component}/reveal")
+def reveal_access(system: str, component: str, req: RevealReq, request: Request):
+    """An SSH password (no field), or one secret extra field."""
     target = f"{system}/{component}"
     require_admin(request, f"reveal {target}")
     if not auth.stepup_ok(request.state.session):
         raise HTTPException(403, "stepup")
     try:
-        pw = access.password(system, component)
-    except KeyError:
-        raise HTTPException(404, f"no component {target}")
-    if pw is None:
-        raise HTTPException(404, f"{target} has no password set")
-    audit(request, "reveal-password", target)
-    return JSONResponse({"system": system, "component": component, "password": pw},
-                        headers={"Cache-Control": "no-store", "Pragma": "no-cache"})
-
-
-@app.put("/api/access/{system}/{component}")
-def save_access(system: str, component: str, req: AccessSave, request: Request):
-    target = f"{system}/{component}"
-    require_admin(request, f"set {target}")
-    check_code(request, req.code, "set-access", target, req.passkey)
-    try:
-        changed = access.update(system, component, request.state.who, address=req.address,
-                                port=req.port, user=req.user, password=req.password,
-                                clear_password=req.clear_password)
+        value = access.secret(system, component, req.field)
     except access.AccessError as e:
-        raise HTTPException(400, str(e))
-    if changed:
-        audit(request, "set-access", target, fields=changed)
-    return {"status": "saved" if changed else "unchanged", "changed": changed, **access.listing()}
+        raise _access_error(e) from None
+    if value is None:
+        raise HTTPException(404, f"{target} has no value set")
+    audit(request, "reveal-access", target, field=req.field or "ssh password")
+    return JSONResponse({"system": system, "component": component, "field": req.field, "value": value},
+                        headers={"Cache-Control": "no-store", "Pragma": "no-cache"})
 
 
 # --------------------------------------------------------------------------

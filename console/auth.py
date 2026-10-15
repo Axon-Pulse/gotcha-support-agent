@@ -22,20 +22,20 @@ forged header alone gets neither a session nor a secret.
 import hashlib
 import hmac
 import json
-import os
 import secrets
 import sys
 import threading
 import time
-from pathlib import Path
 
 import pyotp
 
+from console.files import file_lock, write_private
 from console.settings import S
 
 ISSUER = "Gotcha support console"
 MAX_FAILS = 5
-LOCK_SECONDS = 300
+LOCK_SECONDS = 300        # the first lock; each one after it is twice as long
+MAX_LOCK_SECONDS = 86400
 IDLE_SECONDS = 2 * 3600
 RECOVERY_CODES = 8
 # No 0/o, 1/l/i: a recovery code is read off paper.
@@ -58,28 +58,9 @@ def role(who: str) -> str:
 # Files only the console user may read
 # --------------------------------------------------------------------------
 
-def write_private(path: Path, text: str) -> None:
-    """Replace `path` with `text`, owner-only from the first byte, never half-written."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(4)}.tmp")
-    fd = os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(text)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, path)
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
-
-
 # --------------------------------------------------------------------------
 # The TOTP store: console/state/totp.json
 # --------------------------------------------------------------------------
-
-_LOCK = threading.Lock()
-
 
 def _load() -> dict:
     try:
@@ -111,7 +92,7 @@ def enroll(who: str, force: bool = False) -> tuple[str, str, list[str]]:
         raise AuthError("give the login as Tailscale shows it, e.g. name@company.com")
     secret = pyotp.random_base32()
     codes = _new_codes()
-    with _LOCK:
+    with file_lock("auth"):
         store = _load()
         if who in store and not force:
             raise AuthError(f"{who} is already enrolled (use --force to replace)")
@@ -133,7 +114,7 @@ def new_recovery_codes(who: str) -> list[str]:
     and so the entry in their authenticator app, stays."""
     who = who.strip().lower()
     codes = _new_codes()
-    with _LOCK:
+    with file_lock("auth"):
         store = _load()
         if who not in store:
             raise AuthError(f"{who} is not enrolled")
@@ -142,17 +123,27 @@ def new_recovery_codes(who: str) -> list[str]:
     return [f"{c[:4]}-{c[4:]}" for c in codes]
 
 
+def _restore(who: str, entry: dict | None) -> None:
+    """Put back what `who` had before an enrolment that wasn't confirmed."""
+    with file_lock("auth"):
+        store = _load()
+        if entry is None:
+            store.pop(who, None)
+        else:
+            store[who] = entry
+        _save(store)
+
+
 def reset(who: str) -> bool:
     """Remove `who`'s authenticator and their passkeys (a lost phone may hold both)."""
     who = who.strip().lower()
-    with _LOCK:
+    with file_lock("auth"):
         store = _load()
         if store.pop(who, None) is None:
             return False
         _save(store)
     from console import passkeys
-    for k in passkeys.listing(who):
-        passkeys.remove(who, k["id"])
+    passkeys.remove_all(who)
     return True
 
 
@@ -160,10 +151,16 @@ def verify(who: str, code: str) -> None:
     """Raise AuthError unless `code` is `who`'s current TOTP code or an unused recovery code.
 
     A TOTP code is accepted once: its time step is remembered, so a code seen over someone's
-    shoulder can't be used again in the same 90 seconds. Five wrong codes lock the login for
-    five minutes."""
+    shoulder can't be used again in the same 90 seconds. Five wrong codes lock the login, for
+    five minutes the first time and twice as long each time after, up to a day."""
     code = (code or "").strip().replace(" ", "")
-    with _LOCK:
+    # Something that can't be a code isn't a guess: it doesn't count towards the lock, so
+    # empty or junk requests can't be used to lock someone out.
+    looks_like_code = (code.isascii() and code.isdigit() and len(code) == 6) or \
+        (code.isascii() and len(_norm_recovery(code)) == 8)
+    if not looks_like_code:
+        raise AuthError("enter the 6-digit code from your authenticator app, or a recovery code")
+    with file_lock("auth"):
         store = _load()
         entry = store.get(who)
         if entry is None:
@@ -174,7 +171,7 @@ def verify(who: str, code: str) -> None:
             wait = int(entry["locked_until"] - now) + 1
             raise AuthError(f"too many wrong codes; try again in {wait}s")
         ok = reused = False
-        if code.isdigit() and len(code) == 6:
+        if code.isascii() and code.isdigit() and len(code) == 6:
             totp = pyotp.TOTP(entry["secret"])
             step_now = int(now // totp.interval)
             for step in (step_now - 1, step_now, step_now + 1):
@@ -191,13 +188,18 @@ def verify(who: str, code: str) -> None:
                 entry["recovery"].remove(h)
                 ok = True
         if ok:
-            entry["fails"] = 0
+            entry["fails"] = entry["locks"] = 0
         elif reused:
             pass  # the right code, just spent: not a guess, so it doesn't count towards the lock
         else:
             entry["fails"] = entry.get("fails", 0) + 1
             if entry["fails"] >= MAX_FAILS:
-                entry["fails"], entry["locked_until"] = 0, now + LOCK_SECONDS
+                # Five wrong codes lock the login, each lock twice as long as the one before
+                # (5 min, 10, 20 … up to a day) until a code is right: guessing a 6-digit
+                # code at that rate is hopeless, even for a process on this host.
+                entry["locks"] = entry.get("locks", 0) + 1
+                wait = min(LOCK_SECONDS * 2 ** (entry["locks"] - 1), MAX_LOCK_SECONDS)
+                entry["fails"], entry["locked_until"] = 0, now + wait
         _save(store)
     if reused:
         raise AuthError("that code was already used; wait for the app to show the next one")
@@ -305,6 +307,7 @@ def _cli(argv: list[str]) -> int:
             return 0
         print(f"{who} was not enrolled.")
         return 1
+    previous = _load().get(who)
     try:
         secret, uri, codes = enroll(who, force="--force" in args)
     except AuthError as e:
@@ -320,9 +323,15 @@ def _cli(argv: list[str]) -> int:
         first = input("\nEnter the 6-digit code the app shows now, to confirm: ")
         verify(who, first)
     except (AuthError, EOFError, KeyboardInterrupt) as e:
-        reset(who)
-        print(f"\nNot confirmed ({e or 'cancelled'}); enrolment undone. Run it again.")
+        _restore(who, previous)
+        what = "the previous authenticator stays" if previous else "enrolment undone"
+        print(f"\nNot confirmed ({e or 'cancelled'}); {what}. Run it again.")
         return 1
+    if previous is not None:
+        # Replacing someone's authenticator is for a lost or new phone, which may hold a
+        # passkey too: those go, and are registered again from the page.
+        from console import passkeys
+        passkeys.remove_all(who)
     print(f"\nDone. {who} signs in to the console with the app's code (role: {role(who)}).")
     return 0
 

@@ -75,13 +75,30 @@ def _capture(client, env, monkeypatch) -> dict:
         "/api/secrets/SLACK_BOT_TOKEN/reveal", headers=ADMIN, json={}).json()
     r["PUT /secrets/SLACK_BOT_TOKEN"] = client.put("/api/secrets/SLACK_BOT_TOKEN", headers=ADMIN, json={
         "value": "xoxb-y", "code": auth._now.code("admin@example.com")}).json()
-    S.inventory_file.write_text("systems:\n  gotcha5:\n    site: Test\n    components:\n"
-                                "      1: {type: node, address: 10.0.0.1, access: {ssh: {user: admin, password_env: NODE_1_SSH_PW}}}\n")
-    S.device_secrets_file.write_text("NODE_1_SSH_PW=pw\n")
+    S.inventory_file.write_text(
+        "systems:\n  gotcha5:\n    site: Test\n    components:\n"
+        "      1: {type: node, domain: radar, address: 10.0.0.1, fields: {azimuth: '120'},\n"
+        "          secret_fields: [{name: web password, env: G5_1_WEB_PW}],\n"
+        "          access: {ssh: {user: admin, password_env: NODE_1_SSH_PW}}}\n")
+    S.device_secrets_file.write_text("NODE_1_SSH_PW=pw\nG5_1_WEB_PW=webpw\n")
     r["/access"] = client.get("/api/access", headers=ADMIN).json()
-    r["POST /access/gotcha5/1/reveal"] = client.post("/api/access/gotcha5/1/reveal", headers=ADMIN, json={}).json()
-    r["PUT /access/gotcha5/1"] = client.put("/api/access/gotcha5/1", headers=ADMIN, json={
-        "address": "10.0.0.2", "code": auth._now.code("admin@example.com")}).json()
+    code = lambda: auth._now.code("admin@example.com")  # noqa: E731
+    base = "/access/system/gotcha5/component"
+    r[f"POST {base}/1/reveal"] = client.post(f"/api{base}/1/reveal", headers=ADMIN, json={}).json()
+    r[f"PUT {base}/1"] = client.put(f"/api{base}/1", headers=ADMIN, json={
+        "address": "10.0.0.2", "fields": {"azimuth": "125", "firmware": "4.2"},
+        "secret_fields": {"snmp community": "c1"}, "code": code()}).json()
+    r[f"POST {base}"] = client.post(f"/api{base}", headers=ADMIN, json={
+        "name": "cam", "category": "cameras", "type": "camera", "address": "10.0.0.3", "code": code()}).json()
+    r[f"DELETE {base}/cam"] = client.request("DELETE", f"/api{base}/cam", headers=ADMIN, json={"code": code()}).json()
+    r["POST /access/system"] = client.post("/api/access/system", headers=ADMIN, json={
+        "name": "gotcha9", "site": "Eilat", "code": code()}).json()
+    r["PUT /access/system/gotcha9"] = client.put("/api/access/system/gotcha9", headers=ADMIN, json={
+        "site": "Eilat port", "code": code()}).json()
+    r["DELETE /access/system/gotcha9"] = client.request("DELETE", "/api/access/system/gotcha9", headers=ADMIN,
+                                                        json={"code": code()}).json()
+    for k in [k for k in r if "access/" in k]:
+        assert "systems" in r[k] or "value" in r[k], (k, r[k])
     get("/passkeys")
     for _ in range(200):
         if not ops.DEPLOY.running:

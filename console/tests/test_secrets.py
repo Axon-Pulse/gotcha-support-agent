@@ -124,6 +124,12 @@ def test_a_new_secret_is_added_and_odd_characters_are_quoted(client, secrets, cl
     ("SLACK_BOT_TOKEN", "a\nEVIL=1"),
     ("SLACK_BOT_TOKEN", ""),
     ("SLACK_BOT_TOKEN", "it's $odd"),
+    ("SLACK_BOT_TOKEN", "a\u2028BRIDGE_ALLOWED_HOSTS=.*"),   # str.splitlines() splits here
+    ("SLACK_BOT_TOKEN", "a\x85B=c"),
+    ("SLACK_BOT_TOKEN", "a\x0bB=c"),
+    ("CLAUDE_BIN_X", "x"),          # a new name that isn't a secret's
+    ("LD_PRELOAD", "/tmp/x.so"),
+    ("HTTPS_PROXY", "http://evil"),
 ])
 def test_names_and_values_that_cant_be_written_safely_are_refused(client, secrets, clock, name, value):
     assert _save(client, clock, name, value).status_code == 400
@@ -173,4 +179,34 @@ def test_restart_now_is_for_admins(client, secrets):
     assert client.post("/api/bot/restart", json={}).status_code == 403
     r = client.post("/api/bot/restart", json={}, headers=ADMIN)
     assert r.status_code == 200 and r.json()["restart_triggered"]
+    _wait_job()
+
+
+def test_a_new_secret_must_be_named_like_one_but_existing_ones_stay_editable(client, secrets, clock):
+    S.bridge_dir.joinpath(".env").write_text(ENV + "OLD_STYLE_NAME=x\n")
+    assert _save(client, clock, "OLD_STYLE_NAME", "y").status_code == 200
+    assert _save(client, clock, "LINEAR_API_KEY", "k").status_code == 200
+    assert _save(client, clock, "ANTHROPIC_BASE_URL", "http://evil").status_code == 400
+
+
+def test_a_second_save_during_a_waiting_restart_doesnt_restart_twice(client, secrets, clock, monkeypatch):
+    import threading
+    from console import conversations
+    done = threading.Event()  # questions stay in flight until the test says so
+    monkeypatch.setattr(conversations, "in_flight", lambda: [] if done.is_set() else [{"outcome": "running"}])
+    _save(client, clock, "SLACK_BOT_TOKEN", "xoxb-1")
+    r = _save(client, clock, "SLACK_BOT_TOKEN", "xoxb-2").json()
+    assert r["restart_triggered"] and "already waiting" in r["restart_note"]
+    assert not ops.DEPLOY.snapshot()["restart_queued"]
+    done.set()
+    _wait_job()
+
+
+def test_a_typo_in_a_bot_secret_doesnt_use_up_the_code(client, secrets, clock):
+    code = clock.code("admin@example.com")
+    for name, value in [("SLACK_BOT_TOKEN", "a\nb"), ("BRIDGE_MODEL", "x"), ("LD_PRELOAD", "x")]:
+        r = client.put(f"/api/secrets/{name}", headers=ADMIN, json={"value": value, "code": code})
+        assert r.status_code == 400
+    r = client.put("/api/secrets/SLACK_BOT_TOKEN", headers=ADMIN, json={"value": "xoxb-ok", "code": code})
+    assert r.status_code == 200
     _wait_job()

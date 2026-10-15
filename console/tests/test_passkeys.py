@@ -147,7 +147,9 @@ def test_stepup_and_confirm_challenges_need_a_session(raw_client, pk):
 def test_removing_a_passkey_and_a_reset_removes_them_all(client, pk, clock):
     _register(client, clock)
     kid = client.get("/api/passkeys").json()["passkeys"][0]["id"]
-    assert client.request("DELETE", f"/api/passkeys/{kid}", json={}).json()["passkeys"] == []
+    assert client.request("DELETE", f"/api/passkeys/{kid}", json={}).status_code == 401  # needs a code
+    r = client.request("DELETE", f"/api/passkeys/{kid}", json={"code": clock.code("local")})
+    assert r.json()["passkeys"] == []
     _register(client, clock)
     auth.reset("local")
     assert passkeys.listing("local") == []
@@ -160,3 +162,16 @@ def test_the_rp_id_is_the_host_name_without_port(monkeypatch):
     assert passkeys.origin_of(req) == ("https://gotcha-server.tail1234.ts.net", "gotcha-server.tail1234.ts.net")
     monkeypatch.setattr(S, "rp_id", "example.ts.net")
     assert passkeys.origin_of(req)[1] == "example.ts.net"
+
+
+def test_a_forced_re_enrolment_removes_passkeys_once_confirmed(client, pk, clock, monkeypatch):
+    _register(client, clock)
+    old = auth._load()["local"]["secret"]
+    monkeypatch.setattr("builtins.input", lambda _: "000000")
+    assert auth._cli(["enroll", "local", "--force"]) == 1
+    assert auth._load()["local"]["secret"] == old and passkeys.count("local") == 1  # kept
+    import pyotp
+    monkeypatch.setattr("builtins.input",
+                        lambda _: pyotp.TOTP(auth._load()["local"]["secret"]).at(clock.t + 30))
+    assert auth._cli(["enroll", "local", "--force"]) == 0
+    assert auth._load()["local"]["secret"] != old and passkeys.count("local") == 0
