@@ -17,7 +17,7 @@ Two files at the repo root, both gitignored, in the shape the retired bot used:
             domain: radar | acoustic | optic | infra     (the category)
             address, port                                 (any component)
             # a sensor (radar, acoustic, camera):
-            version, gui, gui_password_env, azimuth, elevation,
+            version, gui, gui_user, gui_password_env, azimuth, elevation,
             fov_from, fov_to, range
             # compute & infrastructure:
             type, role, scheme, access: {ssh: {user, password_env}}
@@ -570,12 +570,12 @@ CHECKS = {
     "type": lambda v: _text(v, "type"), "role": lambda v: _text(v, "role"),
     "version": lambda v: _text(v, "version"), "model": lambda v: _text(v, "model"),
     "scheme": _scheme, "address": _address, "port": _port, "user": _user,
-    "gui": _url, "web": _url, "rustdesk_ip": _address,
+    "gui": _url, "gui_user": _login, "web": _url, "rustdesk_ip": _address,
     "azimuth": _azimuth, "elevation": _elevation, "fov_from": _fov, "fov_to": _fov, "range": _range,
     "latitude": _latitude, "longitude": _longitude, "altitude": _altitude,
 }
 # A component's plain values, written straight into it.
-COMPONENT_PLAIN = ("type", "role", "version", "model", "scheme", "address", "port", "gui", "web",
+COMPONENT_PLAIN = ("type", "role", "version", "model", "scheme", "address", "port", "gui", "gui_user", "web",
                    "rustdesk_ip", "azimuth", "elevation", "fov_from", "fov_to", "range")
 SYSTEM_PLAIN = ("site", "description", "latitude", "longitude", "altitude")
 # Fixed passwords to remove: the SSH password and the slots.
@@ -677,7 +677,7 @@ def listing() -> dict:
                 "name": str(cname), "type": c.get("type"), "role": c.get("role"),
                 "scheme": c.get("scheme"), "address": c.get("address"), "port": c.get("port"),
                 "user": _ssh(c).get("user"), "has_password": is_set(env),
-                "version": c.get("version"), "gui": c.get("gui"),
+                "version": c.get("version"), "gui": c.get("gui"), "gui_user": c.get("gui_user"),
                 # Numbers only if they are finite ones: a hand-written .nan can't break the page.
                 **{k: _num(c.get(k)) for k in ("azimuth", "elevation", "fov_from", "fov_to", "range")},
                 "model": c.get("model"),

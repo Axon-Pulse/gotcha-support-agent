@@ -663,22 +663,22 @@ def test_a_viewer_gets_no_window(client, inv):
 def test_a_sensor_has_its_own_fields(client, inv):
     r = _call(client, inv, "POST", "system/gotcha5/component", name="rdr-2", category="radars",
               version="4.2.1", address="10.0.0.22", port=443, gui="https://10.0.0.22/ui",
-              gui_password="gui-pw", azimuth=120, elevation="-2.5")
+              gui_user="admin@site", gui_password="gui-pw", azimuth=120, elevation="-2.5")
     assert r.status_code == 200, r.text
     assert _comp("gotcha5", "rdr-2") == {
         "domain": "radar", "version": "4.2.1", "address": "10.0.0.22", "port": 443,
-        "gui": "https://10.0.0.22/ui", "azimuth": 120, "elevation": -2.5,
+        "gui": "https://10.0.0.22/ui", "gui_user": "admin@site", "azimuth": 120, "elevation": -2.5,
         "gui_password_env": "GOTCHA5_RDR_2_GUI_PW"}
     assert "GOTCHA5_RDR_2_GUI_PW=gui-pw\n" in _secrets() and "gui-pw" not in r.text
     c = _find(r.json(), "gotcha5", "rdr-2")
-    assert (c["version"], c["gui"], c["azimuth"], c["elevation"], c["has_gui_password"]) == \
-        ("4.2.1", "https://10.0.0.22/ui", 120, -2.5, True)
+    assert (c["version"], c["gui"], c["gui_user"], c["azimuth"], c["elevation"], c["has_gui_password"]) == \
+        ("4.2.1", "https://10.0.0.22/ui", "admin@site", 120, -2.5, True)
 
 
 @pytest.mark.parametrize("body", [
     {"azimuth": 361}, {"azimuth": -1}, {"azimuth": True}, {"azimuth": "north"},
     {"fov_from": -200}, {"fov_from": 10, "fov_to": -10}, {"range": 0}, {"range": "far"},
-    {"elevation": 91}, {"elevation": -90.5}, {"gui": "not a url at all"}, {"gui": "javascript:alert(1)"},
+    {"elevation": 91}, {"elevation": -90.5}, {"gui": "not a url at all"}, {"gui_user": "a\nb"}, {"gui_user": "x" * 65}, {"gui": "javascript:alert(1)"},
     {"web": "http://a b"}, {"rustdesk_ip": "1.2.3.4; x"}, {"users": {"bad\nname": "x"}},
     {"users": {"root": "a b"}}, {"gui_password": "x", "clear": ["gui_password"]},
     {"clear": ["ssh_password"]},

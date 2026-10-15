@@ -351,6 +351,7 @@ class ComponentFields(Code):
     # a sensor
     version: str | None = None
     gui: str | None = None
+    gui_user: str | None = None
     gui_password: str | None = None
     azimuth: StrictInt | StrictFloat | str | None = None
     elevation: StrictInt | StrictFloat | str | None = None

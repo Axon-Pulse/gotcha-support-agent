@@ -1229,7 +1229,7 @@ function paintSecret(k){
 const SYS_FIELDS=[['name','name'],['site','location'],['description','description'],
   ['latitude','latitude'],['longitude','longitude'],['altitude','altitude m']];
 const SENSOR_FIELDS=[['name','name'],['version','version'],['address','IP'],['port','port'],
-  ['gui','GUI address'],['azimuth','azimuth °'],['elevation','elevation °'],
+  ['gui','GUI address'],['gui_user','GUI user'],['azimuth','azimuth °'],['elevation','elevation °'],
   ['fov_from','FOV from °'],['fov_to','FOV to °'],['range','range m']];
 
 const COMP_FIELDS=[['name','name'],['type','type'],['role','role'],['scheme','scheme'],
@@ -1239,9 +1239,9 @@ const PC_FIELDS=[['model','model'],['web','web address'],['rustdesk_ip','RustDes
 const KEEP_IDS=[...new Set([...SYS_FIELDS,...SENSOR_FIELDS,...COMP_FIELDS,...PC_FIELDS].map(([k])=>k)),
   'code','category','sensor','user','scheme','pw','guipw','webpw','rdpw'];
 const KEEP_CHECKS=['clear','clear-gui','clear-web','clear-rd'];
-const MONO=new Set(['name','address','port','user','gui','web','rustdesk_ip','version','azimuth','elevation',
+const MONO=new Set(['name','address','port','user','gui','gui_user','web','rustdesk_ip','version','azimuth','elevation',
   'fov_from','fov_to','range','latitude','longitude','altitude']);
-const WIDTH={port:'80px',scheme:'90px',azimuth:'100px',elevation:'100px',gui:'220px',web:'220px',
+const WIDTH={gui_user:'140px',port:'80px',scheme:'90px',azimuth:'100px',elevation:'100px',gui:'220px',web:'220px',
   fov_from:'90px',fov_to:'90px',range:'90px',site:'180px',description:'320px',latitude:'130px',longitude:'130px',altitude:'100px'};
 const NUMERIC=new Set(['port','azimuth','elevation','fov_from','fov_to','range','latitude','longitude','altitude']);
 // Each box with its name above it: a filled box no longer shows its placeholder.
@@ -1323,8 +1323,8 @@ function sensorForm(s,c,cat){
   const v=c||{};
   return `<tr><td colspan="7">
     <div class="row">${inputs(SENSOR_FIELDS.slice(0,4),v)} ${catSelect(cat)}</div>
-    <div class="row" style="margin-top:6px">${inputs(SENSOR_FIELDS.slice(4,5),v)} ${pwBox('guipw','clear-gui',v.has_gui_password,'GUI password')}</div>
-    <div class="row" style="margin-top:6px">${inputs(SENSOR_FIELDS.slice(5),v)}
+    <div class="row" style="margin-top:6px">${inputs(SENSOR_FIELDS.slice(4,6),v)} ${pwBox('guipw','clear-gui',v.has_gui_password,'GUI password')}</div>
+    <div class="row" style="margin-top:6px">${inputs(SENSOR_FIELDS.slice(6),v)}
       <span class="note">Azimuth: where it points, 0 = north, clockwise. FOV: degrees either side of that;
         empty means ${esc(coverageHint(cat))}.</span></div>
     ${sensorHasSsh(v)?`<div class="row" style="margin-top:6px">${inputs(SENSOR_SSH_FIELDS,v)} ${pwBox('pw','clear',v.has_password,'SSH password')}</div>`:''}
@@ -1369,7 +1369,7 @@ function sensorRow(s,c,id){
   const aim=[has(c.azimuth)?`az ${deg3(c.azimuth)}°`:'',has(c.elevation)?`el ${esc(c.elevation)}°`:''].filter(Boolean).join(' · ');
   return `<tr><td class="mono">${esc(c.name)}<div class="dim" style="font-family:inherit">${esc([c.version&&'v'+c.version,c.type].filter(Boolean).join(' · '))}</div></td>
     <td class="mono">${addrCell(c)}</td>
-    <td>${webLink(c.gui)||'<span class="dim">—</span>'}${c.has_gui_password?`<div>${secretSpan(s,c,'slot:gui_password',id+'-g')}</div>`:''}</td>
+    <td>${webLink(c.gui)||'<span class="dim">—</span>'}${c.gui_user?`<div class="mono">${esc(c.gui_user)}</div>`:''}${c.has_gui_password?`<div>${secretSpan(s,c,'slot:gui_password',id+'-g')}</div>`:''}</td>
     <td class="mono">${aim||'<span class="dim">—</span>'}</td>
     <td class="mono">${(c.computers||[]).map(esc).join(', ')||'<span class="dim">—</span>'}</td>
     <td>${sensorHasSsh(c)?`<span class="tchip"><b>SSH</b> <span class="mono">${esc(c.user||'')}</span> ${c.has_password?secretSpan(s,c,'',id+'-s'):''}</span> `:''}${extrasCell(s,c,id)}${changedNote(c)}</td>
