@@ -22,6 +22,9 @@ from console.settings import S
 
 # A NAME=value line, as both docker compose and the shell read it: any variable-like name.
 ENV_LINE_RX = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
+# Written bare when it is only these; otherwise in single quotes, which both docker compose
+# and the shell take literally (no $VAR expansion, no # comment).
+BARE_RX = re.compile(r"[A-Za-z0-9._:/+=@,%-]*")
 
 
 def write_private(path: Path, text: str) -> None:
@@ -71,6 +74,22 @@ def env_entries(path: Path) -> list[tuple[str, str]]:
     except FileNotFoundError:
         return []
     return [(m.group(1), m.group(2)) for m in map(ENV_LINE_RX.match, lines(text)) if m]
+
+
+def env_line(name: str, val: str) -> str:
+    """NAME=value as docker compose (env_file) and the shell (`. ./.env`) both read it back as
+    `val`. ValueError for a value that can't be written so."""
+    if BARE_RX.fullmatch(val):
+        return f"{name}={val}"
+    if "'" in val:
+        raise ValueError("a value with a single quote and other special characters can't be "
+                         "written safely to .env; edit the file by hand")
+    return f"{name}='{val}'"
+
+
+def unquote(v: str) -> str:
+    """An env file's raw value as it is read: one pair of surrounding quotes off."""
+    return v[1:-1] if len(v) >= 2 and v[0] == v[-1] and v[0] in "'\"" else v
 
 
 def env_update(path: Path, changes: dict[str, str | None], header: str = "") -> None:

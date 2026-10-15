@@ -9,7 +9,7 @@ and when, is kept beside it in console/state/secrets_meta.json, without values.
 import re
 
 from console import ops
-from console.files import env_update, file_lock, meta_load, meta_save, meta_touch
+from console.files import env_line, env_update, file_lock, meta_load, meta_save, meta_touch, unquote
 from console.safe_text import has_control
 from console.settings import S
 
@@ -18,9 +18,6 @@ NAME_RX = re.compile(r"[A-Z][A-Z0-9_]{1,63}")
 # (CLAUDE_BIN, LD_PRELOAD, HTTPS_PROXY, ANTHROPIC_BASE_URL…) could change what it runs or
 # where it sends the key, which is more than managing a secret. Existing entries stay editable.
 NEW_NAME_RX = re.compile(r"[A-Z][A-Z0-9_]{0,55}_(TOKEN|KEY|SECRET|PASSWORD|PW)")
-# Written bare when it is only these; otherwise in single quotes, which both docker compose
-# and the shell take literally (no $VAR expansion, no # comment).
-BARE_RX = re.compile(r"[A-Za-z0-9._:/+=@,%-]*")
 MAX_LEN = 4096
 
 
@@ -32,15 +29,9 @@ def _path():
     return S.bridge_dir / ".env"
 
 
-def _unquote(v: str) -> str:
-    if len(v) >= 2 and v[0] == v[-1] and v[0] in "'\"":
-        return v[1:-1]
-    return v
-
-
 def hidden() -> dict[str, str]:
     """name -> value for the entries the console doesn't show. Stays in this process."""
-    return {k: _unquote(v) for k, v in ops.bot_env_entries() if k not in ops.SHOWN}
+    return {k: unquote(v) for k, v in ops.bot_env_entries() if k not in ops.SHOWN}
 
 
 def listing() -> list[dict]:
@@ -55,15 +46,6 @@ def value(name: str) -> str:
     if name not in vals:
         raise KeyError(name)
     return vals[name]
-
-
-def _line(name: str, val: str) -> str:
-    if BARE_RX.fullmatch(val):
-        return f"{name}={val}"
-    if "'" in val:
-        raise SecretError("a value with a single quote and other special characters can't be "
-                          "written safely to .env; edit the file by hand")
-    return f"{name}='{val}'"
 
 
 def precheck(name: str, val: str) -> str:
@@ -82,7 +64,10 @@ def precheck(name: str, val: str) -> str:
     if name not in hidden() and not NEW_NAME_RX.fullmatch(name):
         raise SecretError("a new secret's name must end in _TOKEN, _KEY, _SECRET, _PASSWORD "
                           "or _PW; other settings of the bot are changed on the server")
-    return _line(name, val)
+    try:
+        return env_line(name, val)
+    except ValueError as e:
+        raise SecretError(str(e)) from None
 
 
 def put(name: str, val: str, who: str) -> dict:

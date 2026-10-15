@@ -9,7 +9,7 @@ A web page for the Slack support bot (`../slack-bridge/` + `../support-agent-ski
 | **Reference docs** | `system-model.md`, `glossary.md`, `escalation.md` and all of `signatures.txt`, as text with a preview. `SKILL.md` is shown read-only. | `support-agent-skill/kb/`, `scripts/` |
 | **Stats** | Questions, cost, time to answer, timeouts, per day; the cases read most. | the same as Conversations |
 | **Systems** | The sites the bot can reach, how (Tailscale SSH or plain ssh), and what each ran when last triaged. Click a site for its **sensors**: each platform's nodes with type and address, from the site's own config, and whether each address answered at that triage. The radar's own IP, which isn't in the config, is shown too. **Run triage now** runs the same read-only triage the bot runs for a question. | `list_systems.sh`, `systems.tsv`, saved triages (`slack-bridge/state/triage/`, `/tmp/gotcha-triage/`) |
-| **Bot config** | The container, the bot's settings from `slack-bridge/.env` (tokens and keys are named, never shown), its permissions and guard, and who changed what here. | read-only |
+| **Bot config** | The container, the bot's settings from `slack-bridge/.env` (tokens and keys are named, never shown), its permissions and guard, and who changed what here. An admin changes the settings here (see below). | `slack-bridge/.env` |
 
 The header shows whether `selftest.sh` passes and whether the running bot has the files on
 disk. **Deploy** runs `make -C slack-bridge update`.
@@ -101,6 +101,7 @@ minutes, then 10, 20 and so on up to a day, until a right one comes in.
 | See which secrets are set, and who changed them when | ✅ | ✅ |
 | **Reveal** a secret | | ✅ after a code; one code is good for 30 minutes, each value shows for 30 s |
 | **Change or add** a secret | | ✅ with a code on every save |
+| **Change** the bot's settings (Bot config) | | ✅ with a code on every save |
 
 The secrets are the entries of `slack-bridge/.env` that the Bot tab doesn't show: the Slack
 tokens, the Anthropic key, and anything else put there. Saving one rewrites only that line
@@ -108,6 +109,17 @@ tokens, the Anthropic key, and anything else put there. Saving one rewrites only
 recreates the container so it reads `.env` again). If questions are being answered, the
 restart waits for them, up to 10 minutes. Every sign-in, reveal, change and refusal goes in
 the audit log, never with a value.
+
+The bot's settings on the Bot config tab change the same way: **change settings**, edit any
+of them, then one code saves them all and restarts the bot once. Empty (or "default") puts a
+setting back to the bot's default. Each value is checked before the code is used:
+model and effort from a list, timeout 30–600 s, 1–5 questions at once, Slack IDs only, with
+at least one channel (`C…`: the bot's `make check`, which Deploy runs, needs one), the SSH
+login a plain user name. A line that is there but empty shows as "(empty)" and stays as it is
+unless changed; only the settings changed are written. The machines the bot may SSH into are every `axon-gotcha-<number>`
+and/or machines by exact name, never a wider pattern: that is the boundary of its command
+guard. `BOT_UID`/`BOT_GID` (fixed when the image is built) and `CLAUDE_BIN` (the program it
+runs) stay read-only; change those on the server. The audit log keeps what each setting became.
 
 **Setting someone up** (on this machine, with them next to you or on a call):
 
@@ -294,6 +306,7 @@ Slack users show as IDs (`U0…`): the bot's Slack app has no `users:read` scope
 | `kb.py` | Cases ↔ parts, SKILL.md index rows, signatures, reference docs, `selftest.sh`. |
 | `conversations.py` | Transcripts + turn log → threads, steps and stats. |
 | `ops.py` | Bot config (allowlisted `.env` names), the container, Systems, Deploy and restart. |
+| `bot_settings.py` | Which bot settings an admin may change, the check for each, and writing them to `.env`. |
 | `sites.py` | A site's sensors from its newest saved triage; running a triage on demand. |
 | `settings.py` | Paths and access, from `CONSOLE_*` variables with this checkout as the default. |
 | `index.html` | The whole page: one file, no build step, no external scripts. |

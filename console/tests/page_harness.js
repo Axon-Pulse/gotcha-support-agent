@@ -85,6 +85,18 @@ const S=sandbox;
   await check('open the sensors of a site',()=>S.toggleSite('axon-gotcha-4'),['#systems','magos_radar']);
   await check('a site shows how each address answered',async()=>{},['#systems','answers (ping)']);
   await check('bot tab',()=>S.showTab('bot'),['#bot','BRIDGE_TIMEOUT_S']);
+  await check('a viewer gets no change button',async()=>{
+    if(el('#bot').innerHTML.includes('change settings')) throw new Error('shown to a viewer'); },['#bot','read-only: ']);
+  await check('an admin changes settings',()=>{ S.BOT.b.can_edit=true; S.editSettings(true); },
+    ['#bot','id="bs-BRIDGE_EFFORT"','id="bs-sites"','6-digit code']);
+  await check('only what changed is sent',()=>{
+    // (The stand-in page's boxes start empty, and the form remembered them so.)
+    el('#bs-BRIDGE_EFFORT').value='high'; el('#bs-SLACK_ALLOWED_USERS').value='U0AAAAAAA  U0BBBBBBB';
+    const c=S.settingChanges();
+    if(JSON.stringify(c)!==JSON.stringify({BRIDGE_EFFORT:'high',SLACK_ALLOWED_USERS:'U0AAAAAAA,U0BBBBBBB'})) throw new Error(JSON.stringify(c));
+    el('#bs-sites').checked=false; el('#bs-BRIDGE_ALLOWED_HOSTS').value='lab-pc-1';
+    if(S.settingChanges().BRIDGE_ALLOWED_HOSTS!=='lab-pc-1') throw new Error('hosts');
+    S.editSettings(false); });
   await check('deploy panel',async()=>{ await S.refreshDeploy?.(); S.openDeploy(); },['#deploy','Deploy now']);
   await check('selftest pill',()=>S.runSelftest());
   await check('secrets tab hides values',()=>S.showTab('secrets'),['#sec-bot','••••••••']);
