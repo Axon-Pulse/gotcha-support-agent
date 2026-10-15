@@ -59,6 +59,12 @@ const S=sandbox;
   await check('open a thread',()=>S.openThread(key),['#cv-detail','Turn 1']);
   await check('a thread shows the steps',async()=>{},['#cv-detail','What the bot did']);
   await check('a timed-out turn says so',async()=>{},['#cv-detail','time limit']);
+  await check('who asked shows by name, the ID on hover',async()=>{
+    const r=RESP['/conversations'], u=r.threads[0].users[0];
+    if(!u) throw new Error('the captured thread has no asker');
+    RESP['/conversations']={...r,names:{[u]:'Gal Badichi'},names_problem:'the Slack app needs the users:read permission'};
+    await S.loadConvos(); RESP['/conversations']=r; },
+    ['#convos','Gal Badichi','title="U1"','Names: the Slack app needs the users:read permission']);
   await check('cases tab',()=>S.showTab('cases'),['#cases','Cases']);
   await check('open a case in the form',()=>S.openCase('radar-transmitter-off'),['#case-ed','SKILL.md index row']);
   await check('the form has the sections',async()=>{},['#case-ed','Root cause']);

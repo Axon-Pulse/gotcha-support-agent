@@ -22,7 +22,8 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, StrictFloat, StrictInt
 
-from console import access, auth, bot_settings, conversations, kb, ops, passkeys, secrets_env, sites
+from console import (access, auth, bot_settings, conversations, kb, ops, passkeys, secrets_env, sites,
+                     slack_users)
 from console.settings import S
 
 HERE = Path(__file__).resolve().parent
@@ -538,17 +539,22 @@ def meta(request: Request):
 
 @app.get("/api/conversations")
 def list_conversations(q: str = "", outcome: str = "", channel: str = ""):
-    rows = conversations.summaries(q, outcome, channel)
+    names, names_problem = slack_users.names(conversations.user_ids())
+    rows = conversations.summaries(q, outcome, channel, names)
+    shown = {u for r in rows for u in r["users"]}
     return {"threads": rows, "turn_log": S.turns_file.exists(),
-            "channels": sorted({r["channel"] for r in rows})}
+            "channels": sorted({r["channel"] for r in rows}),
+            "names": {u: n for u, n in names.items() if u in shown}, "names_problem": names_problem}
 
 
 @app.get("/api/conversations/{key}")
 def get_conversation(key: str):
     try:
-        return conversations.thread(key)
+        t = conversations.thread(key)
     except FileNotFoundError:
         raise HTTPException(404, f"no thread {key}")
+    names, _ = slack_users.names(u["user"] for u in t["turns"])
+    return {**t, "names": names}
 
 
 @app.get("/api/stats")

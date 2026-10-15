@@ -271,16 +271,25 @@ def threads() -> dict[str, list[dict]]:
     return out
 
 
-def summaries(q: str = "", outcome: str = "", channel: str = "") -> list[dict]:
+def user_ids() -> set[str]:
+    """Everyone who has asked the bot, as Slack IDs."""
+    return {t["user"] for turns in threads().values() for t in turns if t["user"]}
+
+
+def summaries(q: str = "", outcome: str = "", channel: str = "",
+              names: dict[str, str] | None = None) -> list[dict]:
+    """The threads, newest first. `q` also finds a thread by who asked, by ID or by name."""
     rows = []
     ql = q.lower().strip()
+    names = names or {}
     for key, turns in threads().items():
         if channel and not key.startswith(channel + ":"):
             continue
         if outcome and not any(t["outcome"] == outcome for t in turns):
             continue
         if ql and not any(ql in (t["question"] or "").lower() or ql in (t["answer"] or "").lower()
-                          or ql in (t["user"] or "").lower() for t in turns):
+                          or ql in (t["user"] or "").lower()
+                          or ql in names.get(t["user"], "").lower() for t in turns):
             continue
         costs = [t["cost_usd"] for t in turns if isinstance(t["cost_usd"], (int, float))]
         rows.append({"key": key, "channel": turns[0]["channel"], "thread_ts": turns[0]["thread_ts"],
