@@ -91,7 +91,9 @@ The answer must name *your* login, or say that you aren't allowed. It must not s
 ### Sign-in, roles and the bot's secrets
 
 Being on `CONSOLE_ALLOWED_USERS` gets you to the sign-in form. To get past it you enter a
-6-digit code from an authenticator app (Google Authenticator, Authy, 1Password, …).
+6-digit code from an authenticator app (Google Authenticator, Authy, 1Password, …), a
+recovery code, or use a passkey. A code works once. Five wrong codes lock that login for 5
+minutes, then 10, 20 and so on up to a day, until a right one comes in.
 
 | | viewer | admin (`CONSOLE_ADMINS`) |
 |---|:-:|:-:|
@@ -123,7 +125,9 @@ passkey** (it asks for your app code first). The browser keeps it on this comput
 (fingerprint, Windows Hello, Touch ID), on your phone (scan the QR code it shows) or on a
 security key. After that: **Sign in with passkey** on the sign-in screen, **Use passkey** in the
 code dialog when revealing, and an empty code field when saving uses the passkey. The app
-code and recovery codes keep working as the fallback; `totp-reset` removes the passkeys too.
+code and recovery codes keep working as the fallback. Removing a passkey asks for a code too.
+`totp-reset`, and replacing someone's authenticator with `totp-enroll … FORCE=1` once the new
+one is confirmed, remove that person's passkeys: a lost phone may hold one.
 
 Browsers allow passkeys only on `https://` addresses or `localhost`, never on an IP address:
 on the tailnet that means `tailscale serve --https` (enable HTTPS certificates for the tailnet
@@ -139,18 +143,58 @@ Who is an admin is set in `console/.env` and takes effect when the console resta
 not editable from the page, so a session someone has taken over can't make itself an admin.
 Signing in lasts 12 hours (2 idle); restarting the console signs everyone out.
 
-**Secrets tab, second part — system access: how to reach each system.** For every system and component in
-`systems_inventory.yaml` (repo root): address, port and SSH user, which everyone signed in can
-see, and the SSH password, which only an admin can reveal (same code and 30-minute window as
-Secrets) or change (a code on every save). Addresses, ports and users are written to the YAML;
-a password goes only to `secrets.local.env`, under the component's `password_env` name (given
-one like `GOTCHA5_CAM_SSH_PW` if it had none). The page can't change `password_env`, so it
-can't be pointed at another entry of that file, such as the Anthropic key. Both files are
-gitignored and rewritten `chmod 600`. Point elsewhere with `CONSOLE_INVENTORY_FILE` and
-`CONSOLE_DEVICE_SECRETS_FILE`.
+**`CONSOLE_ALLOWED_HOSTS`** (comma-separated) lists the host names the console may be opened
+as, e.g. `gotcha-server.tail1234.ts.net,gotcha-server`. Set it once the address is settled: a
+request for any other name is refused, which stops a web page elsewhere from pointing its own
+name at this machine (DNS rebinding). Empty accepts any.
 
-**What this doesn't do:** `slack-bridge/.env`, `secrets.local.env` and `console/state/totp.json` stay plain text on
-disk, owner-only. Anyone with a shell as this user can read both.
+**Secrets tab, second part: system access.** One card per system in `systems_inventory.yaml`
+(repo root): its name, location (`site`), description, and the same **four categories** for
+every system: **Radars, Acoustics, Cameras, Compute & Infrastructure**. Which components are in
+each category, and how many, is up to each system (two radars and no acoustics; four cameras
+and two switches).
+
+Every component has its own fields, all optional apart from its name and category: type or
+model, role, scheme, IP or host, port, SSH user and SSH password, plus any **extra fields** it
+needs, added on the fly. An unmanaged switch can have nothing but a name; a managed one an
+address and a password. An extra field is either plain (shown to everyone signed in, e.g.
+`azimuth: 120`) or **secret** (hidden, revealed like a password, e.g. `web password`). A plain
+field named like a secret (`password`, `key`, `token`, `community`…) is refused: add it as
+secret.
+
+| | viewer | admin |
+|---|:-:|:-:|
+| Systems, categories, components, addresses, users, plain fields | ✅ | ✅ |
+| Which secrets are set | ✅ | ✅ |
+| Reveal an SSH password or secret field | | ✅ after a code (30-minute window), 30 s per value |
+| Add, edit (rename, move to another category), delete a system or component | | ✅ with a code or passkey each time |
+
+How it is stored, in the shape the retired bot used:
+- The category is the component's `domain`: `radar`, `acoustic`, `optic` (cameras) or `infra`.
+  A component with no domain, or another one, shows under Compute & Infrastructure until moved.
+- Plain extra fields are under `fields:`. Secret ones are listed under `secret_fields:` by
+  name, and their values go only to `secrets.local.env`, like SSH passwords (`password_env`).
+- Every env name is made by the console (e.g. `GOTCHA5_CAM_WEB_PASSWORD_PW`). The page can't
+  choose one, so a component can't be pointed at another entry of `secrets.local.env` (the
+  Anthropic key lives there too).
+- A change touches only what it changes, in both files. `secrets.local.env` keeps its other
+  lines and comments. `systems_inventory.yaml` is read and written round-trip: comments, order,
+  quoting and compact `{a: 1}` style stay, and a field nobody edited keeps its exact value
+  (`010`, `yes`, a multi-line string). A value the console writes is quoted when an older YAML
+  reader would misread it (`'yes'`, `'010'`). Changing only a secret's value leaves the YAML
+  untouched. A component that shares part of its YAML with another through an anchor (`&a` /
+  `*a`) can't be edited from the page, since the change would land on both.
+- Deleting a component or system removes the secrets no other component holds. A secret two
+  components share can't be changed from either one; change it on the server.
+- Emptying a field removes it. Field formats are checked before the code is used, so a typo
+  doesn't cost a code. Both files
+  are gitignored and written `chmod 600`. Point elsewhere with `CONSOLE_INVENTORY_FILE` and
+  `CONSOLE_DEVICE_SECRETS_FILE`.
+
+On purpose there is **no way to see or edit the YAML as a whole** from the page.
+
+**What this doesn't do:** `slack-bridge/.env`, `secrets.local.env` and `console/state/totp.json`
+stay plain text on disk, owner-only. Anyone with a shell as this user can read all three.
 
 ### Keeping it running
 
@@ -219,11 +263,13 @@ Slack users show as IDs (`U0…`): the bot's Slack app has no `users:read` scope
 
 | Path | What it is |
 |---|---|
-| `server.py` | The FastAPI app: routes, the tailnet login check, sign-in, the audit log. |
+| `server.py` | The FastAPI app: routes, the tailnet login check, sign-in, roles, the audit log. |
 | `auth.py` | Roles, authenticator codes (TOTP), sessions; `python -m console.auth` enrols people. |
 | `secrets_env.py` | The hidden entries of `slack-bridge/.env`: names for all, values for admins. |
 | `passkeys.py` | Passkeys (WebAuthn): register, sign in, unlock reveals, confirm saves. |
-| `access.py` | Each system's addresses, SSH users and passwords (`systems_inventory.yaml`, `secrets.local.env`). |
+| `access.py` | Systems, their four categories and components, plain and secret fields (`systems_inventory.yaml`, `secrets.local.env`). |
+| `files.py` | Atomic owner-only writes, cross-process file locks, env files changed in place, who-changed-what metadata. |
+| `safe_text.py` | The check that keeps line breaks and control characters out of values written to files. |
 | `kb.py` | Cases ↔ parts, SKILL.md index rows, signatures, reference docs, `selftest.sh`. |
 | `conversations.py` | Transcripts + turn log → threads, steps and stats. |
 | `ops.py` | Bot config (allowlisted `.env` names), the container, Systems, Deploy and restart. |
