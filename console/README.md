@@ -188,7 +188,7 @@ or moving it out of the sensor categories, leaves them pointing at nothing.
 
 How it is stored, in the shape the retired bot used:
 - The category is the component's `domain`: `radar`, `acoustic`, `optic` (cameras) or `infra`.
-- A sensor's keys: `version`, `address`, `port`, `gui`, `gui_password_env`, `azimuth`,
+- A sensor's keys: `version`, `address`, `port`, `gui`, `gui_user`, `gui_password_env`, `azimuth`,
   `elevation`, `fov_from`, `fov_to`, `range`. A computer's: `model`, `sensor`, `web`, `web_password_env`, `rustdesk_ip`,
   `rustdesk_password_env`, `users: [{name, password_env}]`, beside `type`, `role`, `scheme`,
   `address`, `port` and `access.ssh`.
