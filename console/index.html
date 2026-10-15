@@ -491,6 +491,7 @@ async function refreshDeploy(){
     d.deploy.waiting?'restart waits for questions…':'restarting bot…';}
   if(RESTART_WATCH&&!d.deploy.running&&!d.deploy.restart_queued&&d.deploy.kind==='restart'&&d.deploy.finished){
     RESTART_WATCH=false;
+    if(TAB==='bot'&&!BOT.editing) loadBot();   // the container's new start time
     d.deploy.exit_code===0?toast('Bot restarted with the new settings.','ok')
       :toast('The bot restart failed — open the deploy panel for its log.','bad',{label:'Show log',fn:()=>{DEPLOY_OPEN=false;openDeploy();}});
   }
@@ -991,8 +992,80 @@ function renderSite(h,row){
 }
 
 // ================================================================== Bot config
+// The bot's settings: everyone sees them; an admin changes the editable ones together, with a
+// code, and the bot restarts to read them. Empty (or "default") means the bot's default.
+var BOT={b:null,a:null,editing:false,initial:{}};
+const SETTING_HELP={
+  BRIDGE_MODEL:'which Claude model answers',BRIDGE_EFFORT:'how hard it thinks',
+  BRIDGE_TIMEOUT_S:'seconds for one answer (30–600)',BRIDGE_MAX_CONCURRENT:'questions at once (1–5)',
+  BRIDGE_RTL_MARKS:'right-to-left fixes for Hebrew replies',BRIDGE_ALLOW_PING:'may ping the sites',
+  BRIDGE_ALLOWED_HOSTS:'the machines the bot may SSH into',SLACK_ALLOWED_CHANNELS:'channel IDs it answers in',
+  SLACK_ALLOWED_USERS:'user IDs it answers (empty: anyone in those channels)',SLACK_ALLOW_DMS:'answers direct messages (from allowed users)',
+  GOTCHA_SSH_USER:'login for SSH to the sites (empty: tailscale ssh’s own)'};
+const FLAGS=new Set(['BRIDGE_RTL_MARKS','BRIDGE_ALLOW_PING','SLACK_ALLOW_DMS']);
+const DEFAULT_OPT='(default)';   // no setting's value has parentheses
+function settingInput(st){
+  const id='bs-'+st.name, cur=st.set?st.value:null, b=BOT.b;
+  // "default" removes the line; a line that is there but empty (which the bot reads otherwise,
+  // e.g. BRIDGE_MODEL= is Claude Code's own default) shows as such, and stays unless changed.
+  const opts=(list,label=x=>x)=>`<option value="${DEFAULT_OPT}" ${cur===null?'selected':''}>default (${esc(st.default?label(st.default):'none')})</option>`+
+    (cur===''?'<option value="" selected>(empty)</option>':'')+
+    [...new Set([...list,...(cur?[cur]:[])])].map(x=>`<option value="${esc(x)}" ${x===cur?'selected':''}>${esc(label(x))}</option>`).join('');
+  if(st.name==='BRIDGE_MODEL') return `<select id="${id}">${opts(b.models)}</select>`;
+  if(st.name==='BRIDGE_EFFORT') return `<select id="${id}">${opts(b.efforts)}</select>`;
+  if(FLAGS.has(st.name)) return `<select id="${id}">${opts(['1','0'],x=>x==='1'?'on':'off')}</select>`;
+  if(st.name==='BRIDGE_ALLOWED_HOSTS'){
+    const parts=(st.value||st.default).split('|').filter(Boolean);   // empty: the bot uses the default
+    return `<label class="note"><input type="checkbox" id="bs-sites" ${parts.includes(b.sites)?'checked':''}> every <span class="mono">axon-gotcha-&lt;number&gt;</span></label>
+      <input id="${id}" class="mono" style="min-width:240px" placeholder="and machines by name, comma-separated"
+        value="${esc(parts.filter(x=>x!==b.sites).join(', '))}">`;
+  }
+  const num=st.name==='BRIDGE_TIMEOUT_S'||st.name==='BRIDGE_MAX_CONCURRENT';
+  return `<input id="${id}" class="mono" ${num?'inputmode="numeric" style="width:90px"':'style="min-width:240px"'}
+    placeholder="${num?'default':'empty: default'}" value="${esc(cur||'')}">`;
+}
+// What the form says each editable setting should be: a value, or null for the default.
+function settingValue(st){
+  const i=$('#bs-'+st.name); if(!i) return undefined;
+  if(st.name==='BRIDGE_ALLOWED_HOSTS'){
+    const names=i.value.split(/[\s,|]+/).filter(Boolean);
+    return [...($('#bs-sites').checked?[BOT.b.sites]:[]),...names].join('|');
+  }
+  if(i.tagName==='SELECT') return i.value===DEFAULT_OPT?null:i.value;
+  const v=i.value.trim();
+  if(!v) return null;
+  return st.name.startsWith('SLACK_ALLOWED')?v.split(/[\s,]+/).filter(Boolean).join(','):v;
+}
+const editableSettings=()=>BOT.b.settings.filter(st=>st.editable);
+// Only what the admin changed since the form opened: a setting left alone isn't sent, so its
+// line stays exactly as it is (an empty BRIDGE_MODEL= isn't the same as no line).
+function settingChanges(){
+  const out={};
+  editableSettings().forEach(st=>{
+    const v=settingValue(st);
+    if(v!==undefined&&v!==BOT.initial[st.name]) out[st.name]=v;
+  });
+  return out;
+}
+async function saveSettings(){
+  const code=$('#bs-code').value.trim(); $('#bs-code').value='';
+  const changes=settingChanges();
+  if(!Object.keys(changes).length){ toast('Nothing changed.','warn'); return; }
+  try{
+    const f=await saveFactor(code); if(!f) return;
+    const r=await api('/bot/settings',{method:'PUT',body:{changes,...f}});
+    BOT.editing=false; await loadBot();
+    if(r.status==='unchanged') toast('Nothing changed.','warn'); else restartToast(r,r.changed.join(', '));
+  }catch(e){ toast(e.message,'bad'); }
+}
+function editSettings(on){ BOT.editing=on; renderBot(); }
 async function loadBot(){
+  if(BOT.editing&&BOT.b) return;   // back on the tab mid-edit: keep what was typed
   const [b,a]=await Promise.all([api('/bot'),api('/audit?limit=100')]);
+  BOT.b=b; BOT.a=a; renderBot();
+}
+function renderBot(){
+  const b=BOT.b, a=BOT.a, ed=BOT.editing&&b.can_edit;
   const c=b.container||{};
   $('#bot').innerHTML=`
     <div class="card"><h3>Container</h3>
@@ -1000,11 +1073,20 @@ async function loadBot(){
         since ${fmtIso(c.started)} · ${esc(c.restarts)} restarts</td></tr>
         <tr><th>image</th><td class="mono">${esc(c.image_id)} · built ${fmtIso(c.image_created)} · skill hash ${esc(c.skill_hash||'none')}</td></tr></table>`
         :`<p class="alert">${esc(c.error||'not found')}</p>`}</div>
-    <div class="card"><h3>Settings <span class="dim" style="font-weight:400">— <code>slack-bridge/.env</code>, read-only here</span></h3>
+    <div class="card"><h3>Settings <span class="dim" style="font-weight:400">— <code>slack-bridge/.env</code></span>
+        <span class="grow"></span>${b.can_edit&&b.env_file&&!ed?'<button class="sm" onclick="editSettings(true)">change settings</button>':''}</h3>
       ${b.env_file?'':'<p class="alert warn">No slack-bridge/.env on this host.</p>'}
-      <div class="scroll"><table><tr><th>name</th><th>value</th><th>default</th></tr>
-      ${b.settings.map(s=>`<tr><td class="mono">${esc(s.name)}</td><td class="mono">${s.set?esc(s.value):'<span class="dim">default</span>'}</td>
-        <td class="mono dim">${esc(s.default)}</td></tr>`).join('')}</table></div>
+      <div class="scroll"><table><tr><th>name</th><th>value</th><th>default</th><th>changed</th></tr>
+      ${b.settings.map(s=>`<tr><td><span class="mono">${esc(s.name)}</span>${SETTING_HELP[s.name]?`<div class="note">${esc(SETTING_HELP[s.name])}</div>`:''}</td>
+        <td>${ed&&s.editable?settingInput(s)
+          :`<span class="mono">${s.set?esc(s.value):'<span class="dim">default</span>'}</span>`}
+          ${s.read_only?`<div class="note">read-only: ${esc(s.read_only)}</div>`:''}</td>
+        <td class="mono dim">${esc(s.default)}</td>
+        <td class="dim" style="font-size:12px;white-space:nowrap">${s.updated_at?`${fmtTime(s.updated_at)} · ${esc(s.updated_by)}`:''}</td></tr>`).join('')}</table></div>
+      ${ed?`<div class="row" style="margin-top:8px">${codeInput('bs-code')}
+          <button class="go" onclick="saveSettings()">Save</button><button class="sm" onclick="editSettings(false)">Cancel</button></div>
+        <p class="hint">Saving writes only the changed lines of <code>slack-bridge/.env</code> and restarts the bot to use them
+          (after the questions it is answering). Empty, or “default”, puts a setting back to the bot’s default.</p>`:''}
       <p class="note">Hidden values: ${b.secrets_set.length} ·
         <a href="#secrets" onclick="showTab('secrets');return false">open Secrets</a> to see or change them.</p></div>
     <div class="card"><h3>What the bot may do</h3>
@@ -1016,6 +1098,7 @@ async function loadBot(){
       ${a.entries.map(e=>`<tr><td class="mono" style="white-space:nowrap">${fmtTime(e.ts)}</td><td class="mono">${esc(e.who)}</td>
         <td>${esc(e.action)} <span class="mono">${esc(e.target)}</span>${e.to?` → <span class="mono">${esc(e.to)}</span>`:''}</td></tr>`).join('')
         ||'<tr><td colspan="3" class="dim">Nothing yet.</td></tr>'}</table></div></div>`;
+  if(ed) BOT.initial=Object.fromEntries(editableSettings().map(st=>[st.name,settingValue(st)]));
 }
 
 // ================================================================== Secrets
@@ -1703,7 +1786,7 @@ async function boot(){
 boot();
 Object.assign(window,{showTab,runSelftest,openDeploy,startDeploy,loadConvos,openThread,openCase,closeCase,newCase,
   previewSlug,toggleTopic,addTopic,setMode,renderSyms,addSym,renderSigs,moveSec,rmSec,addSec,saveCase,renameCase,
-  deleteCase,openDoc,renderDoc,saveDoc,loadStats,loadSystems,toggleSite,runTriage,loadBot,
+  deleteCase,openDoc,renderDoc,saveDoc,loadStats,loadSystems,toggleSite,runTriage,loadBot,saveSettings,editSettings,settingChanges,BOT,
   doLogin,logout,loadSecrets,renderSecrets,revealSecret,hideSecret,copySecret,editSecret,addSecret,cancelEdit,
   togglePwField,saveSecret,restartNow,refreshDeploy,SEC,renderAccess,openForm,closeForm,saveSystem,deleteSystem,saveComponent,deleteComponent,revealAccess,hideAccess,syncRows,toggleSecret,toggleSystem,toggleCat,expandAll,toggleTowerView,fieldChanges,ACC,
   loginPasskey,togglePasskeys,renderPasskeys,registerPasskey,removePasskey});

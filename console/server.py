@@ -22,7 +22,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, StrictFloat, StrictInt
 
-from console import access, auth, conversations, kb, ops, passkeys, secrets_env, sites
+from console import access, auth, bot_settings, conversations, kb, ops, passkeys, secrets_env, sites
 from console.settings import S
 
 HERE = Path(__file__).resolve().parent
@@ -292,16 +292,18 @@ def save_secret(name: str, req: SecretSave, request: Request):
     except secrets_env.SecretError as e:
         raise HTTPException(400, str(e)) from None
     audit(request, "set-secret", name)
-    out = {"status": "saved", "secret": row}
+    return {"status": "saved", "secret": row, **_restart_bot(request, f"set {name}")}
+
+
+def _restart_bot(request: Request, why: str) -> dict:
+    """After a change to .env: restart the bot so it reads it. The change stands either way;
+    if the restart can't start, the page offers "Restart now"."""
     try:
         note = ops.DEPLOY.restart(request.state.who)
-        out["restart_triggered"] = True
-        if note:
-            out["restart_note"] = note
-        audit(request, "restart-bot", S.container, reason=f"set {name}")
-    except Exception as e:  # the save stands; the page offers "Restart now"
-        out["restart_triggered"], out["restart_error"] = False, str(e)
-    return out
+    except Exception as e:
+        return {"restart_triggered": False, "restart_error": str(e)}
+    audit(request, "restart-bot", S.container, reason=why)
+    return {"restart_triggered": True, **({"restart_note": note} if note else {})}
 
 
 @app.post("/api/bot/restart")
@@ -674,8 +676,36 @@ def run_selftest():
 # --------------------------------------------------------------------------
 
 @app.get("/api/bot")
-def bot():
-    return ops.bot_config()
+def bot(request: Request):
+    return {**bot_settings.listing(), "can_edit": request.state.role == "admin"}
+
+
+class SettingsSave(BaseModel):
+    changes: dict[str, str | None]   # NAME -> new value, or null for the default
+    code: str = ""
+    passkey: dict | None = None
+
+
+@app.put("/api/bot/settings")
+def save_settings(req: SettingsSave, request: Request):
+    """An admin's change to the bot's settings: checked, confirmed with a code or passkey every
+    time (a wrong one can stop the bot answering), written to .env, then the bot restarted."""
+    require_admin(request, "set bot settings")
+    try:
+        bot_settings.precheck(req.changes)   # a typo shouldn't use up the admin's code
+    except bot_settings.SettingError as e:
+        raise HTTPException(400, str(e)) from None
+    how = check_code(request, req.code, "set-setting", ",".join(sorted(req.changes)), req.passkey)
+    try:
+        changed = bot_settings.put(req.changes, request.state.who)
+    except bot_settings.SettingError as e:
+        raise HTTPException(400, str(e)) from None
+    if not changed:
+        return {"status": "unchanged", "changed": []}
+    for k, v in changed.items():   # these values aren't secret: the log says what each became
+        audit(request, "set-setting", k, to="(default)" if v is None else v, method=how)
+    names = list(changed)
+    return {"status": "saved", "changed": names, **_restart_bot(request, f"set {','.join(names)}")}
 
 
 @app.get("/api/systems")

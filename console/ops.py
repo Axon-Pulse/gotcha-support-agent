@@ -14,7 +14,7 @@ import threading
 import time
 from pathlib import Path
 
-from console.files import env_entries
+from console.files import env_entries, unquote
 from console.settings import S
 
 # Shown with their values. Anything else in slack-bridge/.env is shown as "set", never read
@@ -51,8 +51,9 @@ def bot_env_entries() -> list[tuple[str, str]]:
 
 
 def bot_env() -> dict[str, str]:
-    """The allowlisted settings only. Nothing else from .env leaves this module."""
-    return {k: v for k, v in bot_env_entries() if k in SHOWN}
+    """The allowlisted settings only, as the bot reads them (quotes off). Nothing else from
+    .env leaves this module."""
+    return {k: unquote(v) for k, v in bot_env_entries() if k in SHOWN}
 
 
 def bot_config() -> dict:

@@ -72,6 +72,7 @@ class Settings:
 
     @property
     def secrets_meta_file(self) -> Path:
+        """Who last changed each entry of slack-bridge/.env (secrets and settings), and when."""
         return self.state_dir / "secrets_meta.json"
 
     @property
