@@ -149,28 +149,49 @@ request for any other name is refused, which stops a web page elsewhere from poi
 name at this machine (DNS rebinding). Empty accepts any.
 
 **Secrets tab, second part: system access.** One card per system in `systems_inventory.yaml`
-(repo root): its name, location (`site`), description, and the same **four categories** for
+(repo root): its name, site, description, optional coordinates (`latitude`/`longitude`, both
+or neither, plus `altitude` in metres; shown as a map link), and the same **four categories** for
 every system: **Radars, Acoustics, Cameras, Compute & Infrastructure**. Which components are in
 each category, and how many, is up to each system (two radars and no acoustics; four cameras
 and two switches).
 
-Every component has its own fields, all optional apart from its name and category: type or
-model, role, scheme, IP or host, port, SSH user and SSH password, plus any **extra fields** it
-needs, added on the fly. An unmanaged switch can have nothing but a name; a managed one an
-address and a password. An extra field is either plain (shown to everyone signed in, e.g.
-`azimuth: 120`) or **secret** (hidden, revealed like a password, e.g. `web password`). A plain
-field named like a secret (`password`, `key`, `token`, `community`…) is refused: add it as
-secret.
+Every component has its own fields, all optional apart from its name and category:
+
+- **A sensor** (radar, acoustic, camera): version, IP, port, GUI address, **GUI password**,
+  azimuth (0-360°) and elevation (-90-90°). Each sensor shows the computer(s) that serve it.
+- **Compute & Infrastructure**: type, role, scheme, IP or host, port, SSH user and **SSH
+  password**. A computer adds its model, the sensor it serves, a web address and **web
+  password**, a RustDesk IP and **RustDesk password**, and its users, each with its own
+  **password** (as many as needed). A switch just leaves those empty.
+- **Any component** can carry extra fields, added on the fly: plain (shown to everyone signed
+  in, e.g. `range: 5km`) or **secret** (hidden, revealed like a password). A plain field named
+  like a secret (`password`, `key`, `token`, `community`…) is refused: add it as secret.
+
+**Tower view**: each system's **tower view** button draws it as the Gotcha GUI draws a tower:
+one circle, north up, with every radar, camera and acoustic as a wedge pointing along its
+azimuth (0 = true north, clockwise) out to its range, coloured by type, labelled with its name
+and direction. A sensor appears there as soon as it is added. Its field of view
+(`fov_from`/`fov_to`, degrees either side of where it points) and `range` are optional; without
+them it gets gotcha30's defaults (radar ±60° 800 m, camera ±30° 500 m, acoustic all round 600 m).
+
+Everything in bold is a secret: kept only in `secrets.local.env`, shown masked, revealed one at a
+time by an admin after a code. Renaming a sensor keeps its computers pointing at it; deleting it,
+or moving it out of the sensor categories, leaves them pointing at nothing.
 
 | | viewer | admin |
 |---|:-:|:-:|
 | Systems, categories, components, addresses, users, plain fields | ✅ | ✅ |
 | Which secrets are set | ✅ | ✅ |
-| Reveal an SSH password or secret field | | ✅ after a code (30-minute window), 30 s per value |
-| Add, edit (rename, move to another category), delete a system or component | | ✅ with a code or passkey each time |
+| Reveal a password (SSH, GUI, web, RustDesk, a computer user's) or secret field | | ✅ after a code (30-minute window), 30 s per value |
+| Add or edit (rename, move to another category) a system or component | | ✅ the first change asks for a code or passkey, then editing stays unlocked for 10 minutes (`CONSOLE_EDIT_SECONDS`) |
+| Delete a system or component | | ✅ always with a code or passkey |
 
 How it is stored, in the shape the retired bot used:
 - The category is the component's `domain`: `radar`, `acoustic`, `optic` (cameras) or `infra`.
+- A sensor's keys: `version`, `address`, `port`, `gui`, `gui_password_env`, `azimuth`,
+  `elevation`, `fov_from`, `fov_to`, `range`. A computer's: `model`, `sensor`, `web`, `web_password_env`, `rustdesk_ip`,
+  `rustdesk_password_env`, `users: [{name, password_env}]`, beside `type`, `role`, `scheme`,
+  `address`, `port` and `access.ssh`.
   A component with no domain, or another one, shows under Compute & Infrastructure until moved.
 - Plain extra fields are under `fields:`. Secret ones are listed under `secret_fields:` by
   name, and their values go only to `secrets.local.env`, like SSH passwords (`password_env`).

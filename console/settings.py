@@ -51,6 +51,8 @@ class Settings:
         self.local_role = env("CONSOLE_LOCAL_ROLE") or "viewer"
         self.session_hours = float(env("CONSOLE_SESSION_HOURS") or 12)
         self.stepup_seconds = int(env("CONSOLE_STEPUP_SECONDS") or 1800)
+        # After a code, how long further System access edits go without asking for one.
+        self.edit_seconds = int(env("CONSOLE_EDIT_SECONDS") or 600)
         # After a secret changes: recreate the container so it reads .env again. A plain
         # `docker compose restart` would keep the old environment.
         self.restart_cmd = ["make", "-C", str(self.bridge_dir), "restart"]

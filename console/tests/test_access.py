@@ -3,6 +3,7 @@ them, every component's own fields. Everyone signed in sees names and plain fiel
 (SSH passwords, secret fields) only an admin reveals, behind a code; every change is an
 admin's, with a code, written field by field into the retired bot's two files."""
 import json
+import re
 import stat
 
 import pytest
@@ -151,7 +152,7 @@ def test_an_admin_reveals_the_ssh_password_only_after_a_code(client, inv):
     assert client.post("/api/access/system/gotcha5/component/cam/reveal", json={}, headers=ADMIN).status_code == 404
     assert client.post("/api/access/system/gotcha5/component/nope/reveal", json={}, headers=ADMIN).status_code == 404
     e = _audit()[-1]
-    assert (e["action"], e["target"], e["field"]) == ("reveal-access", "gotcha5/1", "ssh password")
+    assert (e["action"], e["target"], e["field"]) == ("reveal-access", "gotcha5/1", "password")
 
 
 # --------------------------------------------------------------------------
@@ -612,3 +613,337 @@ def test_components_sharing_yaml_through_an_anchor_are_not_edited(client, inv):
     r = _call(client, inv, "PUT", "system/s/component/a", password="pw-of-a")
     assert r.status_code == 400 and "anchor" in r.json()["detail"]
     assert "pw-of-a" not in _secrets()
+
+
+# --------------------------------------------------------------------------
+# One code, then a few minutes of editing
+# --------------------------------------------------------------------------
+
+def test_one_code_unlocks_system_access_edits_for_ten_minutes(client, inv):
+    r = _call(client, inv, "PUT", "system/gotcha5/component/1", role="a")
+    assert r.status_code == 200 and r.json()["edit_until"] == pytest.approx(inv.t + 600, abs=1)
+    # further changes need no code while the window is open
+    for body in ({"role": "b"}, {"address": "10.0.0.7"}):
+        r = client.put("/api/access/system/gotcha5/component/1", headers=ADMIN, json=body)
+        assert r.status_code == 200, r.text
+    assert client.post("/api/access/system/gotcha5/component", headers=ADMIN,
+                       json={"name": "mic", "category": "acoustics"}).status_code == 200
+    assert _audit()[-1]["method"] == "edit-window"
+    # ten minutes after the code, a code again
+    inv.t += 601
+    r = client.put("/api/access/system/gotcha5/component/1", headers=ADMIN, json={"role": "c"})
+    assert r.status_code == 401
+    assert _comp("gotcha5", 1)["role"] == "b"
+
+
+def test_a_wrong_code_opens_no_window(client, inv):
+    assert _call(client, inv, "PUT", "system/gotcha5/component/1", code="000000", role="a").status_code == 401
+    assert client.put("/api/access/system/gotcha5/component/1", headers=ADMIN, json={"role": "a"}).status_code == 401
+
+
+def test_the_window_is_only_for_system_access(client, inv):
+    S.bridge_dir.joinpath(".env").write_text("SLACK_BOT_TOKEN=xoxb-old\n")
+    _call(client, inv, "PUT", "system/gotcha5/component/1", role="a")
+    # a bot secret still takes a code every time
+    r = client.put("/api/secrets/SLACK_BOT_TOKEN", headers=ADMIN, json={"value": "xoxb-new"})
+    assert r.status_code == 401
+    # and revealing still needs its own step-up
+    r = client.post("/api/access/system/gotcha5/component/1/reveal", headers=ADMIN, json={})
+    assert r.status_code == 403 and r.json()["detail"] == "stepup"
+
+
+def test_a_viewer_gets_no_window(client, inv):
+    assert client.put("/api/access/system/gotcha5/component/1", json={"role": "a"}).status_code == 403
+
+
+# --------------------------------------------------------------------------
+# Sensor fields, and each sensor's computer
+# --------------------------------------------------------------------------
+
+def test_a_sensor_has_its_own_fields(client, inv):
+    r = _call(client, inv, "POST", "system/gotcha5/component", name="rdr-2", category="radars",
+              version="4.2.1", address="10.0.0.22", port=443, gui="https://10.0.0.22/ui",
+              gui_password="gui-pw", azimuth=120, elevation="-2.5")
+    assert r.status_code == 200, r.text
+    assert _comp("gotcha5", "rdr-2") == {
+        "domain": "radar", "version": "4.2.1", "address": "10.0.0.22", "port": 443,
+        "gui": "https://10.0.0.22/ui", "azimuth": 120, "elevation": -2.5,
+        "gui_password_env": "GOTCHA5_RDR_2_GUI_PW"}
+    assert "GOTCHA5_RDR_2_GUI_PW=gui-pw\n" in _secrets() and "gui-pw" not in r.text
+    c = _find(r.json(), "gotcha5", "rdr-2")
+    assert (c["version"], c["gui"], c["azimuth"], c["elevation"], c["has_gui_password"]) == \
+        ("4.2.1", "https://10.0.0.22/ui", 120, -2.5, True)
+
+
+@pytest.mark.parametrize("body", [
+    {"azimuth": 361}, {"azimuth": -1}, {"azimuth": True}, {"azimuth": "north"},
+    {"fov_from": -200}, {"fov_from": 10, "fov_to": -10}, {"range": 0}, {"range": "far"},
+    {"elevation": 91}, {"elevation": -90.5}, {"gui": "not a url at all"}, {"gui": "javascript:alert(1)"},
+    {"web": "http://a b"}, {"rustdesk_ip": "1.2.3.4; x"}, {"users": {"bad\nname": "x"}},
+    {"users": {"root": "a b"}}, {"gui_password": "x", "clear": ["gui_password"]},
+    {"clear": ["ssh_password"]},
+])
+def test_sensor_and_computer_values_are_checked(client, inv, body):
+    assert _call(client, inv, "PUT", "system/gotcha5/component/1", **body).status_code in (400, 422)
+    assert S.inventory_file.read_text() == INV and _secrets() == SECRETS
+
+
+def test_a_computer_with_users_web_and_rustdesk(client, inv):
+    r = _call(client, inv, "POST", "system/gotcha5/component", name="pc-rdr1", category="compute",
+              model="NUC 13 Pro", sensor="1", address="10.0.0.50", web="http://10.0.0.50:9090",
+              web_password="web-pw", rustdesk_ip="10.0.0.50", rustdesk_password="rd-pw",
+              users={"gotcha": "u1-pw", "root": "u2-pw", "viewer": ""})
+    assert r.status_code == 200, r.text
+    c = _comp("gotcha5", "pc-rdr1")
+    assert c["model"] == "NUC 13 Pro" and c["sensor"] == "1" and c["rustdesk_ip"] == "10.0.0.50"
+    assert c["users"] == [{"name": "gotcha", "password_env": "GOTCHA5_PC_RDR1_USER_GOTCHA_PW"},
+                          {"name": "root", "password_env": "GOTCHA5_PC_RDR1_USER_ROOT_PW"},
+                          {"name": "viewer"}]
+    s = _secrets()
+    for v in ("web-pw", "rd-pw", "u1-pw", "u2-pw"):
+        assert f"={v}\n" in s and v not in S.inventory_file.read_text() and v not in r.text
+    listed = _find(r.json(), "gotcha5", "pc-rdr1")
+    assert listed["users"] == [{"name": "gotcha", "set": True}, {"name": "root", "set": True},
+                               {"name": "viewer", "set": False}]
+    assert listed["has_web_password"] and listed["has_rustdesk_password"]
+    # the sensor lists its computer
+    assert _find(r.json(), "gotcha5", "1")["computers"] == ["pc-rdr1"]
+
+
+def test_users_change_one_by_one(client, inv):
+    _call(client, inv, "POST", "system/gotcha5/component", name="pc", category="compute",
+          users={"a": "pa", "b": "pb"})
+    r = _call(client, inv, "PUT", "system/gotcha5/component/pc", users={"a": "pa2", "b": None, "c": ""})
+    assert r.status_code == 200 and r.json()["changed"] == ["user:a", "user:b", "user:c"]
+    assert _comp("gotcha5", "pc")["users"] == [{"name": "a", "password_env": "GOTCHA5_PC_USER_A_PW"},
+                                               {"name": "c"}]
+    s = _secrets()
+    assert "GOTCHA5_PC_USER_A_PW=pa2\n" in s and "USER_B" not in s
+    # a password for a user that had none
+    _call(client, inv, "PUT", "system/gotcha5/component/pc", users={"c": "pc"})
+    assert "GOTCHA5_PC_USER_C_PW=pc\n" in _secrets()
+
+
+def test_each_secret_is_revealed_on_its_own(client, inv):
+    _call(client, inv, "POST", "system/gotcha5/component", name="pc", category="compute",
+          web_password="w", rustdesk_password="r", users={"root": "u"})
+    _call(client, inv, "PUT", "system/gotcha5/component/1", gui_password="g")
+    _stepup(client, inv)
+    path = "/api/access/system/gotcha5/component/{}/reveal"
+    get = lambda c, body: client.post(path.format(c), headers=ADMIN, json=body)  # noqa: E731
+    assert get("pc", {"slot": "web_password"}).json()["value"] == "w"
+    assert get("pc", {"slot": "rustdesk_password"}).json()["value"] == "r"
+    assert get("pc", {"user": "root"}).json()["value"] == "u"
+    assert get("1", {"slot": "gui_password"}).json()["value"] == "g"
+    assert get("1", {}).json()["value"] == "hunter2-CANARY"   # still the SSH password
+    assert get("pc", {"user": "nobody"}).status_code == 404
+    assert get("pc", {"slot": "ANTHROPIC_API_KEY"}).status_code == 404
+    assert client.post(path.format("pc"), json={"user": "root"}).status_code == 403  # a viewer
+    reveals = [e["field"] for e in _audit() if e["action"] == "reveal-access"]
+    assert reveals == ["web_password", "rustdesk_password", "user:root", "gui_password", "password"]
+
+
+def test_removing_fixed_passwords(client, inv):
+    _call(client, inv, "POST", "system/gotcha5/component", name="pc", category="compute",
+          web_password="w", rustdesk_password="r")
+    r = _call(client, inv, "PUT", "system/gotcha5/component/pc", clear=["web_password"])
+    assert r.json()["changed"] == ["web_password"]
+    c = _comp("gotcha5", "pc")
+    assert "web_password_env" not in c and "rustdesk_password_env" in c
+    assert "WEB" not in _secrets() and "RUSTDESK" in _secrets()
+
+
+def test_a_computer_can_only_serve_a_sensor_of_its_system(client, inv):
+    for sensor in ("nuc", "nope", "cam-x"):  # nuc is compute; nope doesn't exist
+        r = _call(client, inv, "POST", "system/gotcha5/component", name="pc", category="compute", sensor=sensor)
+        assert r.status_code == 400, sensor
+    assert _call(client, inv, "POST", "system/gotcha5/component", name="pc", category="compute",
+                 sensor="cam").status_code == 200
+
+
+def test_links_follow_a_sensor_renamed_moved_or_deleted(client, inv):
+    _call(client, inv, "POST", "system/gotcha5/component", name="pc", category="compute", sensor="cam")
+    _call(client, inv, "PUT", "system/gotcha5/component/cam", name="cam-ptz")
+    assert _comp("gotcha5", "pc")["sensor"] == "cam-ptz"
+    assert _find(client.get("/api/access").json(), "gotcha5", "cam-ptz")["computers"] == ["pc"]
+    _call(client, inv, "PUT", "system/gotcha5/component/cam-ptz", category="compute")
+    assert "sensor" not in _comp("gotcha5", "pc")
+    _call(client, inv, "PUT", "system/gotcha5/component/cam-ptz", category="cameras")
+    _call(client, inv, "PUT", "system/gotcha5/component/pc", sensor="cam-ptz")
+    _call(client, inv, "DELETE", "system/gotcha5/component/cam-ptz")
+    assert "sensor" not in _comp("gotcha5", "pc")
+
+
+def test_deleting_a_computer_takes_all_its_passwords(client, inv):
+    _call(client, inv, "POST", "system/gotcha5/component", name="pc", category="compute",
+          web_password="w", rustdesk_password="r", users={"a": "pa"})
+    _call(client, inv, "DELETE", "system/gotcha5/component/pc")
+    s = _secrets()
+    assert "GOTCHA5_PC_" not in s and "ANTHROPIC_API_KEY" in s
+
+
+def test_viewers_see_the_fields_but_no_password(client, inv):
+    _call(client, inv, "POST", "system/gotcha5/component", name="pc", category="compute",
+          web="http://x", web_password="SECRET-W", rustdesk_password="SECRET-R", users={"root": "SECRET-U"})
+    r = client.get("/api/access")
+    assert "SECRET" not in r.text and "_PW" not in r.text and "http://x" in r.text
+
+
+def test_users_and_secret_fields_keep_their_one_line_style(client, inv):
+    S.inventory_file.write_text(INV.replace("      nuc:\n        type: nuc\n",
+        "      nuc:\n        type: nuc\n        users: [{name: a, password_env: NUC_A_PW}]   # kept on one line\n"
+        "        secret_fields: [{name: s1, env: NUC_S1_PW}]\n"))
+    _call(client, inv, "PUT", "system/gotcha5/component/nuc", users={"b": "pb"}, secret_fields={"s2": "v2"})
+    text = S.inventory_file.read_text()
+    assert re.search(r"users: \[\{name: a, password_env: NUC_A_PW\}, \{name: b, password_env: "
+                     r"GOTCHA5_NUC_USER_B_PW\}\] +# kept on one line", text), text
+    assert "secret_fields: [{name: s1, env: NUC_S1_PW}, {name: s2, env: GOTCHA5_NUC_S2_PW}]" in text
+    _call(client, inv, "PUT", "system/gotcha5/component/nuc", users={"a": None})
+    assert "users: [{name: b, password_env: GOTCHA5_NUC_USER_B_PW}]" in S.inventory_file.read_text()
+
+
+
+def test_a_sensors_coverage_for_the_tower_view(client, inv):
+    r = _call(client, inv, "PUT", "system/gotcha5/component/1", azimuth=30, fov_from=-45, fov_to=45, range=1200)
+    assert r.status_code == 200, r.text
+    assert _find(r.json(), "gotcha5", "1")["coverage"] == {
+        "from": -45, "to": 45, "range": 1200, "default_fov": False, "default_range": False}
+    # a camera with nothing set gets gotcha30's defaults; compute has no coverage
+    assert _find(r.json(), "gotcha5", "cam")["coverage"] == {
+        "from": -30, "to": 30, "range": 500, "default_fov": True, "default_range": True}
+    assert "coverage" not in _find(r.json(), "gotcha5", "nuc")
+
+
+# --------------------------------------------------------------------------
+# Where a system stands
+# --------------------------------------------------------------------------
+
+def test_a_new_system_with_its_coordinates(client, inv):
+    r = _call(client, inv, "POST", "system", name="haifa", site="Haifa port", latitude="32.8191234567",
+              longitude=34.9983, altitude=12)
+    assert r.status_code == 200, r.text
+    assert _doc()["systems"]["haifa"] == {"site": "Haifa port", "latitude": 32.8191235,
+                                          "longitude": 34.9983, "altitude": 12, "components": {}}
+    s = next(x for x in r.json()["systems"] if x["name"] == "haifa")
+    assert (s["latitude"], s["longitude"], s["altitude"]) == (32.8191235, 34.9983, 12)
+
+
+@pytest.mark.parametrize("body", [
+    {"latitude": 91, "longitude": 0}, {"latitude": 0, "longitude": 181}, {"latitude": "north", "longitude": 1},
+    {"latitude": 32}, {"longitude": 35}, {"latitude": 1, "longitude": 1, "altitude": 20000},
+])
+def test_coordinates_are_checked(client, inv, body):
+    assert _call(client, inv, "POST", "system", name="x", **body).status_code == 400
+    assert "x" not in _doc()["systems"]
+
+
+def test_moving_and_removing_a_systems_coordinates(client, inv):
+    _call(client, inv, "PUT", "system/gotcha5", latitude=32.1, longitude=35.2)
+    r = _call(client, inv, "PUT", "system/gotcha5", latitude=32.2)
+    assert r.json()["changed"] == ["latitude"] and _doc()["systems"]["gotcha5"]["latitude"] == 32.2
+    assert _call(client, inv, "PUT", "system/gotcha5", latitude="").status_code == 400  # not alone
+    r = _call(client, inv, "PUT", "system/gotcha5", latitude="", longitude="")
+    assert r.status_code == 200 and "latitude" not in _doc()["systems"]["gotcha5"]
+
+
+
+# --------------------------------------------------------------------------
+# From the third review
+# --------------------------------------------------------------------------
+
+def test_a_delete_always_takes_its_own_code(client, inv):
+    _call(client, inv, "PUT", "system/gotcha5", site="x")  # opens the window
+    for path in ("system/gotcha6/component/2", "system/gotcha6"):
+        r = client.request("DELETE", "/api/access/" + path, headers=ADMIN, json={})
+        assert r.status_code == 401, path
+    assert "gotcha6" in _doc()["systems"]
+    assert _call(client, inv, "DELETE", "system/gotcha6").status_code == 200
+
+
+def test_a_failed_change_opens_no_window(client, inv):
+    assert _call(client, inv, "PUT", "system/nope", site="x").status_code == 404
+    r = client.put("/api/access/system/gotcha5", headers=ADMIN, json={"site": "y"})
+    assert r.status_code == 401
+
+
+def test_a_code_inside_the_window_is_still_checked_and_extends_it(client, inv):
+    r = _call(client, inv, "PUT", "system/gotcha5", site="a")
+    first = r.json()["edit_until"]
+    assert client.get("/api/auth/status", headers=ADMIN).json()["edit_until"] == first
+    assert _call(client, inv, "PUT", "system/gotcha5", code="000000", site="b").status_code == 401
+    inv.t += 100
+    assert _call(client, inv, "PUT", "system/gotcha5", site="c").json()["edit_until"] == pytest.approx(first + 130, abs=1)
+
+
+@pytest.mark.parametrize("body", [{"fov_from": 10, "fov_to": -10}, {"latitude": 32}])
+def test_a_typo_found_before_the_code_leaves_the_code_usable(client, inv, body):
+    code = inv.code("admin@example.com")
+    path = "system/gotcha5/component/1" if "fov_from" in body else "system/gotcha5"
+    assert _call(client, inv, "PUT", path, code=code, **body).status_code == 400
+    assert _call(client, inv, "PUT", "system/gotcha5", code=code, site="ok").status_code == 200
+
+
+def test_too_many_users_or_secret_fields_are_refused_before_the_code(client, inv):
+    users = {f"u{i}": "" for i in range(21)}
+    assert _call(client, inv, "PUT", "system/gotcha5/component/nuc", users=users).status_code == 400
+    many = {f"s{i}": "v" for i in range(41)}
+    assert _call(client, inv, "PUT", "system/gotcha5/component/nuc", secret_fields=many).status_code == 400
+
+
+def test_a_shared_user_password_cant_be_changed_from_one_computer(client, inv):
+    S.inventory_file.write_text(INV.replace("      nuc:\n        type: nuc\n",
+        "      nuc:\n        type: nuc\n        users: [{name: root, password_env: SHARED_SSH_PW}]\n"))
+    r = _call(client, inv, "PUT", "system/gotcha5/component/nuc", users={"root": "new"})
+    assert r.status_code == 400 and "shared" in r.json()["detail"]
+
+
+def test_one_line_user_entries_stay_one_line_when_others_change(client, inv):
+    S.inventory_file.write_text(INV.replace("      nuc:\n        type: nuc\n",
+        "      nuc:\n        type: nuc\n        users: [{name: op, password_env: NUC_OP_PW}, {name: root}]\n"))
+    _call(client, inv, "POST", "system/gotcha5/component", name="r9", category="radars")
+    _call(client, inv, "PUT", "system/gotcha5/component/nuc", users={"newbie": ""})
+    assert "users: [{name: op, password_env: NUC_OP_PW}, {name: root}, {name: newbie}]" in S.inventory_file.read_text()
+
+
+def test_hand_written_odd_user_entries_survive_and_duplicates_dont_become_anchors(client, inv):
+    S.inventory_file.write_text(INV.replace("      nuc:\n        type: nuc\n",
+        "      nuc:\n        type: nuc\n        users: [{name: dup}, {name: dup}, plain-string, {name: 7}]\n"))
+    _call(client, inv, "PUT", "system/gotcha5/component/nuc", users={"dup": "pw"})
+    text = S.inventory_file.read_text()
+    assert "&id" not in text and "plain-string" in text and "{name: 7}" in text
+    assert _call(client, inv, "PUT", "system/gotcha5", site="still editable").status_code == 200
+
+
+def test_a_link_to_a_numbered_sensor_reads_as_text(client, inv):
+    _call(client, inv, "POST", "system/gotcha5/component", name="pc", category="compute", sensor="1")
+    assert _find(client.get("/api/access").json(), "gotcha5", "pc")["sensor"] == "1"
+    S.inventory_file.write_text(S.inventory_file.read_text().replace("sensor: '1'", "sensor: 1"))
+    assert _find(client.get("/api/access").json(), "gotcha5", "pc")["sensor"] == "1"
+
+
+@pytest.mark.parametrize("bad", ["azimuth: .nan", "range: .inf", "elevation: -.inf"])
+def test_non_finite_numbers_in_the_file_dont_break_the_listing(client, inv, bad):
+    S.inventory_file.write_text(INV.replace("        port: 8080\n", f"        port: 8080\n        {bad}\n"))
+    r = client.get("/api/access")
+    assert r.status_code == 200 and _find(r.json(), "gotcha5", "cam")["coverage"]["range"] > 0
+
+
+@pytest.mark.parametrize("url,ok", [
+    ("http://10.0.0.5:8080/ui", True), ("10.0.0.5:8080", True), ("radar.local/ui", True), ("localhost:9000", True),
+    ("https://[fe80::1]:443/x", True), ("javascript:1/alert(1)", False), ("data:1/x", False),
+    ("http://a.b/\"><img>", False), ("vbscript:1/x", False),
+])
+def test_web_addresses(client, inv, url, ok):
+    r = _call(client, inv, "PUT", "system/gotcha5/component/1", gui=url)
+    assert (r.status_code == 200) is ok, r.text
+
+
+def test_the_ssh_password_can_be_cleared_through_clear_too(client, inv):
+    assert _call(client, inv, "PUT", "system/gotcha5/component/1", clear=["password"]).json()["changed"] == ["password"]
+    assert "NODE_1_SSH_PW" not in _secrets()
+
+
+def test_the_categories_carry_their_default_coverage(client, inv):
+    cats = {c["key"]: c.get("coverage") for c in client.get("/api/access").json()["categories"]}
+    assert cats == {"radars": {"from": -60, "to": 60, "range": 800}, "acoustics": {"from": -180, "to": 180, "range": 600},
+                    "cameras": {"from": -30, "to": 30, "range": 500}, "compute": None}

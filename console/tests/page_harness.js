@@ -100,38 +100,106 @@ const S=sandbox;
   await check('the secrets tab also shows system access',async()=>{},['#sec-access','10.0.0.1']);
   await check('the four categories',async()=>{},['#sec-access','Compute &amp; Infrastructure']);
   await check('systems are collapsible',()=>S.expandAll(false),['#sec-access','<details class="card sys" ']);
-  await check('expand all opens them',()=>S.expandAll(true),['#sec-access','<details class="card sys" open']);
-  await check('a plain extra field shows',async()=>{},['#sec-access','azimuth']);
-  await check('passwords and secret fields are masked',async()=>{},['#sec-access','••••••••']);
-  await check('reveal the SSH password',async()=>{ el('#codein').value='123456'; const p=S.revealAccess('gotcha5','1',null);
-    await tick(); await tick(); if(el('#codeok').onclick) el('#codeok').onclick(); await p; },['#acp-0-0-0','secretval']);
-  await check('reveal a secret field',()=>S.revealAccess('gotcha5','1','web password'),['#acp-0-0-0-f0','secretval']);
+  await check('categories start collapsed',async()=>{
+    S.ACC.open=new Set(['gotcha5']); S.renderAccess();
+    const h=el('#sec-access').innerHTML;
+    if(!h.includes('<details class="card sys" open')||h.includes('<details class="cat" open')) throw new Error('not as expected'); });
+  await check('expand all opens systems and categories',()=>S.expandAll(true),['#sec-access','<details class="cat" open']);
+  await check('collapse all closes them',async()=>{ S.expandAll(false);
+    if(el('#sec-access').innerHTML.includes('<details class="cat" open')) throw new Error('a category stayed open');
+    S.expandAll(true); });
+  await check('collapse all also closes a form and the tower view',async()=>{
+    S.openForm('comp-edit','gotcha5','1'); S.toggleTowerView('gotcha5'); S.expandAll(false);
+    const h=el('#sec-access').innerHTML;
+    if(S.ACC.form||S.ACC.towerView.size||h.includes('<details class="card sys" open')||h.includes('<details class="cat" open'))
+      throw new Error('something stayed open');
+    S.expandAll(true); });
+  await check('a sensor row: version, GUI link, aim, its computer',async()=>{
+    const h=el('#sec-access').innerHTML;
+    for(const want of ['v4.2','href="http://10.0.0.1/ui"','az 120°','el -2°','<td class="mono">pc</td>','band'])
+      if(!h.includes(want)) throw new Error('lacks '+want); });
+  await check('a computer row: model, serves, web, RustDesk, users',async()=>{
+    const h=el('#sec-access').innerHTML;
+    for(const want of ['NUC 13','<b>serves</b> 1','http://10.0.0.50:9090','<b>RustDesk</b>','<b>user</b> <span class="mono">root','viewer'])
+      if(!h.includes(want)) throw new Error('lacks '+want); });
+  await check('a system shows where it stands, with a map link',async()=>{},['#sec-access','href="https://www.openstreetmap.org/?mlat=32.6619&amp;mlon=35.0102']);
+  await check('the tower view is a button on each system',async()=>{},['#sec-access','>tower view</button>']);
+  await check('the tower view draws the system as one circle',()=>S.toggleTowerView('gotcha5'),['#sec-access','aria-label="Tower view of gotcha5"']);
+  await check('each sensor points along its azimuth',async()=>{
+    const h=el('#sec-access').innerHTML;
+    // radar 1: azimuth 120, ±45 -> a wedge from 075 to 165, labelled with its direction
+    if(!h.includes('>1 120°</text>')) throw new Error('no radar label');
+    if(!h.includes('120°, -45° to 45°')) throw new Error('no radar tooltip');
+    if(!/<path d="M 150 150 L [\d.]+ [\d.]+ A /.test(h)) throw new Error('no wedge');
+    if(!h.includes('north up')) throw new Error('no legend'); });
+  await check('and it hides again',()=>S.toggleTowerView('gotcha5'),['#sec-access','>tower view</button>']);
+  await check('every secret is masked, none shown',async()=>{
+    const h=el('#sec-access').innerHTML;
+    if(!h.includes('••••••••')) throw new Error('no masked secret');
+    for(const v of ['guipw','webpw','pcweb','>rd<','rootpw','>ssh<']) if(h.includes(v)) throw new Error('shows '+v); });
+  await check('reveal the GUI password',async()=>{ const p=S.revealAccess('gotcha5','1','slot:gui_password');
+    await tick(); await tick(); el('#codein').value='123456'; if(el('#codeok').onclick) el('#codeok').onclick(); await p; },['#acp-0-0-0-g','secretval']);
+  await check('reveal a user password',()=>S.revealAccess('gotcha5','pc','user:root'),['#acp-0-3-0-u0','secretval']);
+  await check('the reveal asks for that one secret',async()=>{
+    const last=CALLS.filter(c=>c[1].endsWith('/reveal')).pop();
+    if(JSON.parse(last[2]).user!=='root') throw new Error(last[2]); });
   const form=(vals)=>Object.entries(vals).forEach(([k,v])=>el('#af-'+k).value=v);
-  const clear=()=>['name','site','description','type','role','scheme','address','port','user','pw','code','category']
+  const clear=()=>['name','site','description','type','role','scheme','address','port','user','version','gui','azimuth',
+    'elevation','fov_from','fov_to','range','model','web','rustdesk_ip','pw','guipw','webpw','rdpw','code','category','sensor']
     .forEach(k=>el('#af-'+k).value='');
-  await check('the edit component form',()=>{ S.ACC.can_edit=true; S.openForm('comp-edit','gotcha5','1'); },['#sec-access','delete component']);
-  await check('the form lists its extra fields',async()=>{},['#sec-access','ff-n-1']);
-  await check('add an extra field row',()=>{ el('#ff-n-0').value='azimuth'; el('#ff-v-0').value='125';
-    S.syncRows(); S.ACC.rows.push({name:'firmware',value:'4.2',secret:false}); S.renderAccess(); },['#sec-access','ff-n-2']);
-  await check('save a component with fields',async()=>{ clear(); const c=S.ACC.systems[0].categories[0].components[0];
-    form({name:c.name,type:c.type||'',address:'10.0.0.2',user:c.user||'',category:'radars',code:'123456'});
+  await check('the sensor form',()=>{ S.ACC.can_edit=true; S.openForm('comp-edit','gotcha5','1'); },['#sec-access','GUI password']);
+  await check('it has azimuth and elevation, no SSH',async()=>{
+    const h=el('#sec-access').innerHTML;
+    if(!h.includes('af-azimuth')||!h.includes('af-elevation')||h.includes('af-user')) throw new Error('wrong fields'); });
+  await check('save a sensor with fields',async()=>{ clear(); const c=S.ACC.systems[0].categories[0].components[0];
+    form({name:c.name,version:'4.3',address:'10.0.0.2',port:'8080',gui:c.gui,azimuth:'120',elevation:'-2',fov_from:'-45',fov_to:'45',
+          category:'radars',code:'123456'});
+    S.ACC.rows.forEach((r,i)=>{ el('#ff-n-'+i).value=r.name; el('#ff-v-'+i).value=r.value; });
     S.ACC.rows.push({name:'snmp community',value:'c1',secret:true});
-    await S.saveComponent('gotcha5','1'); },['#sec-access','firmware']);
-  await check('the add form picks its category',()=>S.openForm('comp-add','gotcha5',null,'cameras'),['#sec-access','value="cameras" selected']);
-  await check('add a component',async()=>{ clear(); form({name:'cam',type:'camera',address:'10.0.0.3',category:'cameras',code:'123456'});
+    await S.saveComponent('gotcha5','1');
+    const call=CALLS.filter(x=>x[0]==='PUT'&&x[1].endsWith('/component/1')).pop(), b=JSON.parse(call[2]);
+    if(b.version!=='4.3'||b.address!=='10.0.0.2'||'azimuth' in b||'gui' in b) throw new Error(call[2]); },['#sec-access','firmware']);
+  await check('the computer form',()=>S.openForm('comp-edit','gotcha5','pc'),['#sec-access','RustDesk password']);
+  await check('it lists the users and the sensors it can serve',async()=>{
+    const h=el('#sec-access').innerHTML;
+    if(!h.includes('uu-n-1')||!h.includes('serves sensor')||!h.includes('<option value="1" selected>')) throw new Error('missing'); });
+  await check('save a computer: users change one by one',async()=>{ clear(); const c=S.ACC.systems[0].categories[3].components[0];
+    form({name:c.name,type:'',role:'',scheme:'',address:c.address,port:'',user:c.user,model:'NUC 14',web:c.web,
+          rustdesk_ip:c.rustdesk_ip,sensor:'1',category:'compute',code:'123456'});
+    S.ACC.users.forEach((u,i)=>{ el('#uu-n-'+i).value=u.name; el('#uu-p-'+i).value=''; });
+    S.ACC.users[1].removed=true; S.ACC.users.push({name:'ops',pw:'opspw'});
+    el('#uu-n-2').value='ops'; el('#uu-p-2').value='opspw';
+    await S.saveComponent('gotcha5','pc');
+    const call=CALLS.filter(x=>x[0]==='PUT'&&x[1].endsWith('/component/pc')).pop(), b=JSON.parse(call[2]);
+    if(b.model!=='NUC 14'||JSON.stringify(b.users)!=='{"viewer":null,"ops":"opspw"}'||'sensor' in b) throw new Error(call[2]); });
+  await check('a category stays open after its form closes',async()=>{
+    S.ACC.openCats=new Set(); S.openForm('comp-add','gotcha5',null,'acoustics'); S.closeForm();
+    if(!el('#sec-access').innerHTML.includes('ontoggle="toggleCat(\'gotcha5/acoustics\'') ||
+       !S.ACC.openCats.has('gotcha5/acoustics')) throw new Error('closed again'); });
+  await check('a new camera gets the sensor form',async()=>{ S.openForm('comp-add','gotcha5',null,'cameras');
+    const h=el('#sec-access').innerHTML;
+    if(!h.includes('id="af-azimuth"')||h.includes('id="af-user"')) throw new Error('not the sensor form'); },['#sec-access','value="cameras" selected']);
+  await check('add a component',async()=>{ clear(); form({name:'cam',address:'10.0.0.3',category:'cameras',code:'123456'});
     await S.saveComponent('gotcha5',null); },['#sec-access','10.0.0.3']);
   await check('delete a component',async()=>{ S.openForm('comp-edit','gotcha5','cam'); clear(); form({code:'123456'});
     await S.deleteComponent('gotcha5','cam'); });
   await check('the add system form',()=>S.openForm('sys-add'),['#sec-access','Add a system']);
-  await check('add a system',async()=>{ clear(); form({name:'gotcha9',site:'Eilat',code:'123456'});
-    await S.saveSystem(null); },['#sec-access','gotcha9']);
+  await check('the system form has coordinates',async()=>{},['#sec-access','id="af-latitude"']);
+  await check('add a system',async()=>{ clear(); ['latitude','longitude','altitude'].forEach(k=>el('#af-'+k).value='');
+    form({name:'gotcha9',site:'Eilat',latitude:'29.55',longitude:'34.95',code:'123456'});
+    await S.saveSystem(null);
+    const call=CALLS.filter(x=>x[0]==='POST'&&x[1]==='/access/system').pop(), b=JSON.parse(call[2]);
+    if(b.latitude!=='29.55'||b.longitude!=='34.95'||'altitude' in b) throw new Error(call[2]); },['#sec-access','gotcha9']);
   await check('the edit system form',()=>S.openForm('sys-edit','gotcha9'),['#sec-access','delete system']);
-  await check('edit a system',async()=>{ clear(); form({name:'gotcha9',site:'Eilat port',code:'123456'});
+  await check('save, cancel and delete sit together',async()=>{
+    if(/class="sm no grow"/.test(el('#sec-access').innerHTML)) throw new Error('delete is pushed away'); });
+  await check('edit a system',async()=>{ clear(); ['latitude','longitude','altitude'].forEach(k=>el('#af-'+k).value='');
+    form({name:'gotcha9',site:'Eilat port',code:'123456'});
     await S.saveSystem('gotcha9'); },['#sec-access','Eilat port']);
   await check('delete a system',async()=>{ S.openForm('sys-edit','gotcha9'); clear(); form({code:'123456'});
     await S.deleteSystem('gotcha9'); });
   await check('hiding a revealed secret keeps an open form',async()=>{
-    S.ACC.reveal['gotcha5/1']='pw'; S.openForm('comp-add','gotcha5',null,'radars'); S.hideAccess('gotcha5/1'); },['#sec-access','SSH password (optional)']);
+    S.ACC.reveal['gotcha5/pc#user:root']='x'; S.openForm('comp-add','gotcha5',null,'compute'); S.hideAccess('gotcha5/pc#user:root'); },['#sec-access','SSH password (optional)']);
   await check('an untouched multi-line field goes back exactly',()=>{
     const orig={fields:{multi:'x\ny',pad:' p ',n:'1'}};
     S.ACC.rows=[{name:'multi',value:'xy',secret:false,existing:true,origName:'multi',raw:'x\ny'},
@@ -145,6 +213,28 @@ const S=sandbox;
     el('#ff-n-0').value='multi'; el('#ff-v-0').value='xy';
     const out=S.fieldChanges({fields:{multi:'x\ny'}});
     if('fields' in out) throw new Error(JSON.stringify(out)); });
+  await check('outside the editing window a save sends a code',async()=>{
+    S.AUTH.edit_until=null; S.openForm('comp-edit','gotcha5','1'); clear();
+    const c=S.ACC.systems[0].categories[0].components[0];
+    form({name:c.name,version:'9.8',address:c.address,port:String(c.port),gui:c.gui,azimuth:String(c.azimuth),
+          elevation:String(c.elevation),fov_from:String(c.fov_from),fov_to:String(c.fov_to),category:'radars',code:'123456'});
+    S.ACC.rows.forEach((r,i)=>{ el('#ff-n-'+i).value=r.name; el('#ff-v-'+i).value=r.value; });
+    await S.saveComponent('gotcha5','1');
+    const call=CALLS.filter(x=>x[0]==='PUT'&&x[1].startsWith('/access/')).pop();
+    if(!call||JSON.parse(call[2]).code!=='123456') throw new Error('sent: '+(call&&call[2])); });
+  await check('inside the editing window the form needs no code',()=>{
+    S.AUTH.edit_until=Date.now()/1000+300; S.openForm('comp-edit','gotcha5','1'); },['#sec-access','editing unlocked']);
+  await check('and a save sends none',async()=>{
+    clear(); const c=S.ACC.systems[0].categories[0].components[0];
+    form({name:c.name,version:'9.9',address:c.address,port:String(c.port),gui:c.gui,azimuth:String(c.azimuth),
+          elevation:String(c.elevation),fov_from:String(c.fov_from),fov_to:String(c.fov_to),category:'radars'});
+    S.ACC.rows.forEach((r,i)=>{ el('#ff-n-'+i).value=r.name; el('#ff-v-'+i).value=r.value; });
+    const before=CALLS.length;
+    await S.saveComponent('gotcha5','1');
+    if(CALLS.length===before) throw new Error('no request was sent');
+    const call=CALLS.filter(x=>x[0]==='PUT'&&x[1].startsWith('/access/')).pop();
+    if(!call||'code' in JSON.parse(call[2])) throw new Error('sent: '+(call&&call[2]));
+    S.AUTH.edit_until=null; });
   await check('passkeys panel',()=>{ S.closeForm(); return S.togglePasskeys(); },['#pkpanel','Your passkeys']);
   await check('passkeys need a secure page',async()=>{},['#pkpanel','localhost']);
   await check('removing a passkey sends a code',async()=>{
