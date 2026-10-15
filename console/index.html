@@ -534,12 +534,14 @@ async function startDeploy(){
 
 // ================================================================== Conversations
 var CV={q:'',outcome:'',channel:'',open:null}, CV_TIMER=null;
+// Who asked: their Slack name when it is known, with the ID on hover; else the ID.
+const asker=(id,names)=>names&&names[id]?`<span dir="auto" title="${esc(id)}">${esc(names[id])}</span>`:`<span class="mono">${esc(id)}</span>`;
 async function loadConvos(){
   const qs=new URLSearchParams({q:CV.q,outcome:CV.outcome,channel:CV.channel});
   const r=await api('/conversations?'+qs);
   const rows=r.threads.map(t=>`<tr class="click ${CV.open===t.key?'open':''}" onclick="openThread('${jsq(t.key)}')">
       <td class="mono" style="white-space:nowrap">${fmtTime(t.last)}</td>
-      <td class="mono dim">${esc(t.users.join(', ')||'—')}</td>
+      <td class="dim">${t.users.map(u=>asker(u,r.names)).join(', ')||'—'}</td>
       <td><div class="clip" dir="auto" title="${esc(t.question)}">${esc(t.question)}</div></td>
       <td class="num">${t.count}</td>
       <td>${[...new Set(t.outcomes)].map(outcomeBadge).join(' ')}</td>
@@ -561,6 +563,7 @@ async function loadConvos(){
       ${r.turn_log?'':`<p class="alert warn">No turn log yet (<code>slack-bridge/state/turns.jsonl</code>), so the threads below come from
         Claude's transcripts alone: who asked in Slack, and turns that timed out, aren't known. The log starts with the next deploy of the bridge.</p>`}
     </div>
+    ${r.names_problem?`<p class="alert warn">Names: ${esc(r.names_problem)}. Slack IDs are shown meanwhile.</p>`:''}
     <div class="card"><h3>Threads <span class="dim" style="font-weight:400">— ${r.threads.length}, newest first</span></h3>
       <div class="scroll"><table>
         <tr><th>last</th><th>asked by</th><th>first question</th><th class="num">turns</th><th>outcome</th><th class="num">cost</th></tr>
@@ -581,7 +584,7 @@ async function renderThread(key){
   try{ t=await api('/conversations/'+encodeURIComponent(key)); }
   catch(e){ $('#cv-detail').innerHTML=`<div class="card bad">${esc(e.message)}</div>`; return; }
   const turns=t.turns.map((u,i)=>`<div class="turn">
-      <header><b style="color:var(--fg)">Turn ${i+1}</b> ${fmtTime(u.ts)} ${u.user?`· <span class="mono">${esc(u.user)}</span>`:''}
+      <header><b style="color:var(--fg)">Turn ${i+1}</b> ${fmtTime(u.ts)} ${u.user?`· ${asker(u.user,t.names)}`:''}
         ${outcomeBadge(u.outcome)} · ${fmtSecs(u.seconds)} · ${fmtCost(u.cost_usd)}
         ${u.turns?`· ${u.turns} steps`:''} ${u.resumed?'· resumed':''}
         ${u.session_id?`<span class="mono grow" title="Claude session">${esc(u.session_id.slice(0,8))}</span>`:''}</header>

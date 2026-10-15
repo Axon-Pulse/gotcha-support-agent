@@ -48,6 +48,11 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(auth, "SESSIONS", {})
     from console import passkeys
     passkeys.reset_challenges()
+    from console import slack_users
+
+    def no_slack(token, uid):  # a test never reaches the real Slack
+        raise OSError("no network in tests")
+    monkeypatch.setattr(slack_users, "_fetch", no_slack)
     return tmp_path
 
 

@@ -32,6 +32,7 @@ oauth_config:
       - app_mentions:read   # @gotcha-support in a channel
       - chat:write          # the "Checking…" message, then the answer edited into it
       - im:history          # DMs, when enabled
+      - users:read          # the console shows who asked by name, not by Slack ID
 
 settings:
   event_subscriptions:

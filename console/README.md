@@ -4,7 +4,7 @@ A web page for the Slack support bot (`../slack-bridge/` + `../support-agent-ski
 
 | Tab | What it shows | Reads / writes |
 |---|---|---|
-| **Conversations** | Every Slack thread: who asked, each question and answer, time and cost, and **what the bot did**: each script, its output, each case it read, each command the guard blocked. | Claude's transcripts + `slack-bridge/state/turns.jsonl` + `threads.json` (read) |
+| **Conversations** | Every Slack thread: who asked (by Slack name; see below), each question and answer, time and cost, and **what the bot did**: each script, its output, each case it read, each command the guard blocked. | Claude's transcripts + `slack-bridge/state/turns.jsonl` + `threads.json` (read) |
 | **Cases** | The KB cases as a form: topics, symptoms, title, intro, sections in any order. On the same screen, the case's **SKILL.md index row** and its **log signatures**. Create, rename, delete. A file whose layout the form can't reproduce exactly opens as markdown. | `support-agent-skill/kb/cases/*.md`, `SKILL.md` §3, `scripts/signatures.txt` |
 | **Reference docs** | `system-model.md`, `glossary.md`, `escalation.md` and all of `signatures.txt`, as text with a preview. `SKILL.md` is shown read-only. | `support-agent-skill/kb/`, `scripts/` |
 | **Stats** | Questions, cost, time to answer, timeouts, per day; the cases read most. | the same as Conversations |
@@ -120,6 +120,13 @@ unless changed; only the settings changed are written. The machines the bot may 
 and/or machines by exact name, never a wider pattern: that is the boundary of its command
 guard. `BOT_UID`/`BOT_GID` (fixed when the image is built) and `CLAUDE_BIN` (the program it
 runs) stay read-only; change those on the server. The audit log keeps what each setting became.
+
+**Who asked, by name.** The Conversations tab looks each Slack user ID up with the bot's own
+token (`users.info`) and keeps the names in `console/state/slack_users.json` for a week. This
+needs the Slack app's `users:read` permission (in `slack-bridge/manifest.yaml`): add it at
+api.slack.com → the app → OAuth & Permissions → Bot Token Scopes, then reinstall the app to the
+workspace. The bot token normally stays the same; if Slack shows a new one, set it as
+`SLACK_BOT_TOKEN` on the Secrets tab. Until then the tab shows the IDs and says why.
 
 **Setting someone up** (on this machine, with them next to you or on a call):
 
@@ -306,6 +313,7 @@ Slack users show as IDs (`U0…`): the bot's Slack app has no `users:read` scope
 | `kb.py` | Cases ↔ parts, SKILL.md index rows, signatures, reference docs, `selftest.sh`. |
 | `conversations.py` | Transcripts + turn log → threads, steps and stats. |
 | `ops.py` | Bot config (allowlisted `.env` names), the container, Systems, Deploy and restart. |
+| `slack_users.py` | Slack user IDs → names, looked up with the bot's token and cached for a week. |
 | `bot_settings.py` | Which bot settings an admin may change, the check for each, and writing them to `.env`. |
 | `sites.py` | A site's sensors from its newest saved triage; running a triage on demand. |
 | `settings.py` | Paths and access, from `CONSOLE_*` variables with this checkout as the default. |
