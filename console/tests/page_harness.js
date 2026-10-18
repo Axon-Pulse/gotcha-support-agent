@@ -87,7 +87,21 @@ const S=sandbox;
   await check('SKILL.md is read-only',()=>S.openDoc('skill'),['#doc-ed','readonly']);
   await check('stats tab',()=>S.showTab('stats'),['#stats','Questions per day']);
   await check('stats chart has columns',async()=>{},['#stats','class="mark"']);
-  await check('systems tab',()=>S.showTab('systems'),['#systems','axon-gotcha-4']);
+  await check('systems tab: a block per system, with its live health',()=>S.showTab('systems'),
+    ['#systems','<div class="blocks">','gotcha5','axon-gotcha-4','<b>9/11</b> nodes healthy','2 degraded','<b>magos0</b> degraded',
+     'ping 42 ms · direct','version <span class="mono">v1.5.1</span>','Tower view of gotcha5']);
+  await check('a system block draws its tower without a legend row',async()=>{
+    if(el('#systems').innerHTML.includes('north up')) throw new Error('the legend is still there'); });
+  await check('a speed test shows both ways',()=>S.runSpeed('axon-gotcha-4','internet'),
+    ['#systems','<b>site internet</b>: ↓ 16 Mbit/s · ↑ 4 Mbit/s · connect 120 ms']);
+  await check('check config: the site runs another config',()=>S.runConfigCheck('axon-gotcha-4','gotcha5'),
+    ['#systems','Config check: a different config','/home/gotcha/gotcha-harness/configs/site7/full_system.yaml',
+     '/app/configs/site7/full_system2.yaml']);
+  await check('check IPs shows where System access and the site differ',
+    ()=>S.runIpCheck('axon-gotcha-4','gotcha5'),
+    ['#systems','IP check: ','<b>1</b> at <span class="mono">10.0.0.1</span>: not in the site\'s config',
+     'no component in System access has it']);
+  await check('the list view',()=>S.setSysView('list'),['#systems','Sites the bot can reach']);
   await check('open the sensors of a site',()=>S.toggleSite('axon-gotcha-4'),['#systems','magos_radar']);
   await check('a site shows how each address answered',async()=>{},['#systems','answers (ping)']);
   await check('bot tab',()=>S.showTab('bot'),['#bot','BRIDGE_TIMEOUT_S']);

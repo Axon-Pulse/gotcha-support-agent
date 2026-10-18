@@ -675,6 +675,35 @@ def test_a_sensor_has_its_own_fields(client, inv):
         ("4.2.1", "https://10.0.0.22/ui", "admin@site", 120, -2.5, True)
 
 
+def test_a_system_names_its_tailnet_machine(client, inv):
+    r = _call(client, inv, "PUT", "system/gotcha5", host="axon-gotcha-5")
+    assert r.status_code == 200, r.text
+    assert S.inventory_file.read_text().count("host: axon-gotcha-5") == 1
+    assert next(x for x in r.json()["systems"] if x["name"] == "gotcha5")["host"] == "axon-gotcha-5"
+    for bad in ("axon gotcha", "axon-gotcha-5.tail.ts.net", "-oProxyCommand=x"):
+        assert _call(client, inv, "PUT", "system/gotcha5", host=bad).status_code in (400, 422), bad
+    assert _call(client, inv, "PUT", "system/gotcha5", host="").status_code == 200
+    assert "host:" not in S.inventory_file.read_text()
+
+
+@pytest.mark.parametrize("given,stored", [
+    ("/home/gotcha/gotcha-harness/configs/axon-gotcha-5/full_system.yaml",
+     "/home/gotcha/gotcha-harness/configs/axon-gotcha-5/full_system.yaml"),
+    ("axon-gotcha-5:/home/gotcha/configs/x.yml", "/home/gotcha/configs/x.yml"),   # as scp writes it
+    ("~/gotcha-harness/configs/x.yaml", "~/gotcha-harness/configs/x.yaml"),
+])
+def test_a_system_names_its_config_on_the_site(client, inv, given, stored):
+    r = _call(client, inv, "PUT", "system/gotcha5", config=given)
+    assert r.status_code == 200, r.text
+    assert next(x for x in r.json()["systems"] if x["name"] == "gotcha5")["config"] == stored
+
+
+def test_a_config_path_is_checked(client, inv):
+    for bad in ("configs/x.yaml", "/home/../etc/passwd.yaml", "/home/x.txt", "/home/a b.yaml", "/home/$(id).yaml",
+                "~root/x.yaml", "/home/~/x.yaml"):
+        assert _call(client, inv, "PUT", "system/gotcha5", config=bad).status_code in (400, 422), bad
+
+
 def test_a_sensor_keeps_its_own_computer_and_a_computer_its_web_user(client, inv):
     r = _call(client, inv, "POST", "system/gotcha5/component", name="rdr-3", category="radars",
               computer_ip="10.0.0.60", computer_web="http://10.0.0.60:8080", computer_web_user="ops",

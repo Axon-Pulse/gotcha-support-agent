@@ -62,6 +62,17 @@ def _capture(client, env, monkeypatch) -> dict:
     (S.triage_dirs[0]).mkdir(parents=True, exist_ok=True)
     (S.triage_dirs[0] / "axon-gotcha-4-20261001-100000.txt").write_text(TRIAGE)
     get("/systems/axon-gotcha-4")
+    # A site's live health and a speed test, with the connection to the site stood in for.
+    from console import health
+    monkeypatch.setattr(health, "ping", lambda host: {"ok": True, "ms": 42.0, "via": "direct"})
+    monkeypatch.setattr(health, "_run", lambda argv, timeout, data=None: json.dumps({
+        "summary": {"overall_system_status": "DEGRADED", "total_nodes": 11, "healthy_nodes": 9,
+                    "degraded_nodes": 2, "critical_nodes": 0, "offline_nodes": 0, "release_version": "v1.5.1",
+                    "config_path": "/app/configs/site7/full_system2.yaml"},
+        "problems": [{"node": "magos0", "status": "degraded"}]}) if data else "8000000 4.5 0.5 0.12 2000000 4.2 0.2")
+    get("/systems/axon-gotcha-4/health")
+    r["POST /systems/axon-gotcha-4/speed"] = client.post("/api/systems/axon-gotcha-4/speed",
+                                                          json={"kind": "internet"}).json()
     # Secrets, as an admin: the list, a step-up, a reveal and a save (its restart is a no-op).
     from console import auth, ops
     ADMIN = {"tailscale-user-login": "admin@example.com"}
@@ -76,7 +87,7 @@ def _capture(client, env, monkeypatch) -> dict:
     r["PUT /secrets/SLACK_BOT_TOKEN"] = client.put("/api/secrets/SLACK_BOT_TOKEN", headers=ADMIN, json={
         "value": "xoxb-y", "code": auth._now.code("admin@example.com")}).json()
     S.inventory_file.write_text(
-        "systems:\n  gotcha5:\n    site: Test\n    latitude: 32.6619\n    longitude: 35.0102\n    components:\n"
+        "systems:\n  gotcha5:\n    site: Test\n    host: axon-gotcha-4\n    config: /home/gotcha/gotcha-harness/configs/site7/full_system.yaml\n    latitude: 32.6619\n    longitude: 35.0102\n    components:\n"
         "      1: {domain: radar, version: 4.2, address: 10.0.0.1, port: 8080, gui: 'http://10.0.0.1/ui',\n"
         "          gui_password_env: G5_1_GUI_PW, azimuth: 120, elevation: -2, fov_from: -45, fov_to: 45, fields: {band: X},\n"
         "          secret_fields: [{name: web password, env: G5_1_WEB_PW}]}\n"
@@ -87,6 +98,14 @@ def _capture(client, env, monkeypatch) -> dict:
     S.device_secrets_file.write_text("G5_1_GUI_PW=guipw\nG5_1_WEB_PW=webpw\nG5_PC_WEB_PW=pcweb\n"
                                      "G5_PC_RD_PW=rd\nG5_PC_ROOT_PW=rootpw\nG5_PC_SSH_PW=ssh\n")
     r["/access"] = client.get("/api/access", headers=ADMIN).json()
+    # A config check: gotcha5 (host axon-gotcha-4) against the triage saved above.
+    from console import sites
+    monkeypatch.setattr(health, "file_on_site", lambda host, user, path: True)
+    monkeypatch.setattr(sites, "run_triage", lambda host, user, allowed: {
+        "ok": True, "output_tail": "", "site": sites.site(host)})
+    for check in ("config-check", "ip-check"):
+        r[f"POST /systems/axon-gotcha-4/{check}"] = client.post(f"/api/systems/axon-gotcha-4/{check}", json={}).json()
+        assert r[f"POST /systems/axon-gotcha-4/{check}"]["system"] == "gotcha5"
     code = lambda: auth._now.code("admin@example.com")  # noqa: E731
     base = "/access/system/gotcha5/component"
     r[f"POST {base}/1/reveal"] = client.post(f"/api{base}/1/reveal", headers=ADMIN,

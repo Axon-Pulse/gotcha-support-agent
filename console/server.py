@@ -17,13 +17,14 @@ import json
 import re
 import time
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, StrictFloat, StrictInt
 
-from console import (access, auth, bot_settings, conversations, kb, ops, passkeys, secrets_env, sites,
-                     slack_users)
+from console import (access, auth, bot_settings, conversations, health, kb, ops, passkeys, secrets_env,
+                     sites, slack_users)
 from console.settings import S
 
 HERE = Path(__file__).resolve().parent
@@ -326,6 +327,8 @@ def restart_bot(request: Request):
 class SystemFields(Code):
     site: str | None = None
     description: str | None = None
+    host: str | None = None     # its tailnet machine
+    config: str | None = None   # the config it should run
     latitude: StrictInt | StrictFloat | str | None = None
     longitude: StrictInt | StrictFloat | str | None = None
     altitude: StrictInt | StrictFloat | str | None = None
@@ -726,7 +729,8 @@ def systems():
 
 def _site_name(host: str) -> str:
     allowed = ops.bot_env().get("BRIDGE_ALLOWED_HOSTS") or ops.DEFAULTS["BRIDGE_ALLOWED_HOSTS"]
-    if not re.fullmatch(allowed, host):
+    # A machine name, whatever pattern was set by hand: it goes to tailscale and ssh.
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]{0,252}", host) or not re.fullmatch(allowed, host):
         raise HTTPException(404, f"{host} is not one of the bot's sites ({allowed})")
     return allowed
 
@@ -746,6 +750,78 @@ def triage(host: str, request: Request):
         return sites.run_triage(host, ops.bot_env().get("GOTCHA_SSH_USER"), allowed)
     except RuntimeError as e:
         raise HTTPException(409, str(e))
+
+
+def _system_of(host: str) -> dict:
+    system = next((x for x in access.listing()["systems"] if x["host"] == host), None)
+    if not system:
+        raise HTTPException(404, f"no system in System access has {host} as its tailnet host")
+    return system
+
+
+@app.post("/api/systems/{host}/config-check")
+def config_check(host: str, request: Request):
+    """The config System access says the system runs: whether that file is on the site's
+    machine, and whether it is the one the site's gateway reports running."""
+    _site_name(host)
+    system = _system_of(host)
+    if not system["config"]:
+        raise HTTPException(400, f"set {system['name']}'s config path in System access first")
+    audit(request, "config-check", host, system=system["name"])
+    user = ops.bot_env().get("GOTCHA_SSH_USER")
+    h = _site_check(health.check, host, user, True)
+    if not h["ping"]["ok"]:
+        raise HTTPException(502, f"no answer from {host}")
+    on_site = _site_check(health.file_on_site, host, user, system["config"])
+    running = (h.get("summary") or {}).get("config_path")
+    return {"system": system["name"], "expected": system["config"], "on_site": on_site, "running": running,
+            "match": bool(running) and sites.config_tail(running) == sites.config_tail(system["config"])}
+
+
+@app.post("/api/systems/{host}/ip-check")
+def ip_check(host: str, request: Request):
+    """The system's components in System access against the site's own config, read now by a
+    fresh triage (read-only, as the bot runs it)."""
+    allowed = _site_name(host)
+    system = _system_of(host)
+    audit(request, "ip-check", host, system=system["name"])
+    try:
+        run = sites.run_triage(host, ops.bot_env().get("GOTCHA_SSH_USER"), allowed)
+    except RuntimeError as e:
+        raise HTTPException(409, str(e)) from None
+    try:
+        return {"system": system["name"], "site": run["site"], **sites.compare(system, run["site"])}
+    except ValueError as e:
+        raise HTTPException(502, f"{e}{'' if run['ok'] else ' (the triage: ' + run['output_tail'][-200:] + ')'}") from None
+
+
+def _site_check(fn, *args):
+    try:
+        return fn(*args)
+    except health.SiteBusy as e:
+        raise HTTPException(409, str(e)) from None
+    except health.SiteError as e:
+        raise HTTPException(502, str(e)) from None
+
+
+@app.get("/api/systems/{host}/health")
+def site_health(host: str, fresh: bool = False):
+    """Live: the tailnet ping, and the site gateway's own node health. Read-only; kept a minute
+    unless `fresh`."""
+    _site_name(host)
+    return _site_check(health.check, host, ops.bot_env().get("GOTCHA_SSH_USER"), fresh)
+
+
+class SpeedTest(BaseModel):
+    kind: Literal["link", "internet"]
+
+
+@app.post("/api/systems/{host}/speed")
+def site_speed(host: str, req: SpeedTest, request: Request):
+    """A connection test: this server <-> the site, or the site's own internet."""
+    _site_name(host)
+    audit(request, "speed-test", host, kind=req.kind)
+    return _site_check(health.speed, host, ops.bot_env().get("GOTCHA_SSH_USER"), req.kind)
 
 
 @app.get("/api/deploy")
