@@ -132,7 +132,7 @@ const S=sandbox;
     if(S.ACC.form||S.ACC.towerView.size||h.includes('<details class="card sys" open')||h.includes('<details class="cat" open'))
       throw new Error('something stayed open');
     S.expandAll(true); });
-  await check('a sensor row: version, GUI link, aim, its computer',async()=>{
+  await check('a sensor row: version, web link, aim, its computer',async()=>{
     const h=el('#sec-access').innerHTML;
     for(const want of ['v4.2','href="http://10.0.0.1/ui"','az 120°','el -2°','<td class="mono">pc</td>','band'])
       if(!h.includes(want)) throw new Error('lacks '+want); });
@@ -165,7 +165,16 @@ const S=sandbox;
   const clear=()=>['name','site','description','type','role','scheme','address','port','user','version','gui','azimuth',
     'elevation','fov_from','fov_to','range','model','web','rustdesk_ip','pw','guipw','webpw','rdpw','code','category','sensor']
     .forEach(k=>el('#af-'+k).value='');
-  await check('the sensor form',()=>{ S.ACC.can_edit=true; S.openForm('comp-edit','gotcha5','1'); },['#sec-access','GUI password']);
+  await check('clicking a row shows all its fields, read-only',async()=>{
+    S.closeForm(); S.toggleDetails({target:{closest:()=>null}},'gotcha5','pc');
+    const h=el('#sec-access').innerHTML;
+    if(!h.includes('<b>RustDesk password</b>')||!h.includes('<b>user root</b>')||h.includes('id="af-')) throw new Error('not the details');
+    S.toggleDetails({target:{closest:()=>({})}},'gotcha5','pc');   // a click on its buttons: no change
+    if(!el('#sec-access').innerHTML.includes('<b>RustDesk password</b>')) throw new Error('closed by a button');
+    S.toggleDetails({target:{closest:()=>null}},'gotcha5','pc');
+    if(el('#sec-access').innerHTML.includes('<b>RustDesk password</b>')) throw new Error('still open'); });
+  await check('the sensor form',()=>{ S.ACC.can_edit=true; S.openForm('comp-edit','gotcha5','1'); },
+    ['#sec-access','web password','id="af-computer_ip"','computer web password']);
   await check('it has azimuth and elevation, no SSH',async()=>{
     const h=el('#sec-access').innerHTML;
     if(!h.includes('af-azimuth')||!h.includes('af-elevation')||h.includes('af-user')) throw new Error('wrong fields'); });
@@ -177,7 +186,9 @@ const S=sandbox;
     await S.saveComponent('gotcha5','1');
     const call=CALLS.filter(x=>x[0]==='PUT'&&x[1].endsWith('/component/1')).pop(), b=JSON.parse(call[2]);
     if(b.version!=='4.3'||b.address!=='10.0.0.2'||'azimuth' in b||'gui' in b) throw new Error(call[2]); },['#sec-access','firmware']);
-  await check('the computer form',()=>S.openForm('comp-edit','gotcha5','pc'),['#sec-access','RustDesk password']);
+  await check('the computer form',async()=>{ S.openForm('comp-edit','gotcha5','pc');
+    if(el('#sec-access').innerHTML.includes('id="af-role"')) throw new Error('role is still there'); },
+    ['#sec-access','RustDesk password','id="af-web_user"']);
   await check('it lists the users and the sensors it can serve',async()=>{
     const h=el('#sec-access').innerHTML;
     if(!h.includes('uu-n-1')||!h.includes('serves sensor')||!h.includes('<option value="1" selected>')) throw new Error('missing'); });
