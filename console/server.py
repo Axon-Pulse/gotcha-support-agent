@@ -356,6 +356,10 @@ class ComponentFields(Code):
     gui: str | None = None
     gui_user: str | None = None
     gui_password: str | None = None
+    computer_ip: str | None = None          # the sensor's own computer
+    computer_web: str | None = None
+    computer_web_user: str | None = None
+    computer_web_password: str | None = None
     azimuth: StrictInt | StrictFloat | str | None = None
     elevation: StrictInt | StrictFloat | str | None = None
     fov_from: StrictInt | StrictFloat | str | None = None
@@ -365,6 +369,7 @@ class ComponentFields(Code):
     model: str | None = None
     sensor: str | None = None
     web: str | None = None
+    web_user: str | None = None
     web_password: str | None = None
     rustdesk_ip: str | None = None
     rustdesk_password: str | None = None
@@ -494,7 +499,7 @@ class RevealReq(BaseModel):
     """Which secret: a secret extra field, a fixed password, a user's password, or (none of
     them) the SSH password."""
     field: str | None = None
-    slot: str | None = None    # gui_password, web_password, rustdesk_password
+    slot: str | None = None    # gui_password, web_password, rustdesk_password, computer_web_password
     user: str | None = None
 
 

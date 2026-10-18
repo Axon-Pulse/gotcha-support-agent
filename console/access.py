@@ -18,10 +18,11 @@ Two files at the repo root, both gitignored, in the shape the retired bot used:
             address, port                                 (any component)
             # a sensor (radar, acoustic, camera):
             version, gui, gui_user, gui_password_env, azimuth, elevation,
-            fov_from, fov_to, range
+            fov_from, fov_to, range,
+            computer_ip, computer_web, computer_web_user, computer_web_password_env
             # compute & infrastructure:
             type, role, scheme, access: {ssh: {user, password_env}}
-            model, sensor (the sensor it serves), web, web_password_env,
+            model, sensor (the sensor it serves), web, web_user, web_password_env,
             rustdesk_ip, rustdesk_password_env, users: [{name, password_env}]
             fields: {<name>: <value>, ...}                (extra fields anyone signed in sees)
             secret_fields: [{name: <name>, env: <NAME>}]  (extra fields kept secret)
@@ -94,7 +95,8 @@ DEFAULT_COVERAGE = {"radars": (-60, 60, 800), "cameras": (-30, 30, 500), "acoust
 MAX_RANGE_M = 100_000
 # Passwords with a fixed place on a component: request field -> (YAML key of its env, env part).
 SLOTS = {"gui_password": ("gui_password_env", "GUI"), "web_password": ("web_password_env", "WEB"),
-         "rustdesk_password": ("rustdesk_password_env", "RUSTDESK")}
+         "rustdesk_password": ("rustdesk_password_env", "RUSTDESK"),
+         "computer_web_password": ("computer_web_password_env", "PC_WEB")}
 # A web address: http(s)://, a host or IP (IPv6 in brackets), an optional port and path. Without
 # http(s):// the host must have a dot (or be localhost), so "javascript:1/…" is never one.
 URL_RX = re.compile(r"(?P<scheme>https?://)?(?P<host>[A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(:\d{1,5})?"
@@ -570,13 +572,15 @@ CHECKS = {
     "type": lambda v: _text(v, "type"), "role": lambda v: _text(v, "role"),
     "version": lambda v: _text(v, "version"), "model": lambda v: _text(v, "model"),
     "scheme": _scheme, "address": _address, "port": _port, "user": _user,
-    "gui": _url, "gui_user": _login, "web": _url, "rustdesk_ip": _address,
+    "gui": _url, "gui_user": _login, "web": _url, "web_user": _login, "rustdesk_ip": _address,
+    "computer_ip": _address, "computer_web": _url, "computer_web_user": _login,
     "azimuth": _azimuth, "elevation": _elevation, "fov_from": _fov, "fov_to": _fov, "range": _range,
     "latitude": _latitude, "longitude": _longitude, "altitude": _altitude,
 }
 # A component's plain values, written straight into it.
 COMPONENT_PLAIN = ("type", "role", "version", "model", "scheme", "address", "port", "gui", "gui_user", "web",
-                   "rustdesk_ip", "azimuth", "elevation", "fov_from", "fov_to", "range")
+                   "web_user", "rustdesk_ip", "azimuth", "elevation", "fov_from", "fov_to", "range",
+                   "computer_ip", "computer_web", "computer_web_user")
 SYSTEM_PLAIN = ("site", "description", "latitude", "longitude", "altitude")
 # Fixed passwords to remove: the SSH password and the slots.
 CLEARABLE = ("password", *SLOTS)
@@ -678,6 +682,7 @@ def listing() -> dict:
                 "scheme": c.get("scheme"), "address": c.get("address"), "port": c.get("port"),
                 "user": _ssh(c).get("user"), "has_password": is_set(env),
                 "version": c.get("version"), "gui": c.get("gui"), "gui_user": c.get("gui_user"),
+                **{k: c.get(k) for k in ("web_user", "computer_ip", "computer_web", "computer_web_user")},
                 # Numbers only if they are finite ones: a hand-written .nan can't break the page.
                 **{k: _num(c.get(k)) for k in ("azimuth", "elevation", "fov_from", "fov_to", "range")},
                 "model": c.get("model"),

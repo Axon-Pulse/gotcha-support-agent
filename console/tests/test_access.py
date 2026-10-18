@@ -675,7 +675,25 @@ def test_a_sensor_has_its_own_fields(client, inv):
         ("4.2.1", "https://10.0.0.22/ui", "admin@site", 120, -2.5, True)
 
 
+def test_a_sensor_keeps_its_own_computer_and_a_computer_its_web_user(client, inv):
+    r = _call(client, inv, "POST", "system/gotcha5/component", name="rdr-3", category="radars",
+              computer_ip="10.0.0.60", computer_web="http://10.0.0.60:8080", computer_web_user="ops",
+              computer_web_password="pc-web-pw")
+    assert r.status_code == 200, r.text
+    assert _comp("gotcha5", "rdr-3") == {
+        "domain": "radar", "computer_ip": "10.0.0.60", "computer_web": "http://10.0.0.60:8080",
+        "computer_web_user": "ops", "computer_web_password_env": "GOTCHA5_RDR_3_PC_WEB_PW"}
+    assert "GOTCHA5_RDR_3_PC_WEB_PW=pc-web-pw\n" in _secrets() and "pc-web-pw" not in r.text
+    c = _find(r.json(), "gotcha5", "rdr-3")
+    assert (c["computer_ip"], c["computer_web_user"], c["has_computer_web_password"]) == ("10.0.0.60", "ops", True)
+    r = _call(client, inv, "PUT", "system/gotcha5/component/rdr-3", web_user="admin", clear=["computer_web_password"])
+    assert r.status_code == 200, r.text
+    assert _comp("gotcha5", "rdr-3")["web_user"] == "admin"
+    assert "computer_web_password_env" not in _comp("gotcha5", "rdr-3") and "PC_WEB_PW" not in _secrets()
+
+
 @pytest.mark.parametrize("body", [
+    {"computer_ip": "1.2.3.4; x"}, {"computer_web": "javascript:alert(1)"}, {"web_user": "a\nb"},
     {"azimuth": 361}, {"azimuth": -1}, {"azimuth": True}, {"azimuth": "north"},
     {"fov_from": -200}, {"fov_from": 10, "fov_to": -10}, {"range": 0}, {"range": "far"},
     {"elevation": 91}, {"elevation": -90.5}, {"gui": "not a url at all"}, {"gui_user": "a\nb"}, {"gui_user": "x" * 65}, {"gui": "javascript:alert(1)"},
