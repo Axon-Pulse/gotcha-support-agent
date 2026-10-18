@@ -20,6 +20,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from console.access import SENSOR_CATEGORIES
 from console.settings import S
 
 _NAME = re.compile(r"^(.+)-(\d{8}-\d{6})\.txt$")
@@ -210,3 +211,52 @@ def run_triage(host: str, ssh_user: str | None, allowed: str, timeout_s: int = 1
     finally:
         _running.pop(host, None)
     return {"ok": ok, "output_tail": tail, "site": site(host)}
+
+
+# --------------------------------------------------------------------------
+# System access against the site's own config
+# --------------------------------------------------------------------------
+
+def config_tail(path: str) -> str:
+    """A config path from where the site's configs start: the launcher's /app/configs/x.yaml,
+    the host's /home/u/gotcha-…/configs/x.yaml and configs/x.yaml are the same file."""
+    i = path.find("configs/")
+    return path[i:] if i >= 0 else path.lstrip("./")
+
+
+def _addr_of(value: str) -> str:
+    """What to compare an address by: its IP when it has one, else the host name."""
+    v = value.strip().lower()
+    return _ip_of(v) or re.sub(r"^\w+://|[:/].*$", "", v)
+
+
+def _local(addr: str) -> bool:
+    """An address on the machine itself: a node's own service, not a component."""
+    return addr in ("localhost", "0.0.0.0") or addr.startswith("127.")  # noqa: S104
+
+
+def compare(system: dict, site: dict) -> dict:
+    """The system's components (as System access lists them, no secrets) against the newest
+    triage's reading of the site config. Two lists: sensors whose address the config doesn't
+    have, and config nodes with an address no component has."""
+    t = site.get("triage")
+    if not t or t["unreachable"] or not t["config"]["groups"]:
+        raise ValueError("the site's config couldn't be read; run a triage when the site is online")
+    config = [{"platform": g["platform"], "node": n["name"], "type": n["type"],
+               "address": a["value"], "addr": _addr_of(a["value"])}
+              for g in t["config"]["groups"] for n in g["nodes"] for a in n["addresses"]]
+    config = [c for c in config if not _local(c["addr"])]
+    # The radar behind each magos APU isn't in the config, but the triage derives it: a sensor
+    # at that address is where the config says it is.
+    known = {c["addr"] for c in config} | {p["ip"] for p in t["other_paths"] if p["label"]}
+    comps = [(cat["key"], c) for cat in system["categories"] for c in cat["components"]]
+    ours = {_addr_of(str(c[k])) for _, c in comps for k in ("address", "computer_ip", "rustdesk_ip") if c.get(k)}
+    return {
+        "triage_ts": t["ts"], "config_file": t["config"]["file"],
+        "not_in_config": [{"component": c["name"], "category": cat, "address": c["address"]}
+                          for cat, c in comps if cat in SENSOR_CATEGORIES and c.get("address")
+                          and _addr_of(str(c["address"])) not in known],
+        "unlisted": [{k: c[k] for k in ("platform", "node", "type", "address")}
+                     for c in config if c["addr"] not in ours],
+        "checked": sum(1 for cat, c in comps if cat in SENSOR_CATEGORIES and c.get("address")),
+    }

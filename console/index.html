@@ -78,7 +78,7 @@ tr.click:hover,tr.click.open{background:var(--tint)}
 .saved{font-size:12px;margin-left:8px}
 .tchip{display:inline-block;font:11px var(--mono);padding:3px 8px;border-radius:20px;
   border:1px solid var(--line);color:var(--dim);margin:0 5px 5px 0;white-space:nowrap;background:none}
-.tchip.on{border-color:var(--accent);color:var(--accent)}
+.tchip.on,button.sm.on{border-color:var(--accent);color:var(--accent)}
 button.tchip{cursor:pointer;transition:border-color var(--t),color var(--t),background var(--t)}
 button.tchip:hover{border-color:var(--accent);color:var(--accent);background:var(--tint)}
 .badge{font:10.5px/1 var(--mono);padding:3px 6px;border-radius:5px;border:1px solid var(--line);color:var(--dim);white-space:nowrap}
@@ -164,6 +164,8 @@ svg.chart g.col:hover .hit{fill:var(--tint)}
 .masked{font-family:var(--mono);color:var(--dim);letter-spacing:.1em}
 label.fld{display:inline-flex;flex-direction:column;gap:2px}
 label.fld>span{font-size:11px;color:var(--dim)}
+.blocks{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px;margin-top:12px;align-items:start}
+.blocks>.card{margin:0}
 .tw-plan{display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 0}
 .tw-plan svg{background:radial-gradient(circle,var(--tint) 0,transparent 55%);max-width:100%;height:auto}
 .tw-ring{fill:none;stroke:var(--dim);stroke-opacity:.35}
@@ -903,19 +905,150 @@ function wireTips(){
 }
 
 // ================================================================== Systems
-var SYS=null, SITE={}, SITE_OPEN=new Set(), SITE_BUSY=new Set();
+var SYS=null, SITE={}, SITE_OPEN=new Set(), SITE_BUSY=new Set(), INV=[], HEALTH={}, SPEED={}, CONF={}, IPS={};
+var SYS_VIEW=(()=>{ try{ return localStorage.getItem('sysView')||'blocks'; }catch(e){ return 'blocks'; } })();
 async function loadSystems(){
   $('#systems').innerHTML='<div class="card"><p class="note">Asking the tailnet…</p></div>';
-  SYS=await api('/systems');
+  // The systems from System access (no secrets in it) give each block its tower.
+  const [s,a]=await Promise.all([api('/systems'),api('/access').catch(()=>({systems:[]}))]);
+  SYS=s; INV=a.systems; HEALTH={};
   renderSystems();
   for(const h of SITE_OPEN) loadSite(h);
+  if(SYS_VIEW==='blocks') loadBlocks();
+}
+function setSysView(v){
+  SYS_VIEW=v; try{ localStorage.setItem('sysView',v); }catch(e){}
+  renderSystems(); if(v==='blocks') loadBlocks();
+}
+// Each online site's live health, and its last triage (which colours its sensors).
+function loadBlocks(){
+  SYS.systems.filter(r=>r.state==='online').forEach(r=>{
+    if(!HEALTH[r.name]) loadHealth(r.name);
+    if(!SITE[r.name]) loadSite(r.name);
+  });
+}
+// The answer goes into HEALTH as it is when it arrives: a Refresh meanwhile replaces it.
+async function loadHealth(h,fresh){
+  HEALTH[h]={loading:true}; renderSystems();
+  let r; try{ r=await api(`/systems/${encodeURIComponent(h)}/health${fresh?'?fresh=1':''}`); }
+  catch(e){ r={error:e.message}; }
+  HEALTH[h]=r; renderSystems();
+}
+async function runSpeed(h,kind){
+  SPEED[h]={busy:kind}; renderSystems();
+  let r; try{ r=await api(`/systems/${encodeURIComponent(h)}/speed`,{method:'POST',body:{kind}}); }
+  catch(e){ r={error:e.message}; }
+  SPEED[h]=r; renderSystems();
+}
+// The config the system should run (System access) against the one its gateway reports.
+async function runConfigCheck(h,name){
+  CONF[h]={busy:true}; renderSystems();
+  let r; try{ r=await api(`/systems/${encodeURIComponent(h)}/config-check`,{method:'POST',body:{}}); }
+  catch(e){ r={error:e.message}; }
+  CONF[h]=r; renderSystems();
+  const ok=!r.error&&r.on_site&&r.match;
+  toast(r.error?`${name}: the config check failed. ${r.error}`:ok?`${name}: runs the config System access names.`
+    :`${name}: ${!r.on_site?'the config file System access names isn\'t on the site':'runs a different config than System access names'}. See its block on Systems.`,
+    ok?'ok':'warn');
+}
+function confLine(h){
+  const r=CONF[h]; if(!r) return '';
+  if(r.busy) return '<p class="note">Asking the site which config it runs…</p>';
+  if(r.error) return `<p class="alert warn">Config check: ${esc(r.error)}</p>`;
+  if(r.on_site&&r.match) return `<p class="alert ok">Config check: <span class="mono">${esc(r.expected)}</span> is on the site, and it runs it.</p>`;
+  return `<div class="alert warn"><b>Config check: ${r.on_site?'a different config':'the file isn\'t on the site'}</b>
+      <div>• System access: <span class="mono">${esc(r.expected)}</span>${r.on_site?'':' <span class="bad">(no such file on the site)</span>'}</div>
+      <div>• the site runs: <span class="mono">${esc(r.running||'(its gateway doesn\'t say)')}</span></div></div>`;
+}
+// System access's components against the site's own config, read now by a triage.
+async function runIpCheck(h,name){
+  IPS[h]={busy:true}; renderSystems();
+  let r; try{ r=await api(`/systems/${encodeURIComponent(h)}/ip-check`,{method:'POST',body:{}}); SITE[h]=r.site; }
+  catch(e){ r={error:e.message}; }
+  IPS[h]=r; renderSystems();
+  const n=r.error?0:r.not_in_config.length+r.unlisted.length;
+  toast(r.error?`${name}: the IP check failed. ${r.error}`:n?`${name}: ${n} IP mismatch${n>1?'es':''} with the site's config. See its block on Systems.`
+    :`${name}: every IP matches the site's config.`, r.error||n?'warn':'ok');
+}
+function ipLine(h){
+  const r=IPS[h]; if(!r) return '';
+  if(r.busy) return '<p class="note">Reading the site\'s config (a fresh triage, up to two minutes)…</p>';
+  if(r.error) return `<p class="alert warn">IP check: ${esc(r.error)}</p>`;
+  const n=r.not_in_config.length+r.unlisted.length, from=`<span class="dim">${esc(r.config_file||'the site config')}</span>`;
+  if(!n) return `<p class="alert ok">IP check: all ${r.checked} sensors are where ${from} has them, and it has no address System access lacks.</p>`;
+  return `<div class="alert warn"><b>IP check: ${n} mismatch${n>1?'es':''}</b> with ${from}
+    ${r.not_in_config.map(x=>`<div>• <b>${esc(x.component)}</b> at <span class="mono">${esc(x.address)}</span>: not in the site's config</div>`).join('')}
+    ${r.unlisted.map(x=>`<div>• the site's <b>${esc(x.node)}</b>${x.type?` (${esc(x.type)})`:''} at <span class="mono">${esc(x.address)}</span>: no component in System access has it</div>`).join('')}</div>`;
+}
+const SPEED_KIND={link:'server ↔ site',internet:'site internet'};
+const mbps=x=>x==null?'—':`${x} Mbit/s`;
+function speedLine(h){
+  const r=SPEED[h]; if(!r) return '';
+  if(r.busy) return `<p class="note">Testing ${SPEED_KIND[r.busy]}… (up to a minute)</p>`;
+  if(r.error) return `<p class="note bad">${esc(r.error)}</p>`;
+  return `<p class="note"><b>${SPEED_KIND[r.kind]}</b>: ↓ ${mbps(r.download_mbps)} · ↑ ${mbps(r.upload_mbps)}${
+    r.kind==='internet'?` · connect ${r.connect_ms} ms`:''}${r.kind==='link'?' <span class="dim">(↓ site to server)</span>':''}</p>`;
+}
+// What each sensor's address did at the last triage, by IP: the colour of its wedge.
+const REACH_TINT={ok:'var(--ok)',warn:'var(--warn)',bad:'var(--bad)'}, UNKNOWN_TINT='#8a8f98';
+function reachTint(h){
+  const t=SITE[h]&&SITE[h].triage, by=new Map();
+  if(t){ t.config.groups.forEach(g=>g.nodes.forEach(n=>n.addresses.forEach(a=>{ if(a.path) by.set(a.path.ip,a.path); })));
+    t.other_paths.forEach(p=>by.set(p.ip,p)); }
+  return m=>by.has(m.address)?REACH_TINT[reachOf(by.get(m.address))[0]]:UNKNOWN_TINT;
+}
+const hoursSince=iso=>(Date.now()-Date.parse(iso))/3600e3;
+function siteBlock({inv,host,row}){
+  const h=host&&HEALTH[host]||{}, sum=h.summary, online=row&&row.state==='online';
+  const [cls,state]=!host?['','no tailnet host']:!row?['bad','not on the tailnet']:!online?['bad','offline']
+    :sum?[{LIVE:'ok',DEGRADED:'warn'}[sum.overall_system_status]||'bad',String(sum.overall_system_status||'unknown').toLowerCase()]:['ok','online'];
+  const nodes=sum?`<b>${esc(sum.healthy_nodes)}/${esc(sum.total_nodes)}</b> nodes healthy ${[['degraded','warn'],['critical','bad'],['offline','bad']]
+      .filter(([k])=>sum[k+'_nodes']).map(([k,c])=>`<span class="badge ${c}">${esc(sum[k+'_nodes'])} ${k}</span>`).join(' ')}
+      ${(h.problems||[]).map(p=>`<span class="tchip"><b>${esc(p.node)}</b> ${esc(p.status)}</span>`).join(' ')}`:'';
+  const last=row&&row.last, age=last&&hoursSince(last.triaged);
+  const facts=[
+    online&&(h.loading?'checking…':h.ping?(h.ping.ok?`ping ${Math.round(h.ping.ms)} ms · ${esc(h.ping.via)}`:`<span class="bad">no ping: ${esc(h.ping.error)}</span>`):''),
+    nodes, h.error&&`<span class="warn">${esc(h.error)}</span>`,
+    row&&!online&&row.last_seen&&`last seen ${esc(row.last_seen)}`,
+    (sum&&sum.release_version||last)&&`version <span class="mono">${esc(sum&&sum.release_version||last.release)}</span>`,
+    last&&`<span class="${age>24?'warn':''}">triaged ${age<1?'within the hour':age<48?Math.round(age)+' h ago':Math.round(age/24)+' days ago'}</span>`,
+  ].filter(Boolean).map(x=>`<div class="note" style="margin:2px 0">${x}</div>`).join('');
+  return `<div class="card"><h3>${esc(inv?inv.name:host)} ${inv&&inv.site?`<span class="dim" style="font-weight:400">— ${esc(inv.site)}</span>`:''}
+      <span class="grow"></span><span class="badge ${cls}">${esc(state)}</span></h3>
+    ${inv&&host?`<div class="mono dim" style="font-size:12px">${esc(host)}</div>`:''}
+    ${facts}
+    ${inv?towerPlan(inv,reachTint(host),null)
+      :`<p class="note">Add it to System access, with this tailnet host, to draw its tower.</p>`}
+    ${inv&&!host?'<p class="note">Set its tailnet host (Secrets → edit system) to see its live state.</p>':''}
+    ${online?`<div class="row">
+      <button class="sm" onclick="loadHealth('${jsq(host)}',true)" ${h.loading?'disabled':''}>check again</button>
+      ${inv?[['check config',runConfigCheck,CONF],['check IPs',runIpCheck,IPS]].map(([l,fn,st])=>
+        `<button class="sm" onclick="${fn.name}('${jsq(host)}','${jsq(inv.name)}')" ${st[host]&&st[host].busy?'disabled':''}>${l}</button>`).join(''):''}
+      ${Object.entries(SPEED_KIND).map(([k,l])=>`<button class="sm" onclick="runSpeed('${jsq(host)}','${k}')" ${SPEED[host]&&SPEED[host].busy?'disabled':''}>speed: ${l}</button>`).join('')}</div>
+      ${confLine(host)}${ipLine(host)}${speedLine(host)}`:''}</div>`;
+}
+// One block per system in System access, and one for each of the bot's sites none of them names.
+function renderBlocks(){
+  const rows=new Map(SYS.systems.map(r=>[r.name,r])), linked=new Set(INV.map(x=>x.host).filter(Boolean));
+  const blocks=[...INV.map(inv=>({inv,host:inv.host,row:rows.get(inv.host)})),
+    ...SYS.systems.filter(r=>!linked.has(r.name)).map(r=>({host:r.name,row:r}))];
+  return `<div class="blocks">${blocks.map(siteBlock).join('')}</div>`;
 }
 const lastRun=l=>l?`<span class="mono">${esc(l.release)}</span><div class="dim" style="font-size:12px">triaged ${esc(l.triaged.replace('T',' ').slice(0,16))}${l.config?' · '+esc(l.config):''}</div>`:'<span class="dim">never triaged from here</span>';
 function renderSystems(){
   const s=SYS; if(!s)return;
+  const view=`<span class="grow"></span>${['blocks','list'].map(v=>`<button class="sm ${SYS_VIEW===v?'on':''}" onclick="setSysView('${v}')">${v}</button>`).join('')}
+      <button class="sm" onclick="loadSystems()">Refresh</button>`;
+  if(SYS_VIEW==='blocks'){
+    $('#systems').innerHTML=`<div class="card"><h3>Systems <span class="dim" style="font-weight:400">— live state, read from each site; no secrets</span>${view}</h3>
+      ${s.error?`<p class="alert">${esc(s.error)}</p>`:''}
+      <p class="note">Each sensor is coloured by whether its address answered at the site's last triage. A speed test runs on the
+        site: <b>server ↔ site</b> is the tailnet link both ways; <b>site internet</b> is the site's own (uses up to ~70 MB of its data).</p></div>
+      ${renderBlocks()}`;
+    return;
+  }
   $('#systems').innerHTML=`<div class="card"><h3>Sites the bot can reach
-      <span class="dim" style="font-weight:400">— tailnet names matching <code>${esc(s.allowed)}</code></span>
-      <button class="sm grow" onclick="loadSystems()">Refresh</button></h3>
+      <span class="dim" style="font-weight:400">— tailnet names matching <code>${esc(s.allowed)}</code></span>${view}</h3>
     ${s.error?`<p class="alert">${esc(s.error)}</p>`:''}
     <p class="note">Click a site to see its sensors.</p>
     <div class="scroll"><table><tr><th>site</th><th>state</th><th>via</th><th>ip</th><th>last known version</th></tr>
@@ -949,17 +1082,20 @@ async function runTriage(h){
 }
 // What a sensor's address did at the triage: ping when it was run, else the neighbour cache
 // (REACHABLE = answered lately, STALE = seen before but not lately, FAILED/INCOMPLETE = no answer).
+function reachOf(p){
+  if(p.hijack) return ['bad','routed via the tailnet'];
+  if(p.ping==='OK') return ['ok','answers (ping)'];
+  if(p.ping==='DOWN') return ['bad','no answer (ping)'];
+  const n=p.neigh.toUpperCase();
+  if(n==='REACHABLE') return ['ok','reachable'];
+  if(['STALE','DELAY','PROBE'].includes(n)) return ['warn','seen earlier, not lately'];
+  if(['FAILED','INCOMPLETE'].includes(n)) return ['bad','no answer'];
+  return ['warn','never seen from the machine'];
+}
 function reach(p){
   if(!p) return '<span class="dim">—</span>';
-  const tail=`<div class="dim mono" style="font-size:11px">${esc(p.route)}${p.neigh?' · neigh '+esc(p.neigh):''}</div>`;
-  if(p.hijack) return '<span class="badge bad">routed via the tailnet</span>'+tail;
-  if(p.ping==='OK') return '<span class="badge ok">answers (ping)</span>'+tail;
-  if(p.ping==='DOWN') return '<span class="badge bad">no answer (ping)</span>'+tail;
-  const n=p.neigh.toUpperCase();
-  if(n==='REACHABLE') return '<span class="badge ok">reachable</span>'+tail;
-  if(['STALE','DELAY','PROBE'].includes(n)) return '<span class="badge warn">seen earlier, not lately</span>'+tail;
-  if(['FAILED','INCOMPLETE'].includes(n)) return '<span class="badge bad">no answer</span>'+tail;
-  return '<span class="badge warn">never seen from the machine</span>'+tail;
+  const [cls,label]=reachOf(p);
+  return `<span class="badge ${cls}">${label}</span><div class="dim mono" style="font-size:11px">${esc(p.route)}${p.neigh?' · neigh '+esc(p.neigh):''}</div>`;
 }
 function renderSite(h,row){
   const d=SITE[h], busy=SITE_BUSY.has(h);
@@ -1312,7 +1448,7 @@ function paintSecret(k){
 }
 
 // ------------------------------------------------------------------ forms
-const SYS_FIELDS=[['name','name'],['site','location'],['description','description'],
+const SYS_FIELDS=[['name','name'],['site','location'],['description','description'],['host','tailnet host'],['config','config path'],
   ['latitude','latitude'],['longitude','longitude'],['altitude','altitude m']];
 const SENSOR_FIELDS=[['name','name'],['version','version'],['address','IP'],['port','port'],
   ['gui','web address'],['gui_user','web user'],['azimuth','azimuth °'],['elevation','elevation °'],
@@ -1326,10 +1462,10 @@ const PC_FIELDS=[['model','model'],['web','web address'],['web_user','web user']
 const KEEP_IDS=[...new Set([...SYS_FIELDS,...SENSOR_FIELDS,...COMP_FIELDS,...PC_FIELDS].map(([k])=>k)),
   'code','category','sensor','user','scheme','pw','guipw','webpw','rdpw','pcwebpw'];
 const KEEP_CHECKS=['clear','clear-gui','clear-web','clear-rd','clear-pcweb'];
-const MONO=new Set(['name','address','port','user','gui','gui_user','web','web_user','rustdesk_ip','version','azimuth','elevation',
+const MONO=new Set(['name','host','config','address','port','user','gui','gui_user','web','web_user','rustdesk_ip','version','azimuth','elevation',
   'computer_ip','computer_web','computer_web_user',
   'fov_from','fov_to','range','latitude','longitude','altitude']);
-const WIDTH={gui_user:'140px',port:'80px',scheme:'90px',azimuth:'100px',elevation:'100px',gui:'220px',web:'220px',
+const WIDTH={config:'420px',gui_user:'140px',port:'80px',scheme:'90px',azimuth:'100px',elevation:'100px',gui:'220px',web:'220px',
   fov_from:'90px',fov_to:'90px',range:'90px',site:'180px',description:'320px',latitude:'130px',longitude:'130px',altitude:'100px'};
 const NUMERIC=new Set(['port','azimuth','elevation','fov_from','fov_to','range','latitude','longitude','altitude']);
 // Each box with its name above it: a filled box no longer shows its placeholder.
@@ -1347,7 +1483,11 @@ function sysForm(s){
   const v=s||{}, n=s?s.categories.reduce((a,c)=>a+c.components.length,0):0;
   return `<div class="card" style="background:var(--sunk)"><h3>${s?`Edit system ${esc(s.name)}`:'Add a system'}</h3>
     <div class="row">${inputs(SYS_FIELDS.slice(0,3),v)}</div>
-    <div class="row" style="margin-top:6px">${inputs(SYS_FIELDS.slice(3),v)}
+    <div class="row" style="margin-top:6px">${inputs(SYS_FIELDS.slice(3,5),v)}
+      <span class="note">The system's machine (e.g. axon-gotcha-4), and the config it should run: the file's full path
+        on that machine, as over the tailnet (e.g. /home/gotcha/gotcha-harness/configs/axon-gotcha-4/full_system.yaml;
+        axon-gotcha-4:/home/… works too).</span></div>
+    <div class="row" style="margin-top:6px">${inputs(SYS_FIELDS.slice(5),v)}
       <span class="note">Where the system stands: decimal degrees (e.g. 32.6619, 35.0102). Both or neither.</span></div>
     <div class="row" style="margin-top:8px">${accessCode()}
       <button class="go" onclick="saveSystem(${s?`'${jsq(s.name)}'`:'null'})">Save</button>
@@ -1507,7 +1647,10 @@ const COMP_HEAD='<tr><th>component</th><th>IP</th><th>SSH</th><th>computer</th><
 // pointing along its azimuth out to its range (or a full circle when it hears all round).
 const TYPE_TINT={radars:'var(--radar)',cameras:'var(--camera)',acoustics:'var(--acoustic)'};
 const niceRange=m=>[200,500,1000,2000,5000,10000].find(c=>c>=m)??Math.ceil(m/1000)*1000;
-function towerPlan(s){
+const typeLegend=()=>Object.entries({radars:'radar',cameras:'camera',acoustics:'acoustic'})
+  .map(([k,l])=>`<span class="note"><span class="tw-key" style="background:${TYPE_TINT[k]}"></span> ${l}</span>`).join('');
+// legend: what the colours mean (the types, by default), or null for no legend row at all.
+function towerPlan(s,tintOf=m=>TYPE_TINT[m.cat]||'#6b7280',legend=typeLegend()){
   const SIZE=300, C=SIZE/2, R=112;
   const polar=(deg,r)=>[C+r*Math.sin(deg*Math.PI/180), C-r*Math.cos(deg*Math.PI/180)];
   const f1=x=>x.toFixed(1);
@@ -1517,7 +1660,7 @@ function towerPlan(s){
   const drawn=sensors.filter(m=>omni(m)||(m.azimuth!=null&&m.azimuth!=='')), missing=sensors.filter(m=>!drawn.includes(m));
   const outerM=niceRange(Math.max(1,...drawn.map(m=>m.coverage.range)));
   const wedges=drawn.map(m=>{
-    const tint=TYPE_TINT[m.cat]||'#6b7280', cov=m.coverage, az=Number(m.azimuth)||0;
+    const tint=tintOf(m), cov=m.coverage, az=Number(m.azimuth)||0;
     const r=R*Math.min(1,cov.range/outerM);
     const tip=`${m.name} · ${omni(m)?'all round':`${deg3(az)}°, ${cov.from}° to ${cov.to}°`} · ${cov.range} m`;
     let shape, mid;
@@ -1545,9 +1688,9 @@ function towerPlan(s){
       <g class="tw-north"><line x1="${C}" y1="12" x2="${C}" y2="26"/>
         <path d="M ${C} 6 L ${C-4} 15 L ${C+4} 15 Z"/><text x="${C+7}" y="16">N</text></g>
     </svg>
-    <div class="row" style="justify-content:center;gap:12px">
-      ${Object.entries({radars:'radar',cameras:'camera',acoustics:'acoustic'}).map(([k,l])=>`<span class="note"><span class="tw-key" style="background:${TYPE_TINT[k]}"></span> ${l}</span>`).join('')}
-      <span class="note">· north up · outer ring ${outerM} m</span></div>
+    ${legend===null?'':`<div class="row" style="justify-content:center;gap:12px">
+      ${legend}
+      <span class="note">· north up · outer ring ${outerM} m</span></div>`}
     ${sensors.length?'':'<p class="note" style="text-align:center">No radars, cameras or acoustics yet: add one and it shows here.</p>'}
     ${missing.length?`<p class="note" style="text-align:center">No azimuth yet, so not drawn: ${missing.map(m=>esc(m.name)).join(', ')}.</p>`:''}
   </div>`;
@@ -1813,7 +1956,7 @@ async function boot(){
 boot();
 Object.assign(window,{showTab,runSelftest,openDeploy,startDeploy,loadConvos,openThread,openCase,closeCase,newCase,
   previewSlug,toggleTopic,addTopic,setMode,renderSyms,addSym,renderSigs,moveSec,rmSec,addSec,saveCase,renameCase,
-  deleteCase,openDoc,renderDoc,saveDoc,loadStats,loadSystems,toggleSite,runTriage,loadBot,saveSettings,editSettings,settingChanges,BOT,
+  deleteCase,openDoc,renderDoc,saveDoc,loadStats,loadSystems,toggleSite,runTriage,setSysView,loadHealth,runSpeed,runConfigCheck,runIpCheck,loadBot,saveSettings,editSettings,settingChanges,BOT,
   doLogin,logout,loadSecrets,renderSecrets,revealSecret,hideSecret,copySecret,editSecret,addSecret,cancelEdit,
   togglePwField,saveSecret,restartNow,refreshDeploy,SEC,renderAccess,openForm,closeForm,saveSystem,deleteSystem,saveComponent,deleteComponent,revealAccess,hideAccess,syncRows,toggleSecret,toggleSystem,toggleCat,expandAll,toggleDetails,toggleTowerView,fieldChanges,ACC,
   loginPasskey,togglePasskeys,renderPasskeys,registerPasskey,removePasskey});

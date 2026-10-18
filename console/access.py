@@ -12,6 +12,8 @@ Two files at the repo root, both gitignored, in the shape the retired bot used:
     systems:
       <system>:
         site, description, latitude, longitude, altitude   (where it stands, as in gotcha30)
+        host                                          (its tailnet machine, e.g. axon-gotcha-4)
+        config                                        (the config it should run: its path on the site's machine)
         components:
           <component>:
             domain: radar | acoustic | optic | infra     (the category)
@@ -392,6 +394,25 @@ def _text(v, what: str) -> str:
     return v
 
 
+def _tailnet_host(v) -> str:
+    """The system's machine as the tailnet names it (axon-gotcha-4): its live state comes from there."""
+    v = str(v or "").strip()
+    if not HOST_RX.fullmatch(v) or "." in v:
+        raise AccessError(f"{v!r} is not a tailnet machine name (e.g. axon-gotcha-4)")
+    return v
+
+
+def _config_path(v) -> str:
+    """The config the system should run: its path on the site's machine, as it is reached over
+    the tailnet (/home/gotcha/…/configs/x/full_system.yaml, or ~/…). A leading "host:", as
+    scp writes it, is dropped: the system's host is its own field."""
+    v = re.sub(r"^[A-Za-z0-9][A-Za-z0-9.-]*:(?=[/~])", "", str(v or "").strip())
+    if not re.fullmatch(r"(/|~/)[A-Za-z0-9_./~-]{1,250}\.ya?ml", v) or ".." in v or "~" in v[1:]:
+        raise AccessError(f"{v!r} is not a config path on the site's machine "
+                          "(e.g. /home/gotcha/gotcha-harness/configs/axon-gotcha-4/full_system.yaml)")
+    return v
+
+
 def _address(v) -> str:
     v = str(v or "").strip()
     try:
@@ -569,6 +590,7 @@ def _secret_changes(v) -> dict:
 # The check for each plain value a system or component may be given ("" or None removes it).
 CHECKS = {
     "site": lambda v: _text(v, "location"), "description": lambda v: _text(v, "description"),
+    "host": _tailnet_host, "config": _config_path,
     "type": lambda v: _text(v, "type"), "role": lambda v: _text(v, "role"),
     "version": lambda v: _text(v, "version"), "model": lambda v: _text(v, "model"),
     "scheme": _scheme, "address": _address, "port": _port, "user": _user,
@@ -581,7 +603,7 @@ CHECKS = {
 COMPONENT_PLAIN = ("type", "role", "version", "model", "scheme", "address", "port", "gui", "gui_user", "web",
                    "web_user", "rustdesk_ip", "azimuth", "elevation", "fov_from", "fov_to", "range",
                    "computer_ip", "computer_web", "computer_web_user")
-SYSTEM_PLAIN = ("site", "description", "latitude", "longitude", "altitude")
+SYSTEM_PLAIN = ("site", "description", "host", "config", "latitude", "longitude", "altitude")
 # Fixed passwords to remove: the SSH password and the slots.
 CLEARABLE = ("password", *SLOTS)
 
@@ -704,7 +726,7 @@ def listing() -> dict:
                 sensor["coverage"] = _coverage(cat, sensor)
         m = meta.get(str(sname), {})
         systems.append({"name": str(sname), "site": sysd.get("site"),
-                        "description": sysd.get("description"),
+                        "description": sysd.get("description"), "host": sysd.get("host"), "config": sysd.get("config"),
                         **{k: _num(sysd.get(k)) for k in ("latitude", "longitude", "altitude")},
                         "categories": [{"key": k, "label": CATEGORIES[k][0], "components": v}
                                        for k, v in by_cat.items()],
