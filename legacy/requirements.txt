@@ -1,7 +1,7 @@
 anthropic==1.5.0
 fastapi==0.141.1
 httpx==0.28.1
-langgraph==1.2.11
+langgraph==1.2.14
 langgraph-checkpoint==4.2.0
 langgraph-checkpoint-sqlite==3.1.1
 pytest==9.1.1
